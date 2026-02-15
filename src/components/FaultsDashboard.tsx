@@ -55,6 +55,20 @@ function getSeverityBadgeVariant(severity: FaultSeverity): 'default' | 'secondar
 }
 
 /**
+ * Get badge variant for fault status
+ */
+function getStatusBadgeVariant(status: FaultStatus): 'default' | 'secondary' | 'outline' {
+    switch (status) {
+        case 'active':
+            return 'default';
+        case 'pending':
+            return 'secondary';
+        default:
+            return 'outline';
+    }
+}
+
+/**
  * Get icon for fault severity
  */
 function getSeverityIcon(severity: FaultSeverity) {
@@ -128,7 +142,9 @@ function FaultRow({
         <Collapsible open={isExpanded} onOpenChange={onToggle}>
             <div className="rounded-lg border bg-card">
                 <CollapsibleTrigger asChild>
-                    <div className="flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                    <div
+                        className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/50 transition-colors ${fault.status === 'healed' ? 'opacity-60' : ''}`}
+                    >
                         {/* Expand/Collapse Icon */}
                         <div className="shrink-0 mt-0.5">
                             {isExpanded ? (
@@ -151,14 +167,8 @@ function FaultRow({
                                     {fault.severity}
                                 </Badge>
                                 <Badge
-                                    variant={
-                                        fault.status === 'active'
-                                            ? 'default'
-                                            : fault.status === 'pending'
-                                              ? 'secondary'
-                                              : 'outline'
-                                    }
-                                    className="text-xs"
+                                    variant={getStatusBadgeVariant(fault.status)}
+                                    className={`text-xs ${fault.status === 'healed' ? 'text-green-600 border-green-300 dark:text-green-400 dark:border-green-700' : ''}`}
                                 >
                                     {fault.status}
                                 </Badge>
@@ -528,16 +538,17 @@ export function FaultsDashboard() {
         });
     }, [filteredFaults]);
 
-    // Count by severity
+    // Count by severity (active faults only — CONFIRMED + PREFAILED)
+    const activeFaults = useMemo(() => faults.filter((f) => f.status === 'active' || f.status === 'pending'), [faults]);
     const counts = useMemo(() => {
         return {
-            critical: faults.filter((f) => f.severity === 'critical').length,
-            error: faults.filter((f) => f.severity === 'error').length,
-            warning: faults.filter((f) => f.severity === 'warning').length,
-            info: faults.filter((f) => f.severity === 'info').length,
-            total: faults.length,
+            critical: activeFaults.filter((f) => f.severity === 'critical').length,
+            error: activeFaults.filter((f) => f.severity === 'error').length,
+            warning: activeFaults.filter((f) => f.severity === 'warning').length,
+            info: activeFaults.filter((f) => f.severity === 'info').length,
+            total: activeFaults.length,
         };
-    }, [faults]);
+    }, [activeFaults]);
 
     // Toggle severity filter
     const toggleSeverity = (severity: FaultSeverity) => {
@@ -744,6 +755,12 @@ export function FaultsDashboard() {
                                     onCheckedChange={() => toggleStatus('cleared')}
                                 >
                                     Cleared
+                                </DropdownMenuCheckboxItem>
+                                <DropdownMenuCheckboxItem
+                                    checked={statusFilters.has('healed')}
+                                    onCheckedChange={() => toggleStatus('healed')}
+                                >
+                                    Healed
                                 </DropdownMenuCheckboxItem>
                             </DropdownMenuContent>
                         </DropdownMenu>

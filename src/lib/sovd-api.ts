@@ -1561,6 +1561,8 @@ export class SovdApiClient {
             status = 'pending';
         } else if (apiStatus === 'cleared' || apiStatus === 'resolved') {
             status = 'cleared';
+        } else if (apiStatus === 'healed' || apiStatus === 'prepassed') {
+            status = 'healed';
         }
 
         // Extract entity info from reporting_sources
@@ -1591,9 +1593,12 @@ export class SovdApiClient {
 
     /**
      * List all faults across the system
+     * @param status Optional status filter (e.g. 'all' to include healed faults)
      */
-    async listAllFaults(): Promise<ListFaultsResponse> {
-        const response = await fetchWithTimeout(this.getUrl('faults'), {
+    async listAllFaults(status?: FaultStatus | 'all'): Promise<ListFaultsResponse> {
+        const baseUrl = this.getUrl('faults');
+        const url = status ? `${baseUrl}?status=${encodeURIComponent(status)}` : baseUrl;
+        const response = await fetchWithTimeout(url, {
             method: 'GET',
             headers: { Accept: 'application/json' },
         });
