@@ -1367,7 +1367,7 @@ export const useAppStore = create<AppState>()(
                 }
 
                 try {
-                    const result = await client.listAllFaults();
+                    const result = await client.listAllFaults('all');
                     // Skip state update if faults haven't changed to avoid unnecessary re-renders.
                     // Compare by serializing fault codes + statuses (cheap and covers all meaningful changes).
                     const newKey = result.items.map((f) => `${f.code}:${f.status}:${f.severity}`).join('|');

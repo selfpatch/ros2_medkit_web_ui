@@ -59,6 +59,87 @@ describe('SovdApiClient', () => {
         });
     });
 
+    describe('listAllFaults', () => {
+        const makeFaultItem = (overrides: Record<string, unknown> = {}) => ({
+            fault_code: 'TEST_FAULT',
+            description: 'A test fault',
+            severity: 2,
+            severity_label: 'error',
+            status: 'CONFIRMED',
+            first_occurred: 1700000000,
+            reporting_sources: ['/test/node'],
+            ...overrides,
+        });
+
+        it('passes status query parameter when provided', async () => {
+            vi.mocked(fetch).mockResolvedValue({
+                ok: true,
+                json: () => Promise.resolve({ items: [] }),
+            } as Response);
+
+            await client.listAllFaults('all');
+
+            expect(fetch).toHaveBeenCalledWith(
+                'http://localhost:8080/api/v1/faults?status=all',
+                expect.objectContaining({ method: 'GET' })
+            );
+        });
+
+        it('omits status parameter when not provided', async () => {
+            vi.mocked(fetch).mockResolvedValue({
+                ok: true,
+                json: () => Promise.resolve({ items: [] }),
+            } as Response);
+
+            await client.listAllFaults();
+
+            expect(fetch).toHaveBeenCalledWith(
+                'http://localhost:8080/api/v1/faults',
+                expect.objectContaining({ method: 'GET' })
+            );
+        });
+
+        it('maps HEALED API status to healed', async () => {
+            vi.mocked(fetch).mockResolvedValue({
+                ok: true,
+                json: () => Promise.resolve({ items: [makeFaultItem({ status: 'HEALED' })] }),
+            } as Response);
+
+            const result = await client.listAllFaults('all');
+            expect(result.items[0]?.status).toBe('healed');
+        });
+
+        it('maps PREPASSED API status to healed', async () => {
+            vi.mocked(fetch).mockResolvedValue({
+                ok: true,
+                json: () => Promise.resolve({ items: [makeFaultItem({ status: 'PREPASSED' })] }),
+            } as Response);
+
+            const result = await client.listAllFaults('all');
+            expect(result.items[0]?.status).toBe('healed');
+        });
+
+        it('maps CONFIRMED API status to active', async () => {
+            vi.mocked(fetch).mockResolvedValue({
+                ok: true,
+                json: () => Promise.resolve({ items: [makeFaultItem({ status: 'CONFIRMED' })] }),
+            } as Response);
+
+            const result = await client.listAllFaults();
+            expect(result.items[0]?.status).toBe('active');
+        });
+
+        it('maps CLEARED API status to cleared', async () => {
+            vi.mocked(fetch).mockResolvedValue({
+                ok: true,
+                json: () => Promise.resolve({ items: [makeFaultItem({ status: 'CLEARED' })] }),
+            } as Response);
+
+            const result = await client.listAllFaults();
+            expect(result.items[0]?.status).toBe('cleared');
+        });
+    });
+
     describe('listBulkDataCategories', () => {
         it('returns categories array', async () => {
             vi.mocked(fetch).mockResolvedValue({

@@ -116,7 +116,9 @@ function FaultRow({
         <Collapsible open={isExpanded} onOpenChange={onToggle}>
             <div className="rounded-lg border bg-card">
                 <CollapsibleTrigger asChild>
-                    <div className="flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/50 transition-colors">
+                    <div
+                        className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/50 transition-colors ${fault.status === 'healed' ? 'opacity-60' : ''}`}
+                    >
                         {/* Expand/Collapse Icon */}
                         <div className="shrink-0 mt-0.5">
                             {isExpanded ? (
@@ -146,7 +148,10 @@ function FaultRow({
                                 <Badge variant={getSeverityBadgeVariant(fault.severity)} className="text-xs">
                                     {fault.severity}
                                 </Badge>
-                                <Badge variant={getStatusBadgeVariant(fault.status)} className="text-xs">
+                                <Badge
+                                    variant={getStatusBadgeVariant(fault.status)}
+                                    className={`text-xs ${fault.status === 'healed' ? 'text-green-600 border-green-300 dark:text-green-400 dark:border-green-700' : ''}`}
+                                >
                                     {fault.status}
                                 </Badge>
                             </div>

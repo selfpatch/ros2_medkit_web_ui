@@ -556,7 +556,7 @@ export type FaultSeverity = 'info' | 'warning' | 'error' | 'critical';
 /**
  * Fault status values (legacy)
  */
-export type FaultStatusValue = 'active' | 'pending' | 'cleared';
+export type FaultStatusValue = 'active' | 'pending' | 'cleared' | 'healed';
 
 /**
  * Alias for backwards compatibility
