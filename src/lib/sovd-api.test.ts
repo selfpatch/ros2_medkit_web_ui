@@ -119,6 +119,16 @@ describe('SovdApiClient', () => {
             expect(result.items[0]?.status).toBe('healed');
         });
 
+        it('maps PREFAILED API status to pending', async () => {
+            vi.mocked(fetch).mockResolvedValue({
+                ok: true,
+                json: () => Promise.resolve({ items: [makeFaultItem({ status: 'PREFAILED' })] }),
+            } as Response);
+
+            const result = await client.listAllFaults('all');
+            expect(result.items[0]?.status).toBe('pending');
+        });
+
         it('maps CONFIRMED API status to active', async () => {
             vi.mocked(fetch).mockResolvedValue({
                 ok: true,
