@@ -1557,7 +1557,7 @@ export class SovdApiClient {
         const apiStatus = apiFault.status?.toLowerCase() || '';
         if (apiStatus === 'confirmed' || apiStatus === 'active') {
             status = 'active';
-        } else if (apiStatus === 'pending') {
+        } else if (apiStatus === 'pending' || apiStatus === 'prefailed') {
             status = 'pending';
         } else if (apiStatus === 'cleared' || apiStatus === 'resolved') {
             status = 'cleared';
