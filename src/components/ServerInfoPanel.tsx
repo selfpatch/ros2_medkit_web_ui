@@ -109,7 +109,7 @@ export function ServerInfoPanel() {
     }
 
     // Extract first SOVD info entry for cleaner access
-    const sovdInfo = versionInfo?.sovd_info?.[0];
+    const sovdInfo = versionInfo?.items?.[0];
 
     return (
         <div className="space-y-6">
