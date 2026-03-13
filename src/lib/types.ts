@@ -832,7 +832,7 @@ export interface SovdInfoEntry {
  */
 export interface VersionInfo {
     /** Array of SOVD version info entries */
-    sovd_info: SovdInfoEntry[];
+    items: SovdInfoEntry[];
 }
 
 // =============================================================================

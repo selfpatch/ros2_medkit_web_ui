@@ -621,7 +621,7 @@ export const useAppStore = create<AppState>()(
                     });
 
                     // Extract server info from version-info response (fallback to generic values if unavailable)
-                    const sovdInfo = versionInfo?.sovd_info?.[0];
+                    const sovdInfo = versionInfo?.items?.[0];
                     const serverName = sovdInfo?.vendor_info?.name || 'SOVD Server';
                     const serverVersion = sovdInfo?.vendor_info?.version || '';
                     const sovdVersion = sovdInfo?.version || '';
