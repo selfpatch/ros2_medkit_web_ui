@@ -1,16 +1,16 @@
-# sovd_web_ui
+# ros2_medkit_web_ui
 
-[![CI](https://github.com/selfpatch/sovd_web_ui/actions/workflows/ci.yml/badge.svg)](https://github.com/selfpatch/sovd_web_ui/actions/workflows/ci.yml)
-[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fselfpatch%2Fsovd__web__ui-blue?logo=github)](https://github.com/selfpatch/sovd_web_ui/pkgs/container/sovd_web_ui)
+[![CI](https://github.com/selfpatch/ros2_medkit_web_ui/actions/workflows/ci.yml/badge.svg)](https://github.com/selfpatch/ros2_medkit_web_ui/actions/workflows/ci.yml)
+[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fselfpatch%2Fros2__medkit__web__ui-blue?logo=github)](https://github.com/selfpatch/ros2_medkit_web_ui/pkgs/container/ros2_medkit_web_ui)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://selfpatch.github.io/ros2_medkit/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Us-7289DA?logo=discord&logoColor=white)](https://discord.gg/6CXPMApAyq)
 
 Simple, open-source web UI for browsing SOVD (Service-Oriented Vehicle Diagnostics) entity trees via discovery endpoints.
 
-## What is sovd_web_ui?
+## What is ros2_medkit_web_ui?
 
-sovd_web_ui is a lightweight single-page application that connects to a SOVD server and visualizes the entity hierarchy. It provides:
+ros2_medkit_web_ui is a lightweight single-page application that connects to a SOVD server and visualizes the entity hierarchy. It provides:
 
 - **Server Connection Dialog** - Enter the URL of your SOVD server (supports both `http://ip:port` and `ip:port` formats)
 - **Entity Tree Sidebar** - Browse the hierarchical structure of SOVD entities with lazy-loading
@@ -38,12 +38,12 @@ This tool is designed for developers and integrators working with SOVD-compatibl
 
 ```bash
 # Pull from GitHub Container Registry
-docker pull ghcr.io/selfpatch/sovd_web_ui:latest
-docker run -p 8080:80 ghcr.io/selfpatch/sovd_web_ui:latest
+docker pull ghcr.io/selfpatch/ros2_medkit_web_ui:latest
+docker run -p 8080:80 ghcr.io/selfpatch/ros2_medkit_web_ui:latest
 
 # Or build locally
-docker build -t sovd_web_ui .
-docker run -p 8080:80 sovd_web_ui
+docker build -t ros2_medkit_web_ui .
+docker run -p 8080:80 ros2_medkit_web_ui
 ```
 
 Then open http://localhost:8080 in your browser.

@@ -87,7 +87,7 @@ export const useAppStore = create<AppState>()(
                 /* ... */
             },
         }),
-        { name: 'sovd_web_ui_server_url', partialize: (state) => ({ serverUrl, baseEndpoint }) }
+        { name: 'ros2_medkit_web_ui_server_url', partialize: (state) => ({ serverUrl, baseEndpoint }) }
     )
 );
 ```

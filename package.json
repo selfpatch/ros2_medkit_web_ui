@@ -1,12 +1,12 @@
 {
-    "name": "sovd_web_ui",
+    "name": "ros2_medkit_web_ui",
     "private": true,
     "version": "0.1.0",
     "type": "module",
     "description": "Simple web UI for browsing SOVD entity trees via discovery endpoints",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/selfpatch/sovd_web_ui.git"
+        "url": "git+https://github.com/selfpatch/ros2_medkit_web_ui.git"
     },
     "scripts": {
         "dev": "vite",

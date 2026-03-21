@@ -19,7 +19,7 @@ import type {
 } from './types';
 import { createSovdClient, type SovdApiClient, type SovdResourceEntityType } from './sovd-api';
 
-const STORAGE_KEY = 'sovd_web_ui_server_url';
+const STORAGE_KEY = 'ros2_medkit_web_ui_server_url';
 const EXECUTION_POLL_INTERVAL_MS = 1000;
 const EXECUTION_CLEANUP_AFTER_MS = 5 * 60 * 1000; // 5 minutes
 
