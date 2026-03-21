@@ -26,7 +26,7 @@ What actually happened, including any error messages or stack traces.
 
 ### Environment
 
-- sovd_web_ui version:
+- ros2_medkit_web_ui version:
 - Browser:
 - OS:
 

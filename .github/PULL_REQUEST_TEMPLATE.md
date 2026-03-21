@@ -1,6 +1,6 @@
 # Pull Request
 
-<!-- Thanks for contributing to sovd_web_ui! -->
+<!-- Thanks for contributing to ros2_medkit_web_ui! -->
 
 ## Summary
 

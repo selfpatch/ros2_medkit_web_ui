@@ -1,24 +1,24 @@
-# Contributing to sovd_web_ui
+# Contributing to ros2_medkit_web_ui
 
-Thanks for your interest in contributing to sovd_web_ui! This guide explains how to report issues, suggest features, and contribute code.
+Thanks for your interest in contributing to ros2_medkit_web_ui! This guide explains how to report issues, suggest features, and contribute code.
 
 ## How to Report Issues
 
 ### Did you find a bug?
 
-- **Ensure the bug was not already reported** by searching [Issues](https://github.com/selfpatch/sovd_web_ui/issues)
-- If you can't find an existing issue, [open a new one](https://github.com/selfpatch/sovd_web_ui/issues/new/choose) and select the **Bug report** template
+- **Ensure the bug was not already reported** by searching [Issues](https://github.com/selfpatch/ros2_medkit_web_ui/issues)
+- If you can't find an existing issue, [open a new one](https://github.com/selfpatch/ros2_medkit_web_ui/issues/new/choose) and select the **Bug report** template
 - Fill in all sections of the template:
     - **Steps to reproduce** - numbered steps to recreate the issue
     - **Expected behavior** - what you expected to happen
     - **Actual behavior** - what actually happened, including error messages or stack traces
-    - **Environment** - sovd_web_ui version, browser, OS
+    - **Environment** - ros2_medkit_web_ui version, browser, OS
     - **Additional information** - logs, snippets, or screenshots if helpful
 
 ### Do you want to suggest a feature or improvement?
 
-- Check if the feature has already been suggested in [Issues](https://github.com/selfpatch/sovd_web_ui/issues)
-- If not, [open a new issue](https://github.com/selfpatch/sovd_web_ui/issues/new/choose) and select the **Feature request / General issue** template
+- Check if the feature has already been suggested in [Issues](https://github.com/selfpatch/ros2_medkit_web_ui/issues)
+- If not, [open a new issue](https://github.com/selfpatch/ros2_medkit_web_ui/issues/new/choose) and select the **Feature request / General issue** template
 - Fill in all sections:
     - **Proposal** - describe the change or feature you'd like to see
     - **Motivation** - why is this important? Who does it benefit?
@@ -115,18 +115,18 @@ Before submitting your PR, ensure:
 
 ## Questions and Help
 
-- For questions about **using sovd_web_ui**, open a [Discussion](https://github.com/selfpatch/sovd_web_ui/discussions) or an Issue with the question label
+- For questions about **using ros2_medkit_web_ui**, open a [Discussion](https://github.com/selfpatch/ros2_medkit_web_ui/discussions) or an Issue with the question label
 - For questions about **contributing**, feel free to ask in your PR or Issue
 - For **security vulnerabilities**, see [`SECURITY.md`](SECURITY.md)
 
 ## Code of Conduct
 
-By contributing to sovd_web_ui, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md). Please be respectful and considerate in all interactions.
+By contributing to ros2_medkit_web_ui, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md). Please be respectful and considerate in all interactions.
 
 ## License
 
-By contributing to sovd_web_ui, you agree that your contributions will be licensed under the Apache License 2.0.
+By contributing to ros2_medkit_web_ui, you agree that your contributions will be licensed under the Apache License 2.0.
 
 ---
 
-Thank you for improving sovd_web_ui! We value contributions of all sizes - from typo fixes to major features. 🚀
+Thank you for improving ros2_medkit_web_ui! We value contributions of all sizes - from typo fixes to major features. 🚀

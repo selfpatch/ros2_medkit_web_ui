@@ -11,7 +11,7 @@ Security vulnerabilities are taken seriously. I appreciate your efforts to respo
 Instead, please report them using one of the following methods:
 
 1. **Preferred: GitHub Security Advisories** (recommended)
-    - Go to the [Security tab](https://github.com/selfpatch/sovd_web_ui/security/advisories/new) of this repository
+    - Go to the [Security tab](https://github.com/selfpatch/ros2_medkit_web_ui/security/advisories/new) of this repository
     - Click "Report a vulnerability"
     - Fill out the form with details about the vulnerability
 
@@ -51,11 +51,11 @@ Please allow reasonable time to investigate and address the vulnerability before
 | ------- | ------------------ |
 | main    | :white_check_mark: |
 
-**Note:** As sovd_web_ui is currently in early development, security updates will be applied to the `main` branch. Once stable releases are available, this section will be updated with specific version support information.
+**Note:** As ros2_medkit_web_ui is currently in early development, security updates will be applied to the `main` branch. Once stable releases are available, this section will be updated with specific version support information.
 
 ## Security Best Practices
 
-When using sovd_web_ui:
+When using ros2_medkit_web_ui:
 
 - Use HTTPS when connecting to SOVD servers over public networks
 - Do not expose the web UI to untrusted networks without proper authentication at the SOVD server level
@@ -64,6 +64,6 @@ When using sovd_web_ui:
 
 ## Questions?
 
-If you have questions about this security policy or the security of sovd_web_ui, please open an issue in the repository.
+If you have questions about this security policy or the security of ros2_medkit_web_ui, please open an issue in the repository.
 
-Thank you for helping keep sovd_web_ui and its users safe!
+Thank you for helping keep ros2_medkit_web_ui and its users safe!
