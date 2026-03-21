@@ -51,4 +51,4 @@ jobs:
               uses: docker/setup-buildx-action@v3
 
             - name: Build Docker image
-              run: docker build -t ros2-medkit-web-ui:test -f Dockerfile .
+              run: docker build -t ros2_medkit_web_ui:test -f Dockerfile .
