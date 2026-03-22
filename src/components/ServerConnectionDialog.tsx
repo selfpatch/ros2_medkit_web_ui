@@ -18,23 +18,20 @@ interface ServerConnectionDialogProps {
 }
 
 export function ServerConnectionDialog({ open, onOpenChange }: ServerConnectionDialogProps) {
-    const { serverUrl, baseEndpoint, isConnecting, connectionError, connect } = useAppStore();
+    const { serverUrl, isConnecting, connectionError, connect } = useAppStore();
     const [url, setUrl] = useState(serverUrl || 'localhost:8080');
-    const [endpoint, setEndpoint] = useState(baseEndpoint || 'api/v1');
 
-    // Update local state when serverUrl/baseEndpoint changes (e.g., from localStorage)
-    // Only update if the dialog is just opened or if the store values change externally
+    // Update local state when serverUrl changes (e.g., from localStorage)
     useEffect(() => {
         if (open) {
             setUrl(serverUrl || '');
-            setEndpoint(baseEndpoint || '');
         }
-    }, [open, serverUrl, baseEndpoint]);
+    }, [open, serverUrl]);
 
     const handleConnect = async () => {
         if (!url.trim()) return;
 
-        const success = await connect(url.trim(), endpoint.trim());
+        const success = await connect(url.trim());
         if (success) {
             onOpenChange(false);
         }
@@ -56,7 +53,7 @@ export function ServerConnectionDialog({ open, onOpenChange }: ServerConnectionD
                         </div>
                         <div>
                             <DialogTitle>Connect to SOVD Server</DialogTitle>
-                            <DialogDescription>Enter the URL and base endpoint of your SOVD server</DialogDescription>
+                            <DialogDescription>Enter the URL of your SOVD server</DialogDescription>
                         </div>
                     </div>
                 </DialogHeader>
@@ -68,7 +65,7 @@ export function ServerConnectionDialog({ open, onOpenChange }: ServerConnectionD
                         </label>
                         <Input
                             id="server-url"
-                            placeholder="192.168.1.100:8080 or http://localhost:3000"
+                            placeholder="192.168.1.100:8080 or http://localhost:8080"
                             value={url}
                             onChange={(e) => setUrl(e.target.value)}
                             onKeyDown={handleKeyDown}
@@ -76,24 +73,7 @@ export function ServerConnectionDialog({ open, onOpenChange }: ServerConnectionD
                             aria-invalid={!!connectionError}
                         />
                         <p className="text-xs text-muted-foreground">
-                            You can enter just IP:port or a full URL with protocol
-                        </p>
-                    </div>
-
-                    <div className="space-y-2">
-                        <label htmlFor="base-endpoint" className="text-sm font-medium">
-                            Base Endpoint
-                        </label>
-                        <Input
-                            id="base-endpoint"
-                            placeholder="e.g. api/v1 (optional)"
-                            value={endpoint}
-                            onChange={(e) => setEndpoint(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            disabled={isConnecting}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                            The path prefix for SOVD entities (leave empty for root)
+                            Enter IP:port or a full URL. The API path (/api/v1) is added automatically.
                         </p>
                     </div>
 
