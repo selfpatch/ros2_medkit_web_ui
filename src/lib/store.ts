@@ -17,7 +17,29 @@ import type {
     VersionInfo,
     SovdFunction,
 } from './types';
-import { createSovdClient, type SovdApiClient, type SovdResourceEntityType } from './sovd-api';
+import { createMedkitClient, type MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
+import type { SovdResourceEntityType } from './types';
+import {
+    transformFaultsResponse,
+    transformOperationsResponse,
+    transformConfigurationsResponse,
+    transformFault,
+    unwrapItems,
+} from './transforms';
+import {
+    getEntityConfigurations,
+    getEntityOperations,
+    getEntityData,
+    getEntityFaults,
+    getEntityFaultDetail,
+    getEntityExecution,
+    postEntityExecution,
+    deleteEntityExecution,
+    deleteEntityFault,
+    putEntityConfiguration,
+    deleteEntityConfiguration,
+    deleteEntityConfigurations,
+} from './api-dispatch';
 
 const STORAGE_KEY = 'ros2_medkit_web_ui_server_url';
 const EXECUTION_POLL_INTERVAL_MS = 1000;
@@ -42,11 +64,10 @@ export interface TrackedExecution extends Execution {
 export interface AppState {
     // Connection state
     serverUrl: string | null;
-    baseEndpoint: string;
     isConnected: boolean;
     isConnecting: boolean;
     connectionError: string | null;
-    client: SovdApiClient | null;
+    client: MedkitClient | null;
 
     // Entity tree state
     treeViewMode: TreeViewMode;
@@ -79,7 +100,7 @@ export interface AppState {
     faultStreamCleanup: (() => void) | null;
 
     // Actions
-    connect: (url: string, baseEndpoint?: string) => Promise<boolean>;
+    connect: (url: string) => Promise<boolean>;
     disconnect: () => void;
     setTreeViewMode: (mode: TreeViewMode) => Promise<void>;
     loadRootEntities: () => Promise<void>;
@@ -242,7 +263,7 @@ interface SelectionContext {
  * Handle topic node selection
  * Distinguished between TopicNodeData (partial) and ComponentTopic (full)
  */
-async function handleTopicSelection(ctx: SelectionContext, client: SovdApiClient): Promise<SelectionResult | null> {
+async function handleTopicSelection(ctx: SelectionContext, client: MedkitClient): Promise<SelectionResult | null> {
     const { node, path, rootEntities } = ctx;
     if (node.type !== 'topic' || !node.data) return null;
 
@@ -253,12 +274,17 @@ async function handleTopicSelection(ctx: SelectionContext, client: SovdApiClient
         // TopicNodeData - need to fetch full details
         const { isPublisher, isSubscriber } = data as TopicNodeData;
         const apiPath = path.replace(/^\/server/, '');
-        const details = await client.getEntityDetails(apiPath);
+        const pathSegments = apiPath.split('/').filter(Boolean);
+        const entityType = (pathSegments[0] || 'apps') as SovdResourceEntityType;
+        const entityId = pathSegments[1] || '';
+        const { getEntityDetail } = await import('./api-dispatch');
+        const { data: detailData } = await getEntityDetail(client, entityType, entityId);
+        const details = (detailData || { id: entityId, name: entityId, type: entityType, href: apiPath }) as SovdEntityDetails;
 
         // Update tree with full data merged with direction info
         const updatedTree = updateNodeInTree(rootEntities, path, (n) => ({
             ...n,
-            data: { ...details.topicData, isPublisher, isSubscriber },
+            data: { ...((details as unknown as Record<string, unknown>)?.topicData as Record<string, unknown>), isPublisher, isSubscriber },
         }));
 
         return {
@@ -465,14 +491,19 @@ function handleOperationSelection(ctx: SelectionContext): SelectionResult | null
 /** Fallback: fetch entity details from API when not in tree */
 async function fetchEntityFromApi(
     path: string,
-    client: SovdApiClient,
+    client: MedkitClient,
     set: (state: Partial<AppState>) => void
 ): Promise<void> {
     set({ selectedPath: path, isLoadingDetails: true, selectedEntity: null });
 
     try {
         const apiPath = path.replace(/^\/server/, '');
-        const details = await client.getEntityDetails(apiPath);
+        // Parse entity type and id from path: /areas/foo -> areas, foo
+        const pathSegments = apiPath.split('/').filter(Boolean);
+        const entityType = (pathSegments[0] || 'areas') as SovdResourceEntityType;
+        const entityId = pathSegments[1] || '';
+        const { data } = await (await import('./api-dispatch')).getEntityDetail(client, entityType, entityId);
+        const details = (data || { id: entityId, name: entityId, type: entityType, href: apiPath }) as SovdEntityDetails;
         set({ selectedEntity: details, isLoadingDetails: false });
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
@@ -495,7 +526,6 @@ export const useAppStore = create<AppState>()(
         (set, get) => ({
             // Initial state
             serverUrl: null,
-            baseEndpoint: '',
             isConnected: false,
             isConnecting: false,
             connectionError: null,
@@ -531,14 +561,14 @@ export const useAppStore = create<AppState>()(
             faultStreamCleanup: null,
 
             // Connect to SOVD server
-            connect: async (url: string, baseEndpoint: string = '') => {
+            connect: async (url: string) => {
                 set({ isConnecting: true, connectionError: null });
 
                 try {
-                    const client = createSovdClient(url, baseEndpoint);
-                    const isOk = await client.ping();
+                    const client = createMedkitClient({ baseUrl: url });
+                    const { error: healthError } = await client.GET('/health');
 
-                    if (!isOk) {
+                    if (healthError) {
                         set({
                             isConnecting: false,
                             connectionError: 'Unable to connect to server. Check the URL and try again.',
@@ -548,7 +578,6 @@ export const useAppStore = create<AppState>()(
 
                     set({
                         serverUrl: url,
-                        baseEndpoint,
                         isConnected: true,
                         isConnecting: false,
                         connectionError: null,
@@ -582,7 +611,6 @@ export const useAppStore = create<AppState>()(
 
                 set({
                     serverUrl: null,
-                    baseEndpoint: '',
                     isConnected: false,
                     isConnecting: false,
                     connectionError: null,
@@ -611,7 +639,7 @@ export const useAppStore = create<AppState>()(
 
                 try {
                     // Fetch version info - critical for server identification and feature detection
-                    const versionInfo = await client.getVersionInfo().catch((error: unknown) => {
+                    const versionInfo = await client.GET('/version-info').then(({ data }) => data ?? null).catch((error: unknown) => {
                         const message = error instanceof Error ? error.message : 'Unknown error';
                         toast.warn(
                             `Failed to fetch server version info: ${message}. ` +
@@ -630,7 +658,8 @@ export const useAppStore = create<AppState>()(
 
                     if (treeViewMode === 'functional') {
                         // Functional view: Functions -> Apps (hosts)
-                        const functions = await client.listFunctions().catch(() => [] as SovdFunction[]);
+                        const functionsRes = await client.GET('/functions').catch(() => null);
+                        const functions = (functionsRes?.data ? unwrapItems<SovdFunction>(functionsRes.data) : []) as SovdFunction[];
                         children = functions.map((fn: SovdFunction) => {
                             // Validate function data quality
                             if (!fn.id || (typeof fn.id !== 'string' && typeof fn.id !== 'number')) {
@@ -658,7 +687,8 @@ export const useAppStore = create<AppState>()(
                         });
                     } else {
                         // Logical view: Areas -> Components -> Apps
-                        const entities = await client.getEntities();
+                        const areasRes = await client.GET('/areas');
+                        const entities = areasRes.data ? unwrapItems<SovdEntity>(areasRes.data) : [];
                         children = entities.map((e: SovdEntity) => toTreeNode(e, '/server'));
                     }
 
@@ -729,45 +759,48 @@ export const useAppStore = create<AppState>()(
                     try {
                         let loadedEntities: EntityTreeNode[] = [];
 
-                        // Convert tree path to API path (remove /server prefix)
-                        const apiPath = path.replace(/^\/server/, '');
-
                         if (isAreaOrSubarea) {
                             // Load both subareas and components for this area
-                            // API returns mixed: components come from getEntities, subareas from listSubareas
-                            const [components, subareas] = await Promise.all([
-                                client.getEntities(apiPath),
-                                client.listSubareas(node.id).catch(() => []),
+                            const [componentsRes, subareasRes] = await Promise.all([
+                                client.GET('/areas/{area_id}/components', { params: { path: { area_id: node.id } } }),
+                                client.GET('/areas/{area_id}/contains', { params: { path: { area_id: node.id } } }).catch(() => null),
                             ]);
 
-                            // Components from getEntities
+                            const components = componentsRes.data ? unwrapItems<SovdEntity>(componentsRes.data) : [];
+                            const subareas = subareasRes?.data ? unwrapItems<SovdEntity>(subareasRes.data) : [];
+
+                            // Components from area
                             const componentNodes = components.map((e: SovdEntity) => toTreeNode(e, path));
                             // Subareas with type 'subarea'
-                            const subareaNodes = subareas.map((subarea) =>
+                            const subareaNodes = subareas.map((subarea: SovdEntity) =>
                                 toTreeNode({ ...subarea, type: 'subarea', hasChildren: true }, path)
                             );
 
                             loadedEntities = [...subareaNodes, ...componentNodes];
                         } else if (isComponentOrSubcomponent) {
                             // Load both subcomponents and apps for this component
-                            const [apps, subcomponents] = await Promise.all([
-                                client.listComponentApps(node.id),
-                                client.listSubcomponents(node.id).catch(() => []),
+                            const [appsRes, subcomponentsRes] = await Promise.all([
+                                client.GET('/components/{component_id}/hosts', { params: { path: { component_id: node.id } } }),
+                                client.GET('/components/{component_id}/subcomponents', { params: { path: { component_id: node.id } } }).catch(() => null),
                             ]);
 
+                            const apps = appsRes.data ? unwrapItems<SovdEntity>(appsRes.data) : [];
+                            const subcomponents = subcomponentsRes?.data ? unwrapItems<SovdEntity>(subcomponentsRes.data) : [];
+
                             // Apps - leaf nodes (no children in tree, resources shown in panel)
-                            const appNodes = apps.map((app) =>
+                            const appNodes = apps.map((app: SovdEntity) =>
                                 toTreeNode({ ...app, type: 'app', hasChildren: false }, path)
                             );
                             // Subcomponents with type 'subcomponent'
-                            const subcompNodes = subcomponents.map((subcomp) =>
+                            const subcompNodes = subcomponents.map((subcomp: SovdEntity) =>
                                 toTreeNode({ ...subcomp, type: 'subcomponent', hasChildren: true }, path)
                             );
 
                             loadedEntities = [...subcompNodes, ...appNodes];
                         } else if (isFunction) {
                             // Load hosts (apps) for this function
-                            const hosts = await client.getFunctionHosts(node.id).catch(() => []);
+                            const hostsRes = await client.GET('/functions/{function_id}/hosts', { params: { path: { function_id: node.id } } }).catch(() => null);
+                            const hosts = hostsRes?.data ? unwrapItems<Record<string, unknown>>(hostsRes.data) : [];
 
                             // Hosts response contains objects with {id, name, href}
                             loadedEntities = hosts.map((host: unknown) => {
@@ -826,8 +859,23 @@ export const useAppStore = create<AppState>()(
 
                 try {
                     // Convert tree path to API path (remove /server prefix)
+                    // Parse entity type from path to dispatch to correct endpoint
                     const apiPath = path.replace(/^\/server/, '');
-                    const entities = await client.getEntities(apiPath);
+                    const segments = apiPath.split('/').filter(Boolean);
+                    const entityType = segments[0] || 'areas';
+                    const entityId = segments[1] || '';
+
+                    let entities: SovdEntity[] = [];
+                    if (entityType === 'areas' && !entityId) {
+                        const res = await client.GET('/areas');
+                        entities = res.data ? unwrapItems<SovdEntity>(res.data) : [];
+                    } else if (entityType === 'areas' && entityId) {
+                        const res = await client.GET('/areas/{area_id}/components', { params: { path: { area_id: entityId } } });
+                        entities = res.data ? unwrapItems<SovdEntity>(res.data) : [];
+                    } else if (entityType === 'components' && entityId) {
+                        const res = await client.GET('/components/{component_id}/hosts', { params: { path: { component_id: entityId } } });
+                        entities = res.data ? unwrapItems<SovdEntity>(res.data) : [];
+                    }
                     const children = entities.map((e: SovdEntity) => toTreeNode(e, path));
 
                     // Update tree with children
@@ -967,8 +1015,15 @@ export const useAppStore = create<AppState>()(
                 try {
                     // Convert tree path to API path (remove /server prefix)
                     const apiPath = selectedPath.replace(/^\/server/, '');
-                    const details = await client.getEntityDetails(apiPath);
-                    set({ selectedEntity: details, isRefreshing: false });
+                    const pathSegments = apiPath.split('/').filter(Boolean);
+                    const entityType = (pathSegments[0] || 'areas') as SovdResourceEntityType;
+                    const entityId = pathSegments[1] || '';
+                    const { data } = await (await import('./api-dispatch')).getEntityDetail(client, entityType, entityId);
+                    if (data) {
+                        set({ selectedEntity: data as unknown as SovdEntityDetails, isRefreshing: false });
+                    } else {
+                        set({ isRefreshing: false });
+                    }
                 } catch {
                     toast.error('Failed to refresh data');
                     set({ isRefreshing: false });
@@ -994,7 +1049,9 @@ export const useAppStore = create<AppState>()(
                 set({ isLoadingConfigurations: true });
 
                 try {
-                    const result = await client.listConfigurations(entityId, entityType);
+                    const { data, error: fetchError } = await getEntityConfigurations(client, entityType, entityId);
+                    if (fetchError) throw new Error(fetchError.message || 'Failed to load configurations');
+                    const result = transformConfigurationsResponse(data, entityId);
                     const newConfigs = new Map(configurations);
                     newConfigs.set(entityId, result.parameters);
                     set({ configurations: newConfigs, isLoadingConfigurations: false });
@@ -1015,7 +1072,8 @@ export const useAppStore = create<AppState>()(
                 if (!client) return false;
 
                 try {
-                    const result = await client.setConfiguration(entityId, paramName, { value }, entityType);
+                    const { data: result, error: setError } = await putEntityConfiguration(client, entityType, entityId, paramName, { value });
+                    if (setError) throw new Error(setError.message || 'Failed to set parameter');
 
                     // API returns {data: ..., id: ..., x-medkit: {parameter: {...}}}
                     // Success is indicated by presence of x-medkit.parameter (no status field)
@@ -1069,7 +1127,8 @@ export const useAppStore = create<AppState>()(
                 if (!client) return false;
 
                 try {
-                    await client.resetConfiguration(entityId, paramName, entityType);
+                    const { error: resetError } = await deleteEntityConfiguration(client, entityType, entityId, paramName);
+                    if (resetError) throw new Error(resetError.message || 'Failed to reset parameter');
 
                     // Refetch configurations to get updated value after reset
                     await fetchConfigurations(entityId, entityType);
@@ -1087,18 +1146,23 @@ export const useAppStore = create<AppState>()(
                 if (!client) return { reset_count: 0, failed_count: 0 };
 
                 try {
-                    const result = await client.resetAllConfigurations(entityId, entityType);
+                    const { data: result, error: resetError } = await deleteEntityConfigurations(client, entityType, entityId);
+                    if (resetError) throw new Error(resetError.message || 'Failed to reset configurations');
 
-                    if (result.failed_count === 0) {
-                        toast.success(`Reset ${result.reset_count} parameters to defaults`);
+                    const resetResult = result as unknown as { reset_count: number; failed_count: number } | undefined;
+                    const resetCount = resetResult?.reset_count ?? 0;
+                    const failedCount = resetResult?.failed_count ?? 0;
+
+                    if (failedCount === 0) {
+                        toast.success(`Reset ${resetCount} parameters to defaults`);
                     } else {
-                        toast.warning(`Reset ${result.reset_count} parameters, ${result.failed_count} failed`);
+                        toast.warning(`Reset ${resetCount} parameters, ${failedCount} failed`);
                     }
 
                     // Refresh configurations to get updated values
                     await fetchConfigurations(entityId, entityType);
 
-                    return { reset_count: result.reset_count, failed_count: result.failed_count };
+                    return { reset_count: resetCount, failed_count: failedCount };
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
                     toast.error(`Failed to reset configurations: ${message}`);
@@ -1117,7 +1181,9 @@ export const useAppStore = create<AppState>()(
                 set({ isLoadingOperations: true });
 
                 try {
-                    const result = await client.listOperations(entityId, entityType);
+                    const { data, error: fetchError } = await getEntityOperations(client, entityType, entityId);
+                    if (fetchError) throw new Error(fetchError.message || 'Failed to load operations');
+                    const result = transformOperationsResponse(data);
                     const newOps = new Map(operations);
                     newOps.set(entityId, result);
                     set({ operations: newOps, isLoadingOperations: false });
@@ -1138,7 +1204,9 @@ export const useAppStore = create<AppState>()(
                 if (!client) return null;
 
                 try {
-                    const result = await client.createExecution(entityId, operationName, request, entityType);
+                    const { data, error: execError } = await postEntityExecution(client, entityType, entityId, operationName, { input: request.input });
+                    if (execError) throw new Error(execError.message || 'Operation failed');
+                    const result = (data || {}) as CreateExecutionResponse;
 
                     // Track all executions with an ID (both running and completed/failed)
                     // Actions always get an ID, services may or may not depending on backend
@@ -1192,7 +1260,9 @@ export const useAppStore = create<AppState>()(
                 if (!client) return;
 
                 try {
-                    const execution = await client.getExecution(entityId, operationName, executionId, entityType);
+                    const { data, error: fetchError } = await getEntityExecution(client, entityType, entityId, operationName, executionId);
+                    if (fetchError) throw new Error(fetchError.message || 'Failed to get execution');
+                    const execution = data as unknown as Execution;
                     // Preserve metadata when updating execution
                     const trackedExecution: TrackedExecution = {
                         ...execution,
@@ -1225,7 +1295,9 @@ export const useAppStore = create<AppState>()(
                 if (!client) return false;
 
                 try {
-                    const execution = await client.cancelExecution(entityId, operationName, executionId, entityType);
+                    const { data, error: cancelError } = await deleteEntityExecution(client, entityType, entityId, operationName, executionId);
+                    if (cancelError) throw new Error(cancelError.message || 'Failed to cancel execution');
+                    const execution = data as unknown as Execution;
                     // Preserve metadata when updating execution
                     const trackedExecution: TrackedExecution = {
                         ...execution,
@@ -1302,12 +1374,9 @@ export const useAppStore = create<AppState>()(
                     const results = await Promise.all(
                         runningExecutions.map(async (exec) => {
                             try {
-                                const updated = await currentClient.getExecution(
-                                    exec.entityId,
-                                    exec.operationName,
-                                    exec.id,
-                                    exec.entityType
-                                );
+                                const { data: execData } = await getEntityExecution(currentClient, exec.entityType, exec.entityId, exec.operationName, exec.id);
+                                if (!execData) throw new Error('No data');
+                                const updated = execData as unknown as Execution;
                                 const isTerminal = ['succeeded', 'failed', 'canceled', 'completed'].includes(
                                     updated.status
                                 );
@@ -1367,10 +1436,12 @@ export const useAppStore = create<AppState>()(
                 }
 
                 try {
-                    const result = await client.listAllFaults('all');
+                    const { data: faultsData, error: faultsError } = await client.GET('/faults', { params: { query: { status: 'all' } } });
+                    if (faultsError) throw new Error(faultsError.message || 'Failed to load faults');
+                    const result = transformFaultsResponse(faultsData);
                     // Skip state update if faults haven't changed to avoid unnecessary re-renders.
                     // Compare by serializing fault codes + statuses (cheap and covers all meaningful changes).
-                    const newKey = result.items.map((f) => `${f.code}:${f.status}:${f.severity}`).join('|');
+                    const newKey = result.items.map((f: Fault) => `${f.code}:${f.status}:${f.severity}`).join('|');
                     const oldKey = currentFaults.map((f) => `${f.code}:${f.status}:${f.severity}`).join('|');
                     if (newKey !== oldKey) {
                         set({ faults: result.items, isLoadingFaults: false });
@@ -1389,7 +1460,8 @@ export const useAppStore = create<AppState>()(
                 if (!client) return false;
 
                 try {
-                    await client.clearFault(entityType, entityId, faultCode);
+                    const { error: clearError } = await deleteEntityFault(client, entityType, entityId, faultCode);
+                    if (clearError) throw new Error(clearError.message || 'Failed to clear fault');
                     toast.success(`Fault ${faultCode} cleared`);
                     // Refresh faults list
                     await fetchFaults();
@@ -1410,50 +1482,68 @@ export const useAppStore = create<AppState>()(
                     faultStreamCleanup();
                 }
 
-                const cleanup = client.subscribeFaultStream(
-                    // onFaultConfirmed
-                    (fault) => {
-                        const { faults } = get();
-                        // Add or update fault in the list
-                        const existingIndex = faults.findIndex(
-                            (f) => f.code === fault.code && f.entity_id === fault.entity_id
-                        );
-                        if (existingIndex >= 0) {
-                            // Skip update if fault data hasn't changed (avoids re-render flicker)
-                            const existing = faults[existingIndex]!;
-                            if (
-                                existing.status === fault.status &&
-                                existing.severity === fault.severity &&
-                                existing.message === fault.message &&
-                                existing.timestamp === fault.timestamp
-                            ) {
-                                return;
+                const stream = client.streams.faults();
+                let running = true;
+
+                const consume = async () => {
+                    try {
+                        for await (const event of stream) {
+                            if (!running) break;
+
+                            const rawData = event.data as Record<string, unknown>;
+                            const faultData = (rawData.fault || rawData) as Parameters<typeof transformFault>[0];
+
+                            if (!('fault_code' in faultData)) continue;
+                            const fault = transformFault(faultData);
+
+                            if (event.event === 'fault_cleared') {
+                                // onFaultCleared - no toast, clearFault() already shows one for UI-triggered clears
+                                const { faults } = get();
+                                const newFaults = faults.filter(
+                                    (f) => !(f.code === fault.code && f.entity_id === fault.entity_id)
+                                );
+                                if (newFaults.length !== faults.length) {
+                                    set({ faults: newFaults });
+                                }
+                            } else {
+                                // fault_confirmed or default message
+                                const { faults } = get();
+                                const existingIndex = faults.findIndex(
+                                    (f) => f.code === fault.code && f.entity_id === fault.entity_id
+                                );
+                                if (existingIndex >= 0) {
+                                    const existing = faults[existingIndex]!;
+                                    if (
+                                        existing.status === fault.status &&
+                                        existing.severity === fault.severity &&
+                                        existing.message === fault.message &&
+                                        existing.timestamp === fault.timestamp
+                                    ) {
+                                        continue;
+                                    }
+                                    const newFaults = [...faults];
+                                    newFaults[existingIndex] = fault;
+                                    set({ faults: newFaults });
+                                } else {
+                                    set({ faults: [...faults, fault] });
+                                }
+                                toast.warning(`Fault: ${fault.message}`, { autoClose: 5000 });
                             }
-                            const newFaults = [...faults];
-                            newFaults[existingIndex] = fault;
-                            set({ faults: newFaults });
-                        } else {
-                            set({ faults: [...faults, fault] });
                         }
-                        toast.warning(`Fault: ${fault.message}`, { autoClose: 5000 });
-                    },
-                    // onFaultCleared - no toast here, clearFault() already shows one for UI-triggered clears
-                    (fault) => {
-                        const { faults } = get();
-                        const newFaults = faults.filter(
-                            (f) => !(f.code === fault.code && f.entity_id === fault.entity_id)
-                        );
-                        // Skip update if no fault was actually removed
-                        if (newFaults.length === faults.length) {
-                            return;
+                    } catch (error) {
+                        if (running) {
+                            const message = error instanceof Error ? error.message : 'Fault stream error';
+                            toast.error(`Fault stream error: ${message}`);
                         }
-                        set({ faults: newFaults });
-                    },
-                    // onError
-                    (error) => {
-                        toast.error(`Fault stream error: ${error.message}`);
                     }
-                );
+                };
+
+                consume();
+
+                const cleanup = () => {
+                    running = false;
+                    stream.close();
+                };
 
                 set({ faultStreamCleanup: cleanup });
             },
@@ -1470,7 +1560,7 @@ export const useAppStore = create<AppState>()(
             name: STORAGE_KEY,
             partialize: (state: AppState) => ({
                 serverUrl: state.serverUrl,
-                baseEndpoint: state.baseEndpoint,
+                treeViewMode: state.treeViewMode,
             }),
         }
     )
