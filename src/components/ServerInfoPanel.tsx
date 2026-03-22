@@ -22,17 +22,18 @@ export function ServerInfoPanel() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const { client, isConnected, serverUrl } = useAppStore(
+    const { isConnected, serverUrl, getServerCapabilities, getVersionInfoAction } = useAppStore(
         useShallow((state) => ({
-            client: state.client,
             isConnected: state.isConnected,
             serverUrl: state.serverUrl,
+            getServerCapabilities: state.getServerCapabilities,
+            getVersionInfoAction: state.getVersionInfoAction,
         }))
     );
 
     useEffect(() => {
         const loadServerInfo = async () => {
-            if (!client || !isConnected) {
+            if (!isConnected) {
                 setIsLoading(false);
                 return;
             }
@@ -42,11 +43,11 @@ export function ServerInfoPanel() {
 
             try {
                 const [caps, version] = await Promise.all([
-                    client.getServerCapabilities().catch(() => null),
-                    client.getVersionInfo().catch(() => null),
+                    getServerCapabilities().catch(() => null),
+                    getVersionInfoAction().catch(() => null),
                 ]);
 
-                setCapabilities(caps);
+                setCapabilities(caps as ServerCapabilities | null);
                 setVersionInfo(version);
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Failed to load server info');
@@ -56,7 +57,7 @@ export function ServerInfoPanel() {
         };
 
         loadServerInfo();
-    }, [client, isConnected]);
+    }, [isConnected, getServerCapabilities, getVersionInfoAction]);
 
     if (!isConnected) {
         return (

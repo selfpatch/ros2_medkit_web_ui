@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Clock, Database, FileBox } from 'lucide-react';
 import { RosbagDownloadButton } from './RosbagDownloadButton';
-import { formatBytes, formatDuration } from '@/lib/sovd-api';
+import { formatBytes, formatDuration } from '@/lib/utils';
 import type { RosbagSnapshot, Snapshot } from '@/lib/types';
 import { isRosbagSnapshot } from '@/lib/types';
 

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore, type AppState } from '@/lib/store';
 import type { Parameter, ParameterType } from '@/lib/types';
-import type { SovdResourceEntityType } from '@/lib/sovd-api';
+import type { SovdResourceEntityType } from '@/lib/types';
 
 interface ConfigurationPanelProps {
     entityId: string;

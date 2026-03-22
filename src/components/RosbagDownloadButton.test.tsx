@@ -10,9 +10,7 @@ const mockDownloadBulkData = vi.fn();
 vi.mock('@/lib/store', () => ({
     useAppStore: vi.fn((selector) =>
         selector({
-            client: {
-                downloadBulkData: mockDownloadBulkData,
-            },
+            downloadBulkData: mockDownloadBulkData,
         })
     ),
 }));

@@ -18,7 +18,7 @@ import { useAppStore } from '@/lib/store';
 import { ConfigurationPanel } from '@/components/ConfigurationPanel';
 import { OperationsPanel } from '@/components/OperationsPanel';
 import { FaultsPanel } from '@/components/FaultsPanel';
-import type { ComponentTopic, Operation, Parameter, Fault } from '@/lib/types';
+import type { ComponentTopic, Operation, Fault } from '@/lib/types';
 
 /** Host app object returned from /functions/{id}/hosts */
 interface FunctionHost {
@@ -65,37 +65,34 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
     const [hosts, setHosts] = useState<FunctionHost[]>([]);
     const [topics, setTopics] = useState<ComponentTopic[]>([]);
     const [operations, setOperations] = useState<Operation[]>([]);
-    const [configurations, setConfigurations] = useState<Parameter[]>([]);
     const [faults, setFaults] = useState<Fault[]>([]);
     const [isLoading, setIsLoading] = useState(false);
 
-    const { client, selectEntity } = useAppStore(
+    const { selectEntity, getFunctionHosts, fetchEntityData, fetchEntityOperations, fetchConfigurations, listEntityFaults, storeConfigurations } = useAppStore(
         useShallow((state) => ({
-            client: state.client,
             selectEntity: state.selectEntity,
+            getFunctionHosts: state.getFunctionHosts,
+            fetchEntityData: state.fetchEntityData,
+            fetchEntityOperations: state.fetchEntityOperations,
+            fetchConfigurations: state.fetchConfigurations,
+            listEntityFaults: state.listEntityFaults,
+            storeConfigurations: state.configurations,
         }))
     );
 
     // Load function resources on mount
     useEffect(() => {
         const loadFunctionData = async () => {
-            if (!client) return;
             setIsLoading(true);
 
             try {
                 // Load hosts, data, operations, configurations, and faults in parallel
-                const [hostsData, topicsData, opsData, configData, faultsData] = await Promise.all([
-                    client.getFunctionHosts
-                        ? client.getFunctionHosts(functionId).catch(() => [] as FunctionHost[])
-                        : Promise.resolve<FunctionHost[]>([]),
-                    client.getFunctionData
-                        ? client.getFunctionData(functionId).catch(() => [] as ComponentTopic[])
-                        : Promise.resolve<ComponentTopic[]>([]),
-                    client.getFunctionOperations
-                        ? client.getFunctionOperations(functionId).catch(() => [] as Operation[])
-                        : Promise.resolve<Operation[]>([]),
-                    client.listConfigurations(functionId, 'functions').catch(() => ({ parameters: [] })),
-                    client.listEntityFaults('functions', functionId).catch(() => ({ items: [] })),
+                const [hostsData, topicsData, opsData, , faultsData] = await Promise.all([
+                    getFunctionHosts(functionId).catch(() => [] as unknown[]),
+                    fetchEntityData('functions', functionId).catch(() => [] as ComponentTopic[]),
+                    fetchEntityOperations('functions', functionId).catch(() => [] as Operation[]),
+                    fetchConfigurations(functionId, 'functions'),
+                    listEntityFaults('functions', functionId).catch(() => ({ items: [] as Fault[], count: 0 })),
                 ]);
 
                 // Normalize hosts - API returns objects with {id, name, href}
@@ -110,7 +107,6 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                 setHosts(normalizedHosts);
                 setTopics(topicsData);
                 setOperations(opsData);
-                setConfigurations(configData.parameters || []);
                 setFaults(faultsData.items || []);
             } catch (error) {
                 console.error('Failed to load function data:', error);
@@ -120,7 +116,7 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
         };
 
         loadFunctionData();
-    }, [client, functionId]);
+    }, [getFunctionHosts, fetchEntityData, fetchEntityOperations, fetchConfigurations, listEntityFaults, functionId]);
 
     const handleResourceClick = (resourcePath: string) => {
         if (onNavigate) {
@@ -162,7 +158,7 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                             if (tab.id === 'hosts') count = hosts.length;
                             if (tab.id === 'data') count = topics.length;
                             if (tab.id === 'operations') count = operations.length;
-                            if (tab.id === 'configurations') count = configurations.length;
+                            if (tab.id === 'configurations') count = (storeConfigurations.get(functionId)?.length || 0);
                             if (tab.id === 'faults') count = faults.length;
 
                             return (
@@ -240,7 +236,7 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                                 className="p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left"
                             >
                                 <Settings className="w-4 h-4 text-violet-500 mb-1" />
-                                <div className="text-2xl font-semibold">{configurations.length}</div>
+                                <div className="text-2xl font-semibold">{(storeConfigurations.get(functionId)?.length || 0)}</div>
                                 <div className="text-xs text-muted-foreground">Configs</div>
                             </button>
                             <button

@@ -18,9 +18,8 @@ import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { SnapshotCard } from './SnapshotCard';
 import { useAppStore, type AppState } from '@/lib/store';
-import type { Fault, FaultSeverity, FaultStatus, FaultResponse } from '@/lib/types';
-import { mapFaultEntityTypeToResourceType } from '@/lib/sovd-api';
-import type { SovdResourceEntityType } from '@/lib/sovd-api';
+import type { Fault, FaultSeverity, FaultStatus, FaultResponse, SovdResourceEntityType } from '@/lib/types';
+import { mapFaultEntityTypeToResourceType } from '@/lib/utils';
 
 interface FaultsPanelProps {
     entityId: string;
@@ -274,20 +273,20 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
     const [faultDetails, setFaultDetails] = useState<Map<string, FaultResponse>>(new Map());
     const [loadingDetails, setLoadingDetails] = useState<Set<string>>(new Set());
 
-    const { client } = useAppStore(
+    const { listEntityFaults, getFaultWithEnvironmentData, clearFault } = useAppStore(
         useShallow((state: AppState) => ({
-            client: state.client,
+            listEntityFaults: state.listEntityFaults,
+            getFaultWithEnvironmentData: state.getFaultWithEnvironmentData,
+            clearFault: state.clearFault,
         }))
     );
 
     const loadFaults = useCallback(async () => {
-        if (!client) return;
-
         setIsLoading(true);
         setError(null);
 
         try {
-            const response = await client.listEntityFaults(entityType, entityId);
+            const response = await listEntityFaults(entityType, entityId);
             setFaults(response.items || []);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load faults');
@@ -295,7 +294,7 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
         } finally {
             setIsLoading(false);
         }
-    }, [client, entityId, entityType]);
+    }, [listEntityFaults, entityId, entityType]);
 
     useEffect(() => {
         loadFaults();
@@ -311,7 +310,7 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
                 newExpanded.add(faultCode);
 
                 // Fetch details if not cached
-                if (!faultDetails.has(faultCode) && client) {
+                if (!faultDetails.has(faultCode)) {
                     setLoadingDetails((prev) => new Set([...prev, faultCode]));
                     try {
                         // Use the fault's own entity info (app-level) for correct bulk_data_uri.
@@ -322,12 +321,12 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
                             ? mapFaultEntityTypeToResourceType(fault.entity_type)
                             : entityType;
                         const detailEntityId = fault?.entity_id || entityId;
-                        const details = await client.getFaultWithEnvironmentData(
+                        const details = await getFaultWithEnvironmentData(
                             detailEntityType,
                             detailEntityId,
                             faultCode
                         );
-                        setFaultDetails((prev) => new Map(prev).set(faultCode, details));
+                        setFaultDetails((prev) => new Map(prev).set(faultCode, details as FaultResponse));
                     } catch (err) {
                         console.error('Failed to fetch fault details:', err);
                     } finally {
@@ -342,17 +341,15 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
 
             setExpandedFaults(newExpanded);
         },
-        [client, entityType, entityId, expandedFaults, faultDetails, faults]
+        [getFaultWithEnvironmentData, entityType, entityId, expandedFaults, faultDetails, faults]
     );
 
     const handleClear = useCallback(
         async (code: string) => {
-            if (!client) return;
-
             setClearingCodes((prev) => new Set([...prev, code]));
 
             try {
-                await client.clearFault(entityType, entityId, code);
+                await clearFault(entityType, entityId, code);
                 // Reload faults after clearing
                 await loadFaults();
             } catch {
@@ -365,7 +362,7 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
                 });
             }
         },
-        [client, entityId, entityType, loadFaults]
+        [clearFault, entityId, entityType, loadFaults]
     );
 
     // Count faults by severity
