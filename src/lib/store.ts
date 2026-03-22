@@ -153,6 +153,38 @@ export interface AppState {
     clearFault: (entityType: SovdResourceEntityType, entityId: string, faultCode: string) => Promise<boolean>;
     subscribeFaultStream: () => void;
     unsubscribeFaultStream: () => void;
+
+    // Component-facing actions (replace direct client usage in components)
+    fetchEntityData: (entityType: SovdResourceEntityType, entityId: string) => Promise<ComponentTopic[]>;
+    fetchEntityOperations: (entityType: SovdResourceEntityType, entityId: string) => Promise<Operation[]>;
+    listEntityFaults: (
+        entityType: SovdResourceEntityType,
+        entityId: string
+    ) => Promise<{ items: Fault[]; count: number }>;
+    getFaultWithEnvironmentData: (
+        entityType: SovdResourceEntityType,
+        entityId: string,
+        faultCode: string
+    ) => Promise<unknown>;
+    publishToEntityData: (
+        entityType: SovdResourceEntityType,
+        entityId: string,
+        dataId: string,
+        request: { value: unknown }
+    ) => Promise<void>;
+    getServerCapabilities: () => Promise<unknown>;
+    getVersionInfoAction: () => Promise<VersionInfo | null>;
+    downloadBulkData: (
+        entityType: SovdResourceEntityType,
+        entityId: string,
+        category: string,
+        fileId: string
+    ) => Promise<{ blob: Blob; filename: string } | null>;
+    getFunctionHosts: (functionId: string) => Promise<unknown[]>;
+    prefetchResourceCounts: (
+        entityType: SovdResourceEntityType,
+        entityId: string
+    ) => Promise<{ data: number; operations: number; configurations: number; faults: number }>;
 }
 
 /**
@@ -1546,6 +1578,133 @@ export const useAppStore = create<AppState>()(
                 };
 
                 set({ faultStreamCleanup: cleanup });
+            },
+
+            // =================================================================
+            // COMPONENT-FACING ACTIONS (replace direct client usage)
+            // =================================================================
+
+            fetchEntityData: async (entityType: SovdResourceEntityType, entityId: string) => {
+                const { client } = get();
+                if (!client) return [];
+                const { data, error: fetchError } = await getEntityData(client, entityType, entityId);
+                if (fetchError) return [];
+                return (await import('./transforms')).transformDataResponse(data);
+            },
+
+            fetchEntityOperations: async (entityType: SovdResourceEntityType, entityId: string) => {
+                const { client } = get();
+                if (!client) return [];
+                const { data, error: fetchError } = await getEntityOperations(client, entityType, entityId);
+                if (fetchError) return [];
+                return transformOperationsResponse(data);
+            },
+
+            listEntityFaults: async (entityType: SovdResourceEntityType, entityId: string) => {
+                const { client } = get();
+                if (!client) return { items: [], count: 0 };
+                const { data, error: fetchError } = await getEntityFaults(client, entityType, entityId);
+                if (fetchError) return { items: [], count: 0 };
+                return transformFaultsResponse(data);
+            },
+
+            getFaultWithEnvironmentData: async (
+                entityType: SovdResourceEntityType,
+                entityId: string,
+                faultCode: string
+            ) => {
+                const { client } = get();
+                if (!client) return null;
+                const { data, error: fetchError } = await getEntityFaultDetail(client, entityType, entityId, faultCode);
+                if (fetchError) return null;
+                return data;
+            },
+
+            publishToEntityData: async (
+                entityType: SovdResourceEntityType,
+                entityId: string,
+                dataId: string,
+                request: { value: unknown }
+            ) => {
+                const { client } = get();
+                if (!client) return;
+                const { putEntityDataItem } = await import('./api-dispatch');
+                await putEntityDataItem(client, entityType, entityId, dataId, request);
+            },
+
+            getServerCapabilities: async () => {
+                const { client } = get();
+                if (!client) return null;
+                const { data } = await client.GET('/');
+                return data ?? null;
+            },
+
+            getVersionInfoAction: async () => {
+                const { client } = get();
+                if (!client) return null;
+                const { data } = await client.GET('/version-info');
+                return (data as VersionInfo) ?? null;
+            },
+
+            downloadBulkData: async (
+                entityType: SovdResourceEntityType,
+                entityId: string,
+                category: string,
+                fileId: string
+            ) => {
+                const { client } = get();
+                if (!client) return null;
+                const { getEntityBulkData } = await import('./api-dispatch');
+                // For binary download, we need the URL to fetch directly with progress
+                // Build URL from client base and use fetch directly
+                const { data } = await getEntityBulkData(client, entityType, entityId, category);
+                if (!data) return null;
+                // Find the file descriptor to get download info
+                const items = (data as unknown as { items?: Array<{ id: string; name?: string }> })?.items || [];
+                const fileDesc = items.find((item) => item.id === fileId);
+                const filename = fileDesc?.name || fileId;
+                // Use the generated client for actual download
+                const { getEntityBulkDataCategories: _ } = await import('./api-dispatch');
+                // Construct the download URL manually since openapi-fetch doesn't support blob responses well
+                const baseUrl = (client as unknown as { baseUrl?: string }).baseUrl || '';
+                const downloadUrl = `${baseUrl}/${entityType}/${entityId}/bulk-data/${category}/${fileId}`;
+                const response = await fetch(downloadUrl);
+                if (!response.ok) return null;
+                const blob = await response.blob();
+                return { blob, filename };
+            },
+
+            getFunctionHosts: async (functionId: string) => {
+                const { client } = get();
+                if (!client) return [];
+                const { data } = await client.GET('/functions/{function_id}/hosts', {
+                    params: { path: { function_id: functionId } },
+                });
+                return data ? unwrapItems<unknown>(data) : [];
+            },
+
+            prefetchResourceCounts: async (entityType: SovdResourceEntityType, entityId: string) => {
+                const { client } = get();
+                if (!client) return { data: 0, operations: 0, configurations: 0, faults: 0 };
+
+                const [dataRes, opsRes, configRes, faultsRes] = await Promise.all([
+                    getEntityData(client, entityType, entityId).catch(() => ({ data: undefined, error: undefined })),
+                    getEntityOperations(client, entityType, entityId).catch(() => ({ data: undefined, error: undefined })),
+                    getEntityConfigurations(client, entityType, entityId).catch(() => ({
+                        data: undefined,
+                        error: undefined,
+                    })),
+                    getEntityFaults(client, entityType, entityId).catch(() => ({ data: undefined, error: undefined })),
+                ]);
+
+                return {
+                    data: dataRes.data ? unwrapItems(dataRes.data).length : 0,
+                    operations: opsRes.data ? unwrapItems(opsRes.data).length : 0,
+                    configurations: configRes.data
+                        ? transformConfigurationsResponse(configRes.data, entityId).parameters.length
+                        : 0,
+                    faults: faultsRes.data ? transformFaultsResponse(faultsRes.data).items.length : 0,
+                };
             },
 
             unsubscribeFaultStream: () => {
