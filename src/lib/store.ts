@@ -1663,10 +1663,9 @@ export const useAppStore = create<AppState>()(
                 const items = (data as unknown as { items?: Array<{ id: string; name?: string }> })?.items || [];
                 const fileDesc = items.find((item) => item.id === fileId);
                 const filename = fileDesc?.name || fileId;
-                // Use the generated client for actual download
-                await import('./api-dispatch');
                 // Construct the download URL manually since openapi-fetch doesn't support blob responses well
-                const baseUrl = (client as unknown as { baseUrl?: string }).baseUrl || '';
+                const { serverUrl: storedUrl } = get();
+                const baseUrl = storedUrl ? storedUrl.replace(/\/$/, '') : '';
                 const downloadUrl = `${baseUrl}/${entityType}/${entityId}/bulk-data/${category}/${fileId}`;
                 const response = await fetch(downloadUrl);
                 if (!response.ok) return null;

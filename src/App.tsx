@@ -16,11 +16,10 @@ import { useAppStore } from '@/lib/store';
 type ViewMode = 'entity' | 'faults-dashboard';
 
 function App() {
-    const { isConnected, serverUrl, baseEndpoint, connect, clearSelection, selectedPath } = useAppStore(
+    const { isConnected, serverUrl, connect, clearSelection, selectedPath } = useAppStore(
         useShallow((state) => ({
             isConnected: state.isConnected,
             serverUrl: state.serverUrl,
-            baseEndpoint: state.baseEndpoint,
             connect: state.connect,
             clearSelection: state.clearSelection,
             selectedPath: state.selectedPath,
@@ -67,7 +66,7 @@ function App() {
     useEffect(() => {
         if (serverUrl && !isConnected && !autoConnectAttempted.current) {
             autoConnectAttempted.current = true;
-            connect(serverUrl, baseEndpoint).then((success) => {
+            connect(serverUrl).then((success) => {
                 if (!success) {
                     toast.error('Auto-connect failed. Please check your server settings.');
                     setShowConnectionDialog(true);
