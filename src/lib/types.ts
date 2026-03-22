@@ -1,6 +1,48 @@
+// Copyright 2026 selfpatch.ai
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// =============================================================================
+// Section 1: Re-exports from generated client
+// Types whose shapes match the generated OpenAPI schema are re-exported here.
+// Most UI types differ significantly (field renames, x-medkit extensions), so
+// they stay as manual definitions. transforms.ts handles the runtime mapping.
+// =============================================================================
+
+import type { components } from '@selfpatch/ros2-medkit-client-ts';
+
 /**
- * SOVD Entity types for discovery endpoints
+ * SOVD version info from GET /version-info
+ * Shape matches generated client schema.
  */
+export type VersionInfo = components['schemas']['VersionInfo'];
+
+/**
+ * SOVD-compliant generic error response
+ * Shape matches generated client schema.
+ */
+export type GenericError = components['schemas']['GenericError'];
+
+/**
+ * Alias for GenericError for backwards compatibility with existing code.
+ */
+export type SovdError = GenericError;
+
+// =============================================================================
+// Section 2 & 3: Manual type definitions
+// API types with significant differences from the generated schema, and
+// UI-only types that are never part of the API.
+// =============================================================================
 
 /**
  * SOVD Resource Entity Type for API endpoints
@@ -827,14 +869,6 @@ export interface SovdInfoEntry {
     vendor_info?: VendorInfo;
 }
 
-/**
- * Version info from GET /version-info
- */
-export interface VersionInfo {
-    /** Array of SOVD version info entries */
-    items: SovdInfoEntry[];
-}
-
 // =============================================================================
 // AUTHENTICATION (Optional SOVD Auth)
 // =============================================================================
@@ -885,18 +919,3 @@ export interface TokenRevokeRequest {
     token_type_hint?: 'refresh_token' | 'access_token';
 }
 
-// =============================================================================
-// GENERIC ERROR (SOVD Error Format)
-// =============================================================================
-
-/**
- * SOVD-compliant generic error response
- */
-export interface SovdError {
-    /** Error code identifier */
-    error_code: string;
-    /** Human-readable error message */
-    message: string;
-    /** Additional error parameters */
-    parameters?: Record<string, unknown>;
-}
