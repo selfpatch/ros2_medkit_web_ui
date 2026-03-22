@@ -4,8 +4,8 @@ import { useShallow } from 'zustand/shallow';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAppStore } from '@/lib/store';
-import { formatBytes, formatDuration } from '@/lib/sovd-api';
-import type { SovdResourceEntityType } from '@/lib/sovd-api';
+import { formatBytes, formatDuration } from '@/lib/utils';
+import type { SovdResourceEntityType } from '@/lib/types';
 import type { RosbagSnapshot } from '@/lib/types';
 
 interface RosbagDownloadButtonProps {
@@ -39,14 +39,14 @@ export function RosbagDownloadButton({ snapshot, variant = 'outline', size = 'sm
     const [isDownloading, setIsDownloading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const { client } = useAppStore(
+    const { downloadBulkData } = useAppStore(
         useShallow((state) => ({
-            client: state.client,
+            downloadBulkData: state.downloadBulkData,
         }))
     );
 
     const handleDownload = useCallback(async () => {
-        if (!client || !snapshot.bulk_data_uri) return;
+        if (!snapshot.bulk_data_uri) return;
 
         setIsDownloading(true);
         setError(null);
@@ -57,18 +57,22 @@ export function RosbagDownloadButton({ snapshot, variant = 'outline', size = 'sm
                 throw new Error('Invalid bulk_data_uri format');
             }
 
-            const { blob, filename } = await client.downloadBulkData(
+            const result = await downloadBulkData(
                 parsed.entityType,
                 parsed.entityId,
                 parsed.category,
                 parsed.id
             );
 
+            if (!result) {
+                throw new Error('Download failed');
+            }
+
             // Create object URL and trigger download
-            const url = URL.createObjectURL(blob);
+            const url = URL.createObjectURL(result.blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = filename;
+            link.download = result.filename;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -78,7 +82,7 @@ export function RosbagDownloadButton({ snapshot, variant = 'outline', size = 'sm
         } finally {
             setIsDownloading(false);
         }
-    }, [client, snapshot]);
+    }, [downloadBulkData, snapshot]);
 
     if (!snapshot.bulk_data_uri) {
         return null;

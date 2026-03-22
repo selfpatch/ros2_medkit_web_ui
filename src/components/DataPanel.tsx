@@ -7,7 +7,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { JsonFormViewer } from '@/components/JsonFormViewer';
 import { TopicPublishForm } from '@/components/TopicPublishForm';
 import type { ComponentTopic, TopicEndpoint, QosProfile, SovdResourceEntityType } from '@/lib/types';
-import type { SovdApiClient } from '@/lib/sovd-api';
 import { cn } from '@/lib/utils';
 
 interface DataPanelProps {
@@ -17,8 +16,6 @@ interface DataPanelProps {
     entityId: string;
     /** Entity type for API endpoint */
     entityType?: SovdResourceEntityType;
-    /** API client for publishing */
-    client: SovdApiClient | null;
     /** Whether a refresh is in progress */
     isRefreshing?: boolean;
     /** Callback when refresh is requested */
@@ -196,7 +193,6 @@ export function DataPanel({
     topic,
     entityId,
     entityType = 'components',
-    client,
     isRefreshing = false,
     onRefresh,
 }: DataPanelProps) {
@@ -273,14 +269,13 @@ export function DataPanel({
                 </div>
 
                 {/* Publish Section */}
-                {canPublish && client && (
+                {canPublish && (
                     <div className="border-t pt-4 space-y-2">
                         <span className="text-sm font-medium">Publish Message</span>
                         <TopicPublishForm
                             topic={topic}
                             entityId={entityId}
                             entityType={entityType}
-                            client={client}
                             initialValue={publishValue}
                             onValueChange={setPublishValue}
                         />

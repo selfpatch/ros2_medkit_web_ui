@@ -33,8 +33,7 @@ import { FunctionsPanel } from '@/components/FunctionsPanel';
 import { ServerInfoPanel } from '@/components/ServerInfoPanel';
 import { FaultsDashboard } from '@/components/FaultsDashboard';
 import { useAppStore, type AppState } from '@/lib/store';
-import type { ComponentTopic, Parameter } from '@/lib/types';
-import type { SovdResourceEntityType } from '@/lib/sovd-api';
+import type { ComponentTopic, Parameter, SovdResourceEntityType } from '@/lib/types';
 
 type ComponentTab = 'data' | 'operations' | 'configurations' | 'faults';
 
@@ -367,9 +366,10 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
         isLoadingDetails,
         isRefreshing,
         isConnected,
-        client,
         selectEntity,
         refreshSelectedEntity,
+        prefetchResourceCounts,
+        fetchEntityData,
     } = useAppStore(
         useShallow((state: AppState) => ({
             selectedPath: state.selectedPath,
@@ -377,9 +377,10 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             isLoadingDetails: state.isLoadingDetails,
             isRefreshing: state.isRefreshing,
             isConnected: state.isConnected,
-            client: state.client,
             selectEntity: state.selectEntity,
             refreshSelectedEntity: state.refreshSelectedEntity,
+            prefetchResourceCounts: state.prefetchResourceCounts,
+            fetchEntityData: state.fetchEntityData,
         }))
     );
 
@@ -392,8 +393,8 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
 
     // Fetch resource counts when entity changes
     useEffect(() => {
-        const fetchResourceCounts = async () => {
-            if (!client || !selectedEntity) {
+        const doFetchResourceCounts = async () => {
+            if (!selectedEntity) {
                 setResourceCounts({ data: 0, operations: 0, configurations: 0, faults: 0 });
                 setTopicsData([]);
                 return;
@@ -419,30 +420,24 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             else if (isFunction) entityType = 'functions';
 
             try {
-                const [dataRes, opsRes, configRes, faultsRes] = await Promise.all([
-                    client.getEntityData(entityType, entityId).catch(() => []),
-                    client.listOperations(entityId, entityType).catch(() => []),
-                    client.listConfigurations(entityId, entityType).catch(() => ({ parameters: [] })),
-                    client.listEntityFaults(entityType, entityId).catch(() => ({ items: [] })),
+                // Fetch resource counts and data in parallel
+                const [counts, dataRes] = await Promise.all([
+                    prefetchResourceCounts(entityType, entityId),
+                    fetchEntityData(entityType, entityId).catch(() => [] as ComponentTopic[]),
                 ]);
 
                 // Store the fetched data for the Data tab
                 const fetchedData = Array.isArray(dataRes) ? dataRes : [];
                 setTopicsData(fetchedData);
 
-                setResourceCounts({
-                    data: fetchedData.length,
-                    operations: Array.isArray(opsRes) ? opsRes.length : 0,
-                    configurations: configRes.parameters?.length || 0,
-                    faults: faultsRes.items?.length || 0,
-                });
+                setResourceCounts(counts);
             } catch {
                 // Silently handle errors - counts will stay at 0
             }
         };
 
-        fetchResourceCounts();
-    }, [client, selectedEntity]);
+        doFetchResourceCounts();
+    }, [selectedEntity, prefetchResourceCounts, fetchEntityData]);
 
     const handleCopyEntity = async () => {
         if (selectedEntity) {
@@ -785,7 +780,6 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                                     topic={topic}
                                     entityId={entityId}
                                     entityType={entityType}
-                                    client={client}
                                     isRefreshing={isRefreshing}
                                     onRefresh={refreshSelectedEntity}
                                 />

@@ -5,8 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { SchemaForm } from '@/components/SchemaFormField';
 import { getSchemaDefaults, deepMerge } from '@/lib/schema-utils';
+import { useShallow } from 'zustand/shallow';
+import { useAppStore } from '@/lib/store';
 import type { ComponentTopic, TopicSchema, SovdResourceEntityType } from '@/lib/types';
-import type { SovdApiClient } from '@/lib/sovd-api';
 
 interface TopicPublishFormProps {
     /** The topic to publish to */
@@ -15,8 +16,6 @@ interface TopicPublishFormProps {
     entityId: string;
     /** Entity type for API endpoint */
     entityType?: SovdResourceEntityType;
-    /** API client instance */
-    client: SovdApiClient;
     /** External initial value (overrides topic-based defaults) */
     initialValue?: unknown;
     /** Callback when value changes */
@@ -65,10 +64,14 @@ export function TopicPublishForm({
     topic,
     entityId,
     entityType = 'components',
-    client,
     initialValue,
     onValueChange,
 }: TopicPublishFormProps) {
+    const { publishToEntityData } = useAppStore(
+        useShallow((state) => ({
+            publishToEntityData: state.publishToEntityData,
+        }))
+    );
     const [viewMode, setViewMode] = useState<ViewMode>('form');
     const [formValues, setFormValues] = useState<Record<string, unknown>>(() => {
         if (initialValue && typeof initialValue === 'object') {
@@ -165,9 +168,8 @@ export function TopicPublishForm({
 
         setIsPublishing(true);
         try {
-            await client.publishToEntityData(entityType, entityId, topicName, {
-                type: messageType,
-                data: dataToPublish,
+            await publishToEntityData(entityType, entityId, topicName, {
+                value: { type: messageType, data: dataToPublish },
             });
             toast.success(`Published to ${topic.topic}`);
         } catch (error) {

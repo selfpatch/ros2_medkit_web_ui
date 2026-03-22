@@ -1664,7 +1664,7 @@ export const useAppStore = create<AppState>()(
                 const fileDesc = items.find((item) => item.id === fileId);
                 const filename = fileDesc?.name || fileId;
                 // Use the generated client for actual download
-                const { getEntityBulkDataCategories: _ } = await import('./api-dispatch');
+                await import('./api-dispatch');
                 // Construct the download URL manually since openapi-fetch doesn't support blob responses well
                 const baseUrl = (client as unknown as { baseUrl?: string }).baseUrl || '';
                 const downloadUrl = `${baseUrl}/${entityType}/${entityId}/bulk-data/${category}/${fileId}`;

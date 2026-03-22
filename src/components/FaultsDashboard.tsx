@@ -30,7 +30,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SnapshotCard } from './SnapshotCard';
 import { useAppStore } from '@/lib/store';
 import type { Fault, FaultSeverity, FaultStatus, FaultResponse } from '@/lib/types';
-import { mapFaultEntityTypeToResourceType } from '@/lib/sovd-api';
+import { mapFaultEntityTypeToResourceType } from '@/lib/utils';
 
 /**
  * Default polling interval in milliseconds
@@ -409,14 +409,14 @@ export function FaultsDashboard() {
     const [groupByEntity, setGroupByEntity] = useState(true);
 
     // Use shared faults state from store
-    const { faults, isLoadingFaults, isConnected, fetchFaults, clearFault, client, hasFaultStream } = useAppStore(
+    const { faults, isLoadingFaults, isConnected, fetchFaults, clearFault, getFaultWithEnvironmentData, hasFaultStream } = useAppStore(
         useShallow((state) => ({
             faults: state.faults,
             isLoadingFaults: state.isLoadingFaults,
             isConnected: state.isConnected,
             fetchFaults: state.fetchFaults,
             clearFault: state.clearFault,
-            client: state.client,
+            getFaultWithEnvironmentData: state.getFaultWithEnvironmentData,
             hasFaultStream: state.faultStreamCleanup !== null,
         }))
     );
@@ -486,16 +486,16 @@ export function FaultsDashboard() {
                 newExpanded.add(faultCode);
 
                 // Fetch details if not cached
-                if (!faultDetails.has(faultCode) && client) {
+                if (!faultDetails.has(faultCode)) {
                     setLoadingDetails((prev) => new Set([...prev, faultCode]));
                     try {
                         const entityGroup = mapFaultEntityTypeToResourceType(fault.entity_type);
-                        const details = await client.getFaultWithEnvironmentData(
+                        const details = await getFaultWithEnvironmentData(
                             entityGroup,
                             fault.entity_id,
                             faultCode
                         );
-                        setFaultDetails((prev) => new Map(prev).set(faultCode, details));
+                        setFaultDetails((prev) => new Map(prev).set(faultCode, details as FaultResponse));
                     } catch (err) {
                         console.error('Failed to fetch fault details:', err);
                     } finally {
@@ -510,7 +510,7 @@ export function FaultsDashboard() {
 
             setExpandedFaults(newExpanded);
         },
-        [client, expandedFaults, faultDetails]
+        [getFaultWithEnvironmentData, expandedFaults, faultDetails]
     );
 
     // Filter faults

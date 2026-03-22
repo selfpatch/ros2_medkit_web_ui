@@ -7,8 +7,8 @@ import { useAppStore } from '@/lib/store';
 import { ConfigurationPanel } from '@/components/ConfigurationPanel';
 import { OperationsPanel } from '@/components/OperationsPanel';
 import { FaultsPanel } from '@/components/FaultsPanel';
-import type { SovdResourceEntityType } from '@/lib/sovd-api';
-import type { ComponentTopic, Operation, Parameter, Fault } from '@/lib/types';
+import type { SovdResourceEntityType } from '@/lib/types';
+import type { ComponentTopic, Operation, Fault } from '@/lib/types';
 
 type ResourceTab = 'data' | 'operations' | 'configurations' | 'faults';
 
@@ -58,47 +58,51 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
     });
     const [data, setData] = useState<ComponentTopic[]>([]);
     const [operations, setOperations] = useState<Operation[]>([]);
-    const [configurations, setConfigurations] = useState<Parameter[]>([]);
     const [faults, setFaults] = useState<Fault[]>([]);
 
-    const { client, selectEntity } = useAppStore(
+    const { selectEntity, fetchEntityData, fetchEntityOperations, fetchConfigurations, listEntityFaults, storeConfigurations } = useAppStore(
         useShallow((state) => ({
-            client: state.client,
             selectEntity: state.selectEntity,
+            fetchEntityData: state.fetchEntityData,
+            fetchEntityOperations: state.fetchEntityOperations,
+            fetchConfigurations: state.fetchConfigurations,
+            listEntityFaults: state.listEntityFaults,
+            storeConfigurations: state.configurations,
         }))
     );
 
     // Lazy load resources for the active tab
     const loadTabResources = useCallback(
         async (tab: ResourceTab) => {
-            if (!client || loadedTabs[tab]) return;
+            if (loadedTabs[tab]) return;
 
             setIsLoading(true);
             try {
                 switch (tab) {
                     case 'data': {
-                        const dataRes = await client
-                            .getEntityData(entityType, entityId)
-                            .catch(() => [] as ComponentTopic[]);
+                        const dataRes = await fetchEntityData(entityType, entityId).catch(
+                            () => [] as ComponentTopic[]
+                        );
                         setData(dataRes);
                         break;
                     }
                     case 'operations': {
-                        const opsRes = await client.listOperations(entityId, entityType).catch(() => [] as Operation[]);
+                        const opsRes = await fetchEntityOperations(entityType, entityId).catch(
+                            () => [] as Operation[]
+                        );
                         setOperations(opsRes);
                         break;
                     }
                     case 'configurations': {
-                        const configRes = await client
-                            .listConfigurations(entityId, entityType)
-                            .catch(() => ({ parameters: [] }));
-                        setConfigurations(configRes.parameters || []);
+                        await fetchConfigurations(entityId, entityType);
+                        // Configurations are stored in the store's configurations map
                         break;
                     }
                     case 'faults': {
-                        const faultsRes = await client
-                            .listEntityFaults(entityType, entityId)
-                            .catch(() => ({ items: [] }));
+                        const faultsRes = await listEntityFaults(entityType, entityId).catch(() => ({
+                            items: [] as Fault[],
+                            count: 0,
+                        }));
                         setFaults(faultsRes.items || []);
                         break;
                     }
@@ -110,7 +114,7 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
                 setIsLoading(false);
             }
         },
-        [client, entityId, entityType, loadedTabs]
+        [fetchEntityData, fetchEntityOperations, fetchConfigurations, listEntityFaults, entityId, entityType, loadedTabs]
     );
 
     // Load resources when tab changes
@@ -136,7 +140,7 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
                     let count = 0;
                     if (tab.id === 'data') count = data.length;
                     if (tab.id === 'operations') count = operations.length;
-                    if (tab.id === 'configurations') count = configurations.length;
+                    if (tab.id === 'configurations') count = storeConfigurations.get(entityId)?.length || 0;
                     if (tab.id === 'faults') count = faults.length;
 
                     return (

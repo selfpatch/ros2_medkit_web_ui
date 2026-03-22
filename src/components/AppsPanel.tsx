@@ -53,26 +53,27 @@ export function AppsPanel({ appId, appName, fqn, nodeName, namespace, componentI
     const [faults, setFaults] = useState<Fault[]>([]);
     const [isLoading, setIsLoading] = useState(false);
 
-    const { client, selectEntity, configurations } = useAppStore(
+    const { selectEntity, configurations, fetchEntityData, fetchEntityOperations, listEntityFaults } = useAppStore(
         useShallow((state) => ({
-            client: state.client,
             selectEntity: state.selectEntity,
             configurations: state.configurations,
+            fetchEntityData: state.fetchEntityData,
+            fetchEntityOperations: state.fetchEntityOperations,
+            listEntityFaults: state.listEntityFaults,
         }))
     );
 
     // Load app resources on mount (configurations are loaded by ConfigurationPanel)
     useEffect(() => {
         const loadAppData = async () => {
-            if (!client) return;
             setIsLoading(true);
 
             try {
                 // Load resources in parallel (configurations handled by ConfigurationPanel)
                 const [topicsData, opsData, faultsData] = await Promise.all([
-                    client.getAppData(appId).catch(() => []),
-                    client.listOperations(appId, 'apps').catch(() => []),
-                    client.listEntityFaults('apps', appId).catch(() => ({ items: [] })),
+                    fetchEntityData('apps', appId).catch(() => [] as ComponentTopic[]),
+                    fetchEntityOperations('apps', appId).catch(() => [] as Operation[]),
+                    listEntityFaults('apps', appId).catch(() => ({ items: [] as Fault[], count: 0 })),
                 ]);
 
                 setTopics(topicsData);
@@ -86,7 +87,7 @@ export function AppsPanel({ appId, appName, fqn, nodeName, namespace, componentI
         };
 
         loadAppData();
-    }, [client, appId]);
+    }, [fetchEntityData, fetchEntityOperations, listEntityFaults, appId]);
 
     const handleResourceClick = (resourcePath: string) => {
         if (onNavigate) {
