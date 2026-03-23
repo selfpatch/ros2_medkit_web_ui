@@ -22,14 +22,17 @@ import type { SovdResourceEntityType } from './types';
 import {
     transformFaultsResponse,
     transformOperationsResponse,
+    transformDataResponse,
     transformConfigurationsResponse,
     transformFault,
     unwrapItems,
 } from './transforms';
 import {
+    getEntityDetail,
     getEntityConfigurations,
     getEntityOperations,
     getEntityData,
+    getEntityDataItem,
     getEntityFaults,
     getEntityFaultDetail,
     getEntityExecution,
@@ -37,8 +40,10 @@ import {
     deleteEntityExecution,
     deleteEntityFault,
     putEntityConfiguration,
+    putEntityDataItem,
     deleteEntityConfiguration,
     deleteEntityConfigurations,
+    getEntityBulkData,
 } from './api-dispatch';
 
 const STORAGE_KEY = 'ros2_medkit_web_ui_server_url';
@@ -303,26 +308,53 @@ async function handleTopicSelection(ctx: SelectionContext, client: MedkitClient)
     const isTopicNodeData = 'isPublisher' in data && 'isSubscriber' in data && !('type' in data);
 
     if (isTopicNodeData) {
-        // TopicNodeData - need to fetch full details
+        // TopicNodeData - need to fetch full topic details from the parent entity
         const { isPublisher, isSubscriber } = data as TopicNodeData;
-        const apiPath = path.replace(/^\/server/, '');
-        const pathSegments = apiPath.split('/').filter(Boolean);
-        const entityType = (pathSegments[0] || 'apps') as SovdResourceEntityType;
-        const entityId = pathSegments[1] || '';
-        const { getEntityDetail } = await import('./api-dispatch');
-        const { data: detailData } = await getEntityDetail(client, entityType, entityId);
-        const details = (detailData || { id: entityId, name: entityId, type: entityType, href: apiPath }) as SovdEntityDetails;
+        const topicName = node.id;
 
-        // Update tree with full data merged with direction info
-        const updatedTree = updateNodeInTree(rootEntities, path, (n) => ({
-            ...n,
-            data: { ...((details as unknown as Record<string, unknown>)?.topicData as Record<string, unknown>), isPublisher, isSubscriber },
-        }));
+        // Find parent entity by walking up the tree path
+        const parentPath = path.split('/').slice(0, -1).join('/');
+        const parentNode = findNode(rootEntities, parentPath);
+        const parentType = parentNode?.type || 'component';
+        const entityType = `${parentType}s` as SovdResourceEntityType;
+        const entityId = parentNode?.id || '';
 
+        // Fetch the specific data item for this topic
+        const { data: topicDetail } = await getEntityDataItem(client, entityType, entityId, topicName);
+        const topicData = topicDetail as unknown as ComponentTopic | null;
+
+        if (topicData) {
+            // Update tree with full data merged with direction info
+            const updatedTree = updateNodeInTree(rootEntities, path, (n) => ({
+                ...n,
+                data: { ...topicData, isPublisher, isSubscriber },
+            }));
+
+            return {
+                selectedPath: path,
+                selectedEntity: {
+                    id: node.id,
+                    name: node.name,
+                    href: node.href,
+                    topicData: { ...topicData, isPublisher, isSubscriber },
+                    rosType: topicData.type,
+                    type: 'topic',
+                },
+                rootEntities: updatedTree,
+                isLoadingDetails: false,
+            };
+        }
+
+        // Fallback if topic fetch fails
         return {
             selectedPath: path,
-            selectedEntity: details,
-            rootEntities: updatedTree,
+            selectedEntity: {
+                id: node.id,
+                name: node.name,
+                type: 'topic',
+                href: node.href,
+                error: 'Failed to load topic details',
+            },
             isLoadingDetails: false,
         };
     }
@@ -520,6 +552,17 @@ function handleOperationSelection(ctx: SelectionContext): SelectionResult | null
     };
 }
 
+/**
+ * Infer entity type from tree path depth.
+ * Tree paths: /server/<areaId> (depth 1), /server/<areaId>/<componentId> (depth 2),
+ * /server/<areaId>/<componentId>/<appId> (depth 3)
+ */
+function inferEntityTypeFromDepth(depth: number): SovdResourceEntityType {
+    if (depth <= 1) return 'areas';
+    if (depth === 2) return 'components';
+    return 'apps';
+}
+
 /** Fallback: fetch entity details from API when not in tree */
 async function fetchEntityFromApi(
     path: string,
@@ -530,24 +573,23 @@ async function fetchEntityFromApi(
 
     try {
         const apiPath = path.replace(/^\/server/, '');
-        // Parse entity type and id from path: /areas/foo -> areas, foo
         const pathSegments = apiPath.split('/').filter(Boolean);
-        const entityType = (pathSegments[0] || 'areas') as SovdResourceEntityType;
-        const entityId = pathSegments[1] || '';
-        const { data } = await (await import('./api-dispatch')).getEntityDetail(client, entityType, entityId);
-        const details = (data || { id: entityId, name: entityId, type: entityType, href: apiPath }) as SovdEntityDetails;
+        const entityId = pathSegments[pathSegments.length - 1] || '';
+        const entityType = inferEntityTypeFromDepth(pathSegments.length);
+
+        const { data } = await getEntityDetail(client, entityType, entityId);
+        const details = (data || { id: entityId, name: entityId, type: entityType.slice(0, -1), href: apiPath }) as SovdEntityDetails;
         set({ selectedEntity: details, isLoadingDetails: false });
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         toast.error(`Failed to load entity details for ${path}: ${message}`);
 
-        // Infer entity type from path structure
         const segments = path.split('/').filter(Boolean);
         const id = segments[segments.length - 1] || path;
-        const inferredType = segments.length === 1 ? 'area' : segments.length === 2 ? 'component' : 'unknown';
+        const inferredType = inferEntityTypeFromDepth(segments.length);
 
         set({
-            selectedEntity: { id, name: id, type: inferredType, href: path, error: 'Failed to load details' },
+            selectedEntity: { id, name: id, type: inferredType.slice(0, -1), href: path, error: 'Failed to load details' },
             isLoadingDetails: false,
         });
     }
@@ -1037,20 +1079,26 @@ export const useAppStore = create<AppState>()(
 
             // Refresh the currently selected entity (re-fetch from server)
             refreshSelectedEntity: async () => {
-                const { selectedPath, client } = get();
-                if (!selectedPath || !client) {
+                const { selectedPath, selectedEntity, client } = get();
+                if (!selectedPath || !client || !selectedEntity) {
                     return;
                 }
 
                 set({ isRefreshing: true });
 
                 try {
-                    // Convert tree path to API path (remove /server prefix)
-                    const apiPath = selectedPath.replace(/^\/server/, '');
-                    const pathSegments = apiPath.split('/').filter(Boolean);
-                    const entityType = (pathSegments[0] || 'areas') as SovdResourceEntityType;
-                    const entityId = pathSegments[1] || '';
-                    const { data } = await (await import('./api-dispatch')).getEntityDetail(client, entityType, entityId);
+                    const entityType = `${selectedEntity.type}s` as SovdResourceEntityType;
+                    const entityId = selectedEntity.id;
+
+                    // Only refresh actual entities (area, component, app, function)
+                    const validTypes: SovdResourceEntityType[] = ['areas', 'components', 'apps', 'functions'];
+                    if (!validTypes.includes(entityType)) {
+                        // For non-entity nodes (topic, fault, parameter), just clear refreshing
+                        set({ isRefreshing: false });
+                        return;
+                    }
+
+                    const { data } = await getEntityDetail(client, entityType, entityId);
                     if (data) {
                         set({ selectedEntity: data as unknown as SovdEntityDetails, isRefreshing: false });
                     } else {
@@ -1589,7 +1637,7 @@ export const useAppStore = create<AppState>()(
                 if (!client) return [];
                 const { data, error: fetchError } = await getEntityData(client, entityType, entityId);
                 if (fetchError) return [];
-                return (await import('./transforms')).transformDataResponse(data);
+                return transformDataResponse(data);
             },
 
             fetchEntityOperations: async (entityType: SovdResourceEntityType, entityId: string) => {
@@ -1628,7 +1676,6 @@ export const useAppStore = create<AppState>()(
             ) => {
                 const { client } = get();
                 if (!client) return;
-                const { putEntityDataItem } = await import('./api-dispatch');
                 await putEntityDataItem(client, entityType, entityId, dataId, request);
             },
 
@@ -1652,21 +1699,19 @@ export const useAppStore = create<AppState>()(
                 category: string,
                 fileId: string
             ) => {
-                const { client } = get();
-                if (!client) return null;
-                const { getEntityBulkData } = await import('./api-dispatch');
-                // For binary download, we need the URL to fetch directly with progress
-                // Build URL from client base and use fetch directly
+                const { client, serverUrl } = get();
+                if (!client || !serverUrl) return null;
+
+                // Fetch file list to get filename
                 const { data } = await getEntityBulkData(client, entityType, entityId, category);
                 if (!data) return null;
-                // Find the file descriptor to get download info
                 const items = (data as unknown as { items?: Array<{ id: string; name?: string }> })?.items || [];
                 const fileDesc = items.find((item) => item.id === fileId);
                 const filename = fileDesc?.name || fileId;
-                // Construct the download URL manually since openapi-fetch doesn't support blob responses well
-                const { serverUrl: storedUrl } = get();
-                const baseUrl = storedUrl ? storedUrl.replace(/\/$/, '') : '';
-                const downloadUrl = `${baseUrl}/${entityType}/${entityId}/bulk-data/${category}/${fileId}`;
+
+                // Download binary via fetch (openapi-fetch doesn't support blob responses)
+                const baseUrl = serverUrl.replace(/\/+$/, '');
+                const downloadUrl = `${baseUrl}/${entityType}/${encodeURIComponent(entityId)}/bulk-data/${encodeURIComponent(category)}/${encodeURIComponent(fileId)}`;
                 const response = await fetch(downloadUrl);
                 if (!response.ok) return null;
                 const blob = await response.blob();
