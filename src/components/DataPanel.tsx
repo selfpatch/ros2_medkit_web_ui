@@ -8,6 +8,7 @@ import { JsonFormViewer } from '@/components/JsonFormViewer';
 import { TopicPublishForm } from '@/components/TopicPublishForm';
 import type { ComponentTopic, TopicEndpoint, QosProfile, SovdResourceEntityType } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { useAppStore } from '@/lib/store';
 
 interface DataPanelProps {
     /** Data item from the API */
@@ -198,8 +199,9 @@ export function DataPanel({
 }: DataPanelProps) {
     const [publishValue, setPublishValue] = useState<unknown>(topic.type_info?.default_value || topic.data || {});
 
+    const isConnected = useAppStore((state) => state.isConnected);
     const hasData = topic.status === 'data' && topic.data !== null && topic.data !== undefined;
-    const canPublish = !!(topic.type || topic.type_info || topic.data);
+    const canPublish = isConnected && !!(topic.type || topic.type_info || topic.data);
 
     const handleCopyFromLast = () => {
         if (topic.data) {
