@@ -563,6 +563,39 @@ function inferEntityTypeFromDepth(depth: number): SovdResourceEntityType {
     return 'apps';
 }
 
+/**
+ * Parse a tree path to find the parent entity and any resource segment.
+ * Tree paths: /server/<areaId>/<componentId>/<appId>/data/<topicName>
+ * Returns: { entityType, entityId, resource?, resourceId? }
+ */
+function parseTreePath(path: string): {
+    entityType: SovdResourceEntityType;
+    entityId: string;
+    resource?: 'data' | 'operations' | 'configurations' | 'faults';
+    resourceId?: string;
+} {
+    const apiPath = path.replace(/^\/server/, '');
+    const segments = apiPath.split('/').filter(Boolean);
+
+    // Check for resource segments: .../data/<id>, .../operations/<id>, etc.
+    const resourceTypes = ['data', 'operations', 'configurations', 'faults'] as const;
+    for (const res of resourceTypes) {
+        const resIndex = segments.indexOf(res);
+        if (resIndex > 0) {
+            // Entity is the segment before the resource
+            const entityId = segments[resIndex - 1] || '';
+            const entityType = inferEntityTypeFromDepth(resIndex);
+            const resourceId = segments[resIndex + 1] ? decodeURIComponent(segments[resIndex + 1]!) : undefined;
+            return { entityType, entityId, resource: res, resourceId };
+        }
+    }
+
+    // No resource segment - it's an entity path
+    const entityId = segments[segments.length - 1] || '';
+    const entityType = inferEntityTypeFromDepth(segments.length);
+    return { entityType, entityId };
+}
+
 /** Fallback: fetch entity details from API when not in tree */
 async function fetchEntityFromApi(
     path: string,
@@ -572,24 +605,66 @@ async function fetchEntityFromApi(
     set({ selectedPath: path, isLoadingDetails: true, selectedEntity: null });
 
     try {
-        const apiPath = path.replace(/^\/server/, '');
-        const pathSegments = apiPath.split('/').filter(Boolean);
-        const entityId = pathSegments[pathSegments.length - 1] || '';
-        const entityType = inferEntityTypeFromDepth(pathSegments.length);
+        const parsed = parseTreePath(path);
 
-        const { data } = await getEntityDetail(client, entityType, entityId);
-        const details = (data || { id: entityId, name: entityId, type: entityType.slice(0, -1), href: apiPath }) as SovdEntityDetails;
+        if (parsed.resource === 'data' && parsed.resourceId) {
+            // Topic detail: fetch specific data item and transform it
+            const { data: rawItem } = await getEntityDataItem(client, parsed.entityType, parsed.entityId, parsed.resourceId);
+            // Transform raw API response to ComponentTopic (same as list transform but for single item)
+            const transformed = rawItem ? transformDataResponse({ items: [rawItem] }) : [];
+            const topicData = transformed[0] || null;
+            set({
+                selectedEntity: {
+                    id: parsed.resourceId,
+                    name: topicData?.topic || parsed.resourceId,
+                    href: path,
+                    topicData: topicData || undefined,
+                    rosType: topicData?.type,
+                    type: 'topic',
+                },
+                isLoadingDetails: false,
+            });
+            return;
+        }
+
+        if (parsed.resource === 'operations' && parsed.resourceId) {
+            // Operation detail
+            set({
+                selectedEntity: {
+                    id: parsed.resourceId,
+                    name: parsed.resourceId,
+                    type: 'service',
+                    href: path,
+                    componentId: parsed.entityId,
+                    entityType: parsed.entityType,
+                },
+                isLoadingDetails: false,
+            });
+            return;
+        }
+
+        // Entity detail
+        const { data } = await getEntityDetail(client, parsed.entityType, parsed.entityId);
+        const details = (data || {
+            id: parsed.entityId,
+            name: parsed.entityId,
+            type: parsed.entityType.slice(0, -1),
+            href: path,
+        }) as SovdEntityDetails;
         set({ selectedEntity: details, isLoadingDetails: false });
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
-        toast.error(`Failed to load entity details for ${path}: ${message}`);
+        console.error('[fetchEntityFromApi] Error:', message, { path });
 
-        const segments = path.split('/').filter(Boolean);
-        const id = segments[segments.length - 1] || path;
-        const inferredType = inferEntityTypeFromDepth(segments.length);
-
+        const parsed = parseTreePath(path);
         set({
-            selectedEntity: { id, name: id, type: inferredType.slice(0, -1), href: path, error: 'Failed to load details' },
+            selectedEntity: {
+                id: parsed.entityId,
+                name: parsed.entityId,
+                type: parsed.entityType.slice(0, -1),
+                href: path,
+                error: 'Failed to load details',
+            },
             isLoadingDetails: false,
         });
     }
@@ -639,7 +714,7 @@ export const useAppStore = create<AppState>()(
                 set({ isConnecting: true, connectionError: null });
 
                 try {
-                    const client = createMedkitClient({ baseUrl: url });
+                    const client = createMedkitClient({ baseUrl: url, fetch: fetch.bind(globalThis) });
                     const { error: healthError } = await client.GET('/health');
 
                     if (healthError) {
@@ -762,7 +837,8 @@ export const useAppStore = create<AppState>()(
                     } else {
                         // Logical view: Areas -> Components -> Apps
                         const areasRes = await client.GET('/areas');
-                        const entities = areasRes.data ? unwrapItems<SovdEntity>(areasRes.data) : [];
+                        const rawAreas = areasRes.data ? unwrapItems<Record<string, unknown>>(areasRes.data) : [];
+                        const entities = rawAreas.map((e) => ({ ...e, type: 'area' }) as unknown as SovdEntity);
                         children = entities.map((e: SovdEntity) => toTreeNode(e, '/server'));
                     }
 
@@ -789,6 +865,7 @@ export const useAppStore = create<AppState>()(
                     set({ rootEntities: [serverNode], expandedPaths: ['/server'] });
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('[store]', error);
                     toast.error(`Failed to load entities: ${message}`);
                 }
             },
@@ -834,43 +911,19 @@ export const useAppStore = create<AppState>()(
                         let loadedEntities: EntityTreeNode[] = [];
 
                         if (isAreaOrSubarea) {
-                            // Load both subareas and components for this area
-                            const [componentsRes, subareasRes] = await Promise.all([
-                                client.GET('/areas/{area_id}/components', { params: { path: { area_id: node.id } } }),
-                                client.GET('/areas/{area_id}/contains', { params: { path: { area_id: node.id } } }).catch(() => null),
-                            ]);
-
-                            const components = componentsRes.data ? unwrapItems<SovdEntity>(componentsRes.data) : [];
-                            const subareas = subareasRes?.data ? unwrapItems<SovdEntity>(subareasRes.data) : [];
-
-                            // Components from area
-                            const componentNodes = components.map((e: SovdEntity) => toTreeNode(e, path));
-                            // Subareas with type 'subarea'
-                            const subareaNodes = subareas.map((subarea: SovdEntity) =>
-                                toTreeNode({ ...subarea, type: 'subarea', hasChildren: true }, path)
-                            );
-
-                            loadedEntities = [...subareaNodes, ...componentNodes];
+                            // Load components for this area
+                            const componentsRes = await client.GET('/areas/{area_id}/components', { params: { path: { area_id: node.id } } });
+                            const rawComponents = componentsRes.data ? unwrapItems<Record<string, unknown>>(componentsRes.data) : [];
+                            const components = rawComponents.map((e) => ({ ...e, type: 'component' }) as unknown as SovdEntity);
+                            loadedEntities = components.map((e: SovdEntity) => toTreeNode(e, path));
                         } else if (isComponentOrSubcomponent) {
-                            // Load both subcomponents and apps for this component
-                            const [appsRes, subcomponentsRes] = await Promise.all([
-                                client.GET('/components/{component_id}/hosts', { params: { path: { component_id: node.id } } }),
-                                client.GET('/components/{component_id}/subcomponents', { params: { path: { component_id: node.id } } }).catch(() => null),
-                            ]);
-
-                            const apps = appsRes.data ? unwrapItems<SovdEntity>(appsRes.data) : [];
-                            const subcomponents = subcomponentsRes?.data ? unwrapItems<SovdEntity>(subcomponentsRes.data) : [];
-
-                            // Apps - leaf nodes (no children in tree, resources shown in panel)
-                            const appNodes = apps.map((app: SovdEntity) =>
+                            // Load apps (hosts) for this component
+                            const appsRes = await client.GET('/components/{component_id}/hosts', { params: { path: { component_id: node.id } } });
+                            const rawApps = appsRes.data ? unwrapItems<Record<string, unknown>>(appsRes.data) : [];
+                            const apps = rawApps.map((e) => ({ ...e, type: 'app' }) as unknown as SovdEntity);
+                            loadedEntities = apps.map((app: SovdEntity) =>
                                 toTreeNode({ ...app, type: 'app', hasChildren: false }, path)
                             );
-                            // Subcomponents with type 'subcomponent'
-                            const subcompNodes = subcomponents.map((subcomp: SovdEntity) =>
-                                toTreeNode({ ...subcomp, type: 'subcomponent', hasChildren: true }, path)
-                            );
-
-                            loadedEntities = [...subcompNodes, ...appNodes];
                         } else if (isFunction) {
                             // Load hosts (apps) for this function
                             const hostsRes = await client.GET('/functions/{function_id}/hosts', { params: { path: { function_id: node.id } } }).catch(() => null);
@@ -908,6 +961,7 @@ export const useAppStore = create<AppState>()(
                     } catch (error) {
                         const message = error instanceof Error ? error.message : 'Unknown error';
                         if (!message.includes('not found') && !message.includes('404')) {
+                            console.error('[store]', error);
                             toast.error(`Failed to load children for ${path}: ${message}`);
                         }
                         set({ loadingPaths: get().loadingPaths.filter((p) => p !== path) });
@@ -936,19 +990,24 @@ export const useAppStore = create<AppState>()(
                     // Parse entity type from path to dispatch to correct endpoint
                     const apiPath = path.replace(/^\/server/, '');
                     const segments = apiPath.split('/').filter(Boolean);
-                    const entityType = segments[0] || 'areas';
-                    const entityId = segments[1] || '';
 
+                    // Fallback: try to load children based on path depth
+                    const depth = segments.length;
                     let entities: SovdEntity[] = [];
-                    if (entityType === 'areas' && !entityId) {
+                    if (depth === 0) {
                         const res = await client.GET('/areas');
-                        entities = res.data ? unwrapItems<SovdEntity>(res.data) : [];
-                    } else if (entityType === 'areas' && entityId) {
-                        const res = await client.GET('/areas/{area_id}/components', { params: { path: { area_id: entityId } } });
-                        entities = res.data ? unwrapItems<SovdEntity>(res.data) : [];
-                    } else if (entityType === 'components' && entityId) {
-                        const res = await client.GET('/components/{component_id}/hosts', { params: { path: { component_id: entityId } } });
-                        entities = res.data ? unwrapItems<SovdEntity>(res.data) : [];
+                        const raw = res.data ? unwrapItems<Record<string, unknown>>(res.data) : [];
+                        entities = raw.map((e) => ({ ...e, type: 'area' }) as unknown as SovdEntity);
+                    } else if (depth === 1) {
+                        const areaId = segments[0]!;
+                        const res = await client.GET('/areas/{area_id}/components', { params: { path: { area_id: areaId } } });
+                        const raw = res.data ? unwrapItems<Record<string, unknown>>(res.data) : [];
+                        entities = raw.map((e) => ({ ...e, type: 'component' }) as unknown as SovdEntity);
+                    } else if (depth === 2) {
+                        const componentId = segments[1]!;
+                        const res = await client.GET('/components/{component_id}/hosts', { params: { path: { component_id: componentId } } });
+                        const raw = res.data ? unwrapItems<Record<string, unknown>>(res.data) : [];
+                        entities = raw.map((e) => ({ ...e, type: 'app' }) as unknown as SovdEntity);
                     }
                     const children = entities.map((e: SovdEntity) => toTreeNode(e, path));
 
@@ -966,6 +1025,7 @@ export const useAppStore = create<AppState>()(
                     });
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('[store]', error);
                     toast.error(`Failed to load children for ${path}: ${message}`);
                     set({ loadingPaths: get().loadingPaths.filter((p) => p !== path) });
                 }
@@ -1033,6 +1093,7 @@ export const useAppStore = create<AppState>()(
                         }
                     } catch (error) {
                         const message = error instanceof Error ? error.message : 'Unknown error';
+                        console.error('[store]', error);
                         toast.error(`Failed to load topic details: ${message}`);
                         set({
                             selectedEntity: {
@@ -1104,7 +1165,8 @@ export const useAppStore = create<AppState>()(
                     } else {
                         set({ isRefreshing: false });
                     }
-                } catch {
+                } catch (error) {
+                    console.error('[store] refreshSelectedEntity', error);
                     toast.error('Failed to refresh data');
                     set({ isRefreshing: false });
                 }
@@ -1137,6 +1199,7 @@ export const useAppStore = create<AppState>()(
                     set({ configurations: newConfigs, isLoadingConfigurations: false });
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('[store]', error);
                     toast.error(`Failed to load configurations: ${message}`);
                     set({ isLoadingConfigurations: false });
                 }
@@ -1186,6 +1249,7 @@ export const useAppStore = create<AppState>()(
                         toast.success(`Parameter ${paramName} updated`);
                         return true;
                     } else {
+                        console.error('[store] setParameter: unexpected response', result);
                         toast.error(
                             `Failed to set parameter: ${(result as { error?: string }).error || 'Unknown error'}`
                         );
@@ -1193,6 +1257,7 @@ export const useAppStore = create<AppState>()(
                     }
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('[store]', error);
                     toast.error(`Failed to set parameter: ${message}`);
                     return false;
                 }
@@ -1216,6 +1281,7 @@ export const useAppStore = create<AppState>()(
                     return true;
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('[store]', error);
                     toast.error(`Failed to reset parameter: ${message}`);
                     return false;
                 }
@@ -1245,6 +1311,7 @@ export const useAppStore = create<AppState>()(
                     return { reset_count: resetCount, failed_count: failedCount };
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('[store]', error);
                     toast.error(`Failed to reset configurations: ${message}`);
                     return { reset_count: 0, failed_count: 0 };
                 }
@@ -1269,6 +1336,7 @@ export const useAppStore = create<AppState>()(
                     set({ operations: newOps, isLoadingOperations: false });
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('[store]', error);
                     toast.error(`Failed to load operations: ${message}`);
                     set({ isLoadingOperations: false });
                 }
@@ -1314,17 +1382,20 @@ export const useAppStore = create<AppState>()(
                         if (isRunning) {
                             toast.success(`Action execution ${result.id.slice(0, 8)}... started`);
                         } else if (result.status === 'failed') {
+                            console.error('[store] createExecution: failed', result);
                             toast.error(`Action execution ${result.id.slice(0, 8)}... failed`);
                         } else if (result.status === 'completed' || result.status === 'succeeded') {
                             toast.success(`Action execution ${result.id.slice(0, 8)}... completed`);
                         }
                     } else if (result.error) {
+                        console.error('[store] createExecution: error in result', result);
                         toast.error(`Operation failed: ${result.error}`);
                     }
 
                     return result;
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('[store]', error);
                     toast.error(`Operation failed: ${message}`);
                     return null;
                 }
@@ -1361,6 +1432,7 @@ export const useAppStore = create<AppState>()(
                         executionId,
                         entityType,
                     });
+                    console.error('[store]', error);
                     toast.error(`Failed to refresh execution status: ${message}`);
                 }
             },
@@ -1392,6 +1464,7 @@ export const useAppStore = create<AppState>()(
                     return true;
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('[store]', error);
                     toast.error(`Failed to cancel execution: ${message}`);
                     return false;
                 }
@@ -1530,6 +1603,7 @@ export const useAppStore = create<AppState>()(
                     }
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('[store]', error);
                     toast.error(`Failed to load faults: ${message}`);
                     set({ isLoadingFaults: false });
                 }
@@ -1548,6 +1622,7 @@ export const useAppStore = create<AppState>()(
                     return true;
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
+                    console.error('[store]', error);
                     toast.error(`Failed to clear fault: ${message}`);
                     return false;
                 }
@@ -1611,6 +1686,7 @@ export const useAppStore = create<AppState>()(
                             }
                         }
                     } catch (error) {
+                        console.error('[store] subscribeFaultStream: error in consume loop', error);
                         if (running) {
                             const message = error instanceof Error ? error.message : 'Fault stream error';
                             toast.error(`Fault stream error: ${message}`);
@@ -1637,7 +1713,10 @@ export const useAppStore = create<AppState>()(
                 if (!client) return [];
                 const { data, error: fetchError } = await getEntityData(client, entityType, entityId);
                 if (fetchError) return [];
-                return transformDataResponse(data);
+                console.warn('[fetchEntityData] raw items:', (data as Record<string, unknown>)?.items ? 'present' : 'MISSING', 'x-medkit in first:', JSON.stringify(((data as Record<string, unknown>)?.items as Array<Record<string, unknown>>)?.[0]?.['x-medkit']).slice(0, 200));
+                const result = transformDataResponse(data);
+                console.warn('[fetchEntityData] transformed:', result.length, 'items, first type_info:', !!result[0]?.type_info, 'first type:', result[0]?.type);
+                return result;
             },
 
             fetchEntityOperations: async (entityType: SovdResourceEntityType, entityId: string) => {
@@ -1663,9 +1742,14 @@ export const useAppStore = create<AppState>()(
             ) => {
                 const { client } = get();
                 if (!client) return null;
+                // Try entity-scoped fault detail - if 404, fault may not be scoped to this entity
                 const { data, error: fetchError } = await getEntityFaultDetail(client, entityType, entityId, faultCode);
-                if (fetchError) return null;
-                return data;
+                if (!fetchError) return data;
+                // Fault not found on this entity - this is expected for faults reported by
+                // a different entity than the one shown in the UI (e.g., anomaly_detector reports
+                // about imu_sim). Log at debug level, not error.
+                console.debug('[store] getFaultWithEnvironmentData: not found on entity, skipping detail', { entityType, entityId, faultCode });
+                return null;
             },
 
             publishToEntityData: async (

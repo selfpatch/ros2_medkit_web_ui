@@ -254,7 +254,7 @@ function FaultRow({
                                         <div className="space-y-2">
                                             {environmentData.snapshots.map((snapshot, idx) => (
                                                 <SnapshotCard
-                                                    key={snapshot.name || idx}
+                                                    key={`${snapshot.name}-${idx}`}
                                                     snapshot={snapshot}
                                                     index={idx}
                                                 />
