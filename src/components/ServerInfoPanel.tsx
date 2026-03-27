@@ -123,7 +123,7 @@ export function ServerInfoPanel() {
                         </div>
                         <div>
                             <CardTitle className="text-lg">
-                                {sovdInfo?.vendor_info?.name || capabilities?.server_name || 'SOVD Server'}
+                                {sovdInfo?.vendor_info?.name || capabilities?.server_name || 'ros2_medkit Gateway'}
                             </CardTitle>
                             <CardDescription className="flex items-center gap-2 flex-wrap">
                                 <Badge variant="outline" className="text-green-600 border-green-300">

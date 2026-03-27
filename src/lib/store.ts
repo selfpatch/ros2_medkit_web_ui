@@ -609,7 +609,12 @@ async function fetchEntityFromApi(
 
         if (parsed.resource === 'data' && parsed.resourceId) {
             // Topic detail: fetch specific data item and transform it
-            const { data: rawItem } = await getEntityDataItem(client, parsed.entityType, parsed.entityId, parsed.resourceId);
+            const { data: rawItem } = await getEntityDataItem(
+                client,
+                parsed.entityType,
+                parsed.entityId,
+                parsed.resourceId
+            );
             // Transform raw API response to ComponentTopic (same as list transform but for single item)
             const transformed = rawItem ? transformDataResponse({ items: [rawItem] }) : [];
             const topicData = transformed[0] || null;
@@ -788,18 +793,21 @@ export const useAppStore = create<AppState>()(
 
                 try {
                     // Fetch version info - critical for server identification and feature detection
-                    const versionInfo = await client.GET('/version-info').then(({ data }) => data ?? null).catch((error: unknown) => {
-                        const message = error instanceof Error ? error.message : 'Unknown error';
-                        toast.warn(
-                            `Failed to fetch server version info: ${message}. ` +
-                                'Server will be shown with generic name and version info may be incomplete.'
-                        );
-                        return null as VersionInfo | null;
-                    });
+                    const versionInfo = await client
+                        .GET('/version-info')
+                        .then(({ data }) => data ?? null)
+                        .catch((error: unknown) => {
+                            const message = error instanceof Error ? error.message : 'Unknown error';
+                            toast.warn(
+                                `Failed to fetch server version info: ${message}. ` +
+                                    'Server will be shown with generic name and version info may be incomplete.'
+                            );
+                            return null as VersionInfo | null;
+                        });
 
                     // Extract server info from version-info response (fallback to generic values if unavailable)
                     const sovdInfo = versionInfo?.items?.[0];
-                    const serverName = sovdInfo?.vendor_info?.name || 'SOVD Server';
+                    const serverName = sovdInfo?.vendor_info?.name || 'ros2_medkit Gateway';
                     const serverVersion = sovdInfo?.vendor_info?.version || '';
                     const sovdVersion = sovdInfo?.version || '';
 
@@ -808,7 +816,9 @@ export const useAppStore = create<AppState>()(
                     if (treeViewMode === 'functional') {
                         // Functional view: Functions -> Apps (hosts)
                         const functionsRes = await client.GET('/functions').catch(() => null);
-                        const functions = (functionsRes?.data ? unwrapItems<SovdFunction>(functionsRes.data) : []) as SovdFunction[];
+                        const functions = (
+                            functionsRes?.data ? unwrapItems<SovdFunction>(functionsRes.data) : []
+                        ) as SovdFunction[];
                         children = functions.map((fn: SovdFunction) => {
                             // Validate function data quality
                             if (!fn.id || (typeof fn.id !== 'string' && typeof fn.id !== 'number')) {
@@ -912,13 +922,21 @@ export const useAppStore = create<AppState>()(
 
                         if (isAreaOrSubarea) {
                             // Load components for this area
-                            const componentsRes = await client.GET('/areas/{area_id}/components', { params: { path: { area_id: node.id } } });
-                            const rawComponents = componentsRes.data ? unwrapItems<Record<string, unknown>>(componentsRes.data) : [];
-                            const components = rawComponents.map((e) => ({ ...e, type: 'component' }) as unknown as SovdEntity);
+                            const componentsRes = await client.GET('/areas/{area_id}/components', {
+                                params: { path: { area_id: node.id } },
+                            });
+                            const rawComponents = componentsRes.data
+                                ? unwrapItems<Record<string, unknown>>(componentsRes.data)
+                                : [];
+                            const components = rawComponents.map(
+                                (e) => ({ ...e, type: 'component' }) as unknown as SovdEntity
+                            );
                             loadedEntities = components.map((e: SovdEntity) => toTreeNode(e, path));
                         } else if (isComponentOrSubcomponent) {
                             // Load apps (hosts) for this component
-                            const appsRes = await client.GET('/components/{component_id}/hosts', { params: { path: { component_id: node.id } } });
+                            const appsRes = await client.GET('/components/{component_id}/hosts', {
+                                params: { path: { component_id: node.id } },
+                            });
                             const rawApps = appsRes.data ? unwrapItems<Record<string, unknown>>(appsRes.data) : [];
                             const apps = rawApps.map((e) => ({ ...e, type: 'app' }) as unknown as SovdEntity);
                             loadedEntities = apps.map((app: SovdEntity) =>
@@ -926,7 +944,9 @@ export const useAppStore = create<AppState>()(
                             );
                         } else if (isFunction) {
                             // Load hosts (apps) for this function
-                            const hostsRes = await client.GET('/functions/{function_id}/hosts', { params: { path: { function_id: node.id } } }).catch(() => null);
+                            const hostsRes = await client
+                                .GET('/functions/{function_id}/hosts', { params: { path: { function_id: node.id } } })
+                                .catch(() => null);
                             const hosts = hostsRes?.data ? unwrapItems<Record<string, unknown>>(hostsRes.data) : [];
 
                             // Hosts response contains objects with {id, name, href}
@@ -1000,12 +1020,16 @@ export const useAppStore = create<AppState>()(
                         entities = raw.map((e) => ({ ...e, type: 'area' }) as unknown as SovdEntity);
                     } else if (depth === 1) {
                         const areaId = segments[0]!;
-                        const res = await client.GET('/areas/{area_id}/components', { params: { path: { area_id: areaId } } });
+                        const res = await client.GET('/areas/{area_id}/components', {
+                            params: { path: { area_id: areaId } },
+                        });
                         const raw = res.data ? unwrapItems<Record<string, unknown>>(res.data) : [];
                         entities = raw.map((e) => ({ ...e, type: 'component' }) as unknown as SovdEntity);
                     } else if (depth === 2) {
                         const componentId = segments[1]!;
-                        const res = await client.GET('/components/{component_id}/hosts', { params: { path: { component_id: componentId } } });
+                        const res = await client.GET('/components/{component_id}/hosts', {
+                            params: { path: { component_id: componentId } },
+                        });
                         const raw = res.data ? unwrapItems<Record<string, unknown>>(res.data) : [];
                         entities = raw.map((e) => ({ ...e, type: 'app' }) as unknown as SovdEntity);
                     }
@@ -1215,7 +1239,13 @@ export const useAppStore = create<AppState>()(
                 if (!client) return false;
 
                 try {
-                    const { data: result, error: setError } = await putEntityConfiguration(client, entityType, entityId, paramName, { value });
+                    const { data: result, error: setError } = await putEntityConfiguration(
+                        client,
+                        entityType,
+                        entityId,
+                        paramName,
+                        { value }
+                    );
                     if (setError) throw new Error(setError.message || 'Failed to set parameter');
 
                     // API returns {data: ..., id: ..., x-medkit: {parameter: {...}}}
@@ -1272,7 +1302,12 @@ export const useAppStore = create<AppState>()(
                 if (!client) return false;
 
                 try {
-                    const { error: resetError } = await deleteEntityConfiguration(client, entityType, entityId, paramName);
+                    const { error: resetError } = await deleteEntityConfiguration(
+                        client,
+                        entityType,
+                        entityId,
+                        paramName
+                    );
                     if (resetError) throw new Error(resetError.message || 'Failed to reset parameter');
 
                     // Refetch configurations to get updated value after reset
@@ -1292,7 +1327,11 @@ export const useAppStore = create<AppState>()(
                 if (!client) return { reset_count: 0, failed_count: 0 };
 
                 try {
-                    const { data: result, error: resetError } = await deleteEntityConfigurations(client, entityType, entityId);
+                    const { data: result, error: resetError } = await deleteEntityConfigurations(
+                        client,
+                        entityType,
+                        entityId
+                    );
                     if (resetError) throw new Error(resetError.message || 'Failed to reset configurations');
 
                     const resetResult = result as unknown as { reset_count: number; failed_count: number } | undefined;
@@ -1352,7 +1391,13 @@ export const useAppStore = create<AppState>()(
                 if (!client) return null;
 
                 try {
-                    const { data, error: execError } = await postEntityExecution(client, entityType, entityId, operationName, { input: request.input });
+                    const { data, error: execError } = await postEntityExecution(
+                        client,
+                        entityType,
+                        entityId,
+                        operationName,
+                        { input: request.input }
+                    );
                     if (execError) throw new Error(execError.message || 'Operation failed');
                     const result = (data || {}) as CreateExecutionResponse;
 
@@ -1411,7 +1456,13 @@ export const useAppStore = create<AppState>()(
                 if (!client) return;
 
                 try {
-                    const { data, error: fetchError } = await getEntityExecution(client, entityType, entityId, operationName, executionId);
+                    const { data, error: fetchError } = await getEntityExecution(
+                        client,
+                        entityType,
+                        entityId,
+                        operationName,
+                        executionId
+                    );
                     if (fetchError) throw new Error(fetchError.message || 'Failed to get execution');
                     const execution = data as unknown as Execution;
                     // Preserve metadata when updating execution
@@ -1447,7 +1498,13 @@ export const useAppStore = create<AppState>()(
                 if (!client) return false;
 
                 try {
-                    const { data, error: cancelError } = await deleteEntityExecution(client, entityType, entityId, operationName, executionId);
+                    const { data, error: cancelError } = await deleteEntityExecution(
+                        client,
+                        entityType,
+                        entityId,
+                        operationName,
+                        executionId
+                    );
                     if (cancelError) throw new Error(cancelError.message || 'Failed to cancel execution');
                     const execution = data as unknown as Execution;
                     // Preserve metadata when updating execution
@@ -1527,7 +1584,13 @@ export const useAppStore = create<AppState>()(
                     const results = await Promise.all(
                         runningExecutions.map(async (exec) => {
                             try {
-                                const { data: execData } = await getEntityExecution(currentClient, exec.entityType, exec.entityId, exec.operationName, exec.id);
+                                const { data: execData } = await getEntityExecution(
+                                    currentClient,
+                                    exec.entityType,
+                                    exec.entityId,
+                                    exec.operationName,
+                                    exec.id
+                                );
                                 if (!execData) throw new Error('No data');
                                 const updated = execData as unknown as Execution;
                                 const isTerminal = ['succeeded', 'failed', 'canceled', 'completed'].includes(
@@ -1589,7 +1652,9 @@ export const useAppStore = create<AppState>()(
                 }
 
                 try {
-                    const { data: faultsData, error: faultsError } = await client.GET('/faults', { params: { query: { status: 'all' } } });
+                    const { data: faultsData, error: faultsError } = await client.GET('/faults', {
+                        params: { query: { status: 'all' } },
+                    });
                     if (faultsError) throw new Error(faultsError.message || 'Failed to load faults');
                     const result = transformFaultsResponse(faultsData);
                     // Skip state update if faults haven't changed to avoid unnecessary re-renders.
@@ -1713,9 +1778,23 @@ export const useAppStore = create<AppState>()(
                 if (!client) return [];
                 const { data, error: fetchError } = await getEntityData(client, entityType, entityId);
                 if (fetchError) return [];
-                console.warn('[fetchEntityData] raw items:', (data as Record<string, unknown>)?.items ? 'present' : 'MISSING', 'x-medkit in first:', JSON.stringify(((data as Record<string, unknown>)?.items as Array<Record<string, unknown>>)?.[0]?.['x-medkit']).slice(0, 200));
+                console.warn(
+                    '[fetchEntityData] raw items:',
+                    (data as Record<string, unknown>)?.items ? 'present' : 'MISSING',
+                    'x-medkit in first:',
+                    JSON.stringify(
+                        ((data as Record<string, unknown>)?.items as Array<Record<string, unknown>>)?.[0]?.['x-medkit']
+                    ).slice(0, 200)
+                );
                 const result = transformDataResponse(data);
-                console.warn('[fetchEntityData] transformed:', result.length, 'items, first type_info:', !!result[0]?.type_info, 'first type:', result[0]?.type);
+                console.warn(
+                    '[fetchEntityData] transformed:',
+                    result.length,
+                    'items, first type_info:',
+                    !!result[0]?.type_info,
+                    'first type:',
+                    result[0]?.type
+                );
                 return result;
             },
 
@@ -1748,7 +1827,11 @@ export const useAppStore = create<AppState>()(
                 // Fault not found on this entity - this is expected for faults reported by
                 // a different entity than the one shown in the UI (e.g., anomaly_detector reports
                 // about imu_sim). Log at debug level, not error.
-                console.debug('[store] getFaultWithEnvironmentData: not found on entity, skipping detail', { entityType, entityId, faultCode });
+                console.debug('[store] getFaultWithEnvironmentData: not found on entity, skipping detail', {
+                    entityType,
+                    entityId,
+                    faultCode,
+                });
                 return null;
             },
 
@@ -1817,7 +1900,10 @@ export const useAppStore = create<AppState>()(
 
                 const [dataRes, opsRes, configRes, faultsRes] = await Promise.all([
                     getEntityData(client, entityType, entityId).catch(() => ({ data: undefined, error: undefined })),
-                    getEntityOperations(client, entityType, entityId).catch(() => ({ data: undefined, error: undefined })),
+                    getEntityOperations(client, entityType, entityId).catch(() => ({
+                        data: undefined,
+                        error: undefined,
+                    })),
                     getEntityConfigurations(client, entityType, entityId).catch(() => ({
                         data: undefined,
                         error: undefined,

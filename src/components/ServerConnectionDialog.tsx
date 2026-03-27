@@ -52,8 +52,8 @@ export function ServerConnectionDialog({ open, onOpenChange }: ServerConnectionD
                             <Server className="w-5 h-5 text-primary" />
                         </div>
                         <div>
-                            <DialogTitle>Connect to SOVD Server</DialogTitle>
-                            <DialogDescription>Enter the URL of your SOVD server</DialogDescription>
+                            <DialogTitle>Connect to ros2_medkit Gateway</DialogTitle>
+                            <DialogDescription>Enter the URL of your ros2_medkit gateway</DialogDescription>
                         </div>
                     </div>
                 </DialogHeader>
@@ -65,7 +65,7 @@ export function ServerConnectionDialog({ open, onOpenChange }: ServerConnectionD
                         </label>
                         <Input
                             id="server-url"
-                            placeholder="192.168.1.100:8080 or http://localhost:8080"
+                            placeholder="http://localhost:8080 or https://gateway.local"
                             value={url}
                             onChange={(e) => setUrl(e.target.value)}
                             onKeyDown={handleKeyDown}
