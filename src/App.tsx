@@ -62,17 +62,20 @@ function App() {
         }
     }, [selectedPath]);
 
-    // Auto-connect on mount if we have a stored URL
+    // Auto-connect on mount if we have a stored URL (once only)
     useEffect(() => {
-        if (serverUrl && !isConnected && !autoConnectAttempted.current) {
-            autoConnectAttempted.current = true;
+        if (!serverUrl || isConnected || autoConnectAttempted.current) return;
+        autoConnectAttempted.current = true;
+
+        const timeoutId = setTimeout(() => {
             connect(serverUrl).then((success) => {
                 if (!success) {
-                    toast.error('Auto-connect failed. Please check your server settings.');
                     setShowConnectionDialog(true);
                 }
             });
-        }
+        }, 0);
+
+        return () => clearTimeout(timeoutId);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 

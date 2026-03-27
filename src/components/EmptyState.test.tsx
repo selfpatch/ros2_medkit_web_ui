@@ -12,7 +12,7 @@ describe('EmptyState', () => {
         render(<EmptyState type="no-connection" />);
 
         expect(screen.getByText('No Server Connected')).toBeInTheDocument();
-        expect(screen.getByText('Connect to a SOVD server to browse entities.')).toBeInTheDocument();
+        expect(screen.getByText('Connect to a ros2_medkit gateway to browse entities.')).toBeInTheDocument();
     });
 
     it('renders no-entities state', () => {

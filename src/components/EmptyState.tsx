@@ -11,7 +11,7 @@ export function EmptyState({ type, onAction }: EmptyStateProps) {
         'no-connection': {
             icon: Server,
             title: 'No Server Connected',
-            description: 'Connect to a SOVD server to browse entities.',
+            description: 'Connect to a ros2_medkit gateway to browse entities.',
             actionLabel: 'Connect to Server',
         },
         'no-entities': {
