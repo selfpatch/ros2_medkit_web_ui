@@ -714,13 +714,21 @@ export const useAppStore = create<AppState>()(
             isLoadingFaults: false,
             faultStreamCleanup: null,
 
-            // Connect to SOVD server
+            // Connect to ros2_medkit gateway
             connect: async (url: string) => {
                 set({ isConnecting: true, connectionError: null });
 
                 try {
                     const client = createMedkitClient({ baseUrl: url, fetch: fetch.bind(globalThis) });
-                    const { error: healthError } = await client.GET('/health');
+
+                    // Health check with 5s timeout
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 5000);
+                    const { error: healthError } = await client
+                        .GET('/health', {
+                            signal: controller.signal,
+                        })
+                        .finally(() => clearTimeout(timeoutId));
 
                     if (healthError) {
                         set({
@@ -746,7 +754,13 @@ export const useAppStore = create<AppState>()(
 
                     return true;
                 } catch (error) {
-                    const message = error instanceof Error ? error.message : 'Connection failed';
+                    const isTimeout = error instanceof DOMException && error.name === 'AbortError';
+                    const message = isTimeout
+                        ? 'Connection timed out. Check the URL and ensure the gateway is running.'
+                        : error instanceof Error
+                          ? error.message
+                          : 'Connection failed';
+                    console.error('[store] connect failed:', error);
                     set({
                         isConnecting: false,
                         connectionError: message,
