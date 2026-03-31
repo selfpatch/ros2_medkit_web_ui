@@ -149,7 +149,7 @@ interface RawFaultsResponse {
 export function transformFaultsResponse(rawData: unknown): ListFaultsResponse {
     const data = rawData as RawFaultsResponse;
     const items = (data.items || []).map((f) => transformFault(f as RawFaultItem));
-    return { items, count: data['x-medkit']?.count || items.length };
+    return { items, count: data['x-medkit']?.count ?? items.length };
 }
 
 // =============================================================================
