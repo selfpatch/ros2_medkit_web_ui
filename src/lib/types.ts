@@ -918,4 +918,3 @@ export interface TokenRevokeRequest {
     /** Token type hint */
     token_type_hint?: 'refresh_token' | 'access_token';
 }
-

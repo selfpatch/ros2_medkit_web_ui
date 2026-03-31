@@ -45,11 +45,7 @@ export function getEntityDetail(client: MedkitClient, entityType: SovdResourceEn
 // Configurations
 // =============================================================================
 
-export function getEntityConfigurations(
-    client: MedkitClient,
-    entityType: SovdResourceEntityType,
-    entityId: string
-) {
+export function getEntityConfigurations(client: MedkitClient, entityType: SovdResourceEntityType, entityId: string) {
     switch (entityType) {
         case 'apps':
             return client.GET('/apps/{app_id}/configurations', { params: { path: { app_id: entityId } } });
@@ -149,11 +145,7 @@ export function deleteEntityConfiguration(
     }
 }
 
-export function deleteEntityConfigurations(
-    client: MedkitClient,
-    entityType: SovdResourceEntityType,
-    entityId: string
-) {
+export function deleteEntityConfigurations(client: MedkitClient, entityType: SovdResourceEntityType, entityId: string) {
     switch (entityType) {
         case 'apps':
             return client.DELETE('/apps/{app_id}/configurations', { params: { path: { app_id: entityId } } });
@@ -248,11 +240,7 @@ export function putEntityDataItem(
 // Operations
 // =============================================================================
 
-export function getEntityOperations(
-    client: MedkitClient,
-    entityType: SovdResourceEntityType,
-    entityId: string
-) {
+export function getEntityOperations(client: MedkitClient, entityType: SovdResourceEntityType, entityId: string) {
     switch (entityType) {
         case 'apps':
             return client.GET('/apps/{app_id}/operations', { params: { path: { app_id: entityId } } });
@@ -317,27 +305,21 @@ export function getEntityExecution(
                 params: { path: { app_id: entityId, operation_id: operationId, execution_id: executionId } },
             });
         case 'components':
-            return client.GET(
-                '/components/{component_id}/operations/{operation_id}/executions/{execution_id}',
-                {
-                    params: {
-                        path: { component_id: entityId, operation_id: operationId, execution_id: executionId },
-                    },
-                }
-            );
+            return client.GET('/components/{component_id}/operations/{operation_id}/executions/{execution_id}', {
+                params: {
+                    path: { component_id: entityId, operation_id: operationId, execution_id: executionId },
+                },
+            });
         case 'areas':
             return client.GET('/areas/{area_id}/operations/{operation_id}/executions/{execution_id}', {
                 params: { path: { area_id: entityId, operation_id: operationId, execution_id: executionId } },
             });
         case 'functions':
-            return client.GET(
-                '/functions/{function_id}/operations/{operation_id}/executions/{execution_id}',
-                {
-                    params: {
-                        path: { function_id: entityId, operation_id: operationId, execution_id: executionId },
-                    },
-                }
-            );
+            return client.GET('/functions/{function_id}/operations/{operation_id}/executions/{execution_id}', {
+                params: {
+                    path: { function_id: entityId, operation_id: operationId, execution_id: executionId },
+                },
+            });
     }
 }
 
@@ -354,27 +336,21 @@ export function deleteEntityExecution(
                 params: { path: { app_id: entityId, operation_id: operationId, execution_id: executionId } },
             });
         case 'components':
-            return client.DELETE(
-                '/components/{component_id}/operations/{operation_id}/executions/{execution_id}',
-                {
-                    params: {
-                        path: { component_id: entityId, operation_id: operationId, execution_id: executionId },
-                    },
-                }
-            );
+            return client.DELETE('/components/{component_id}/operations/{operation_id}/executions/{execution_id}', {
+                params: {
+                    path: { component_id: entityId, operation_id: operationId, execution_id: executionId },
+                },
+            });
         case 'areas':
             return client.DELETE('/areas/{area_id}/operations/{operation_id}/executions/{execution_id}', {
                 params: { path: { area_id: entityId, operation_id: operationId, execution_id: executionId } },
             });
         case 'functions':
-            return client.DELETE(
-                '/functions/{function_id}/operations/{operation_id}/executions/{execution_id}',
-                {
-                    params: {
-                        path: { function_id: entityId, operation_id: operationId, execution_id: executionId },
-                    },
-                }
-            );
+            return client.DELETE('/functions/{function_id}/operations/{operation_id}/executions/{execution_id}', {
+                params: {
+                    path: { function_id: entityId, operation_id: operationId, execution_id: executionId },
+                },
+            });
     }
 }
 
@@ -451,11 +427,7 @@ export function deleteEntityFault(
     }
 }
 
-export function deleteEntityFaults(
-    client: MedkitClient,
-    entityType: SovdResourceEntityType,
-    entityId: string
-) {
+export function deleteEntityFaults(client: MedkitClient, entityType: SovdResourceEntityType, entityId: string) {
     switch (entityType) {
         case 'apps':
             return client.DELETE('/apps/{app_id}/faults', { params: { path: { app_id: entityId } } });

@@ -57,12 +57,7 @@ export function RosbagDownloadButton({ snapshot, variant = 'outline', size = 'sm
                 throw new Error('Invalid bulk_data_uri format');
             }
 
-            const result = await downloadBulkData(
-                parsed.entityType,
-                parsed.entityId,
-                parsed.category,
-                parsed.id
-            );
+            const result = await downloadBulkData(parsed.entityType, parsed.entityId, parsed.category, parsed.id);
 
             if (!result) {
                 throw new Error('Download failed');

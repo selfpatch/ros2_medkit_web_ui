@@ -68,7 +68,15 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
     const [faults, setFaults] = useState<Fault[]>([]);
     const [isLoading, setIsLoading] = useState(false);
 
-    const { selectEntity, getFunctionHosts, fetchEntityData, fetchEntityOperations, fetchConfigurations, listEntityFaults, storeConfigurations } = useAppStore(
+    const {
+        selectEntity,
+        getFunctionHosts,
+        fetchEntityData,
+        fetchEntityOperations,
+        fetchConfigurations,
+        listEntityFaults,
+        storeConfigurations,
+    } = useAppStore(
         useShallow((state) => ({
             selectEntity: state.selectEntity,
             getFunctionHosts: state.getFunctionHosts,
@@ -158,7 +166,7 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                             if (tab.id === 'hosts') count = hosts.length;
                             if (tab.id === 'data') count = topics.length;
                             if (tab.id === 'operations') count = operations.length;
-                            if (tab.id === 'configurations') count = (storeConfigurations.get(functionId)?.length || 0);
+                            if (tab.id === 'configurations') count = storeConfigurations.get(functionId)?.length || 0;
                             if (tab.id === 'faults') count = faults.length;
 
                             return (
@@ -236,7 +244,9 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                                 className="p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left"
                             >
                                 <Settings className="w-4 h-4 text-violet-500 mb-1" />
-                                <div className="text-2xl font-semibold">{(storeConfigurations.get(functionId)?.length || 0)}</div>
+                                <div className="text-2xl font-semibold">
+                                    {storeConfigurations.get(functionId)?.length || 0}
+                                </div>
                                 <div className="text-xs text-muted-foreground">Configs</div>
                             </button>
                             <button

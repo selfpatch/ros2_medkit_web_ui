@@ -43,5 +43,6 @@ describe('mapFaultEntityTypeToResourceType', () => {
         expect(mapFaultEntityTypeToResourceType('function')).toBe('functions');
     });
     it('passes through plural forms', () => expect(mapFaultEntityTypeToResourceType('apps')).toBe('apps'));
-    it('defaults to components for unknown', () => expect(mapFaultEntityTypeToResourceType('unknown')).toBe('components'));
+    it('defaults to components for unknown', () =>
+        expect(mapFaultEntityTypeToResourceType('unknown')).toBe('components'));
 });

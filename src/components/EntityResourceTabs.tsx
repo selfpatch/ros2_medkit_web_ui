@@ -60,7 +60,14 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
     const [operations, setOperations] = useState<Operation[]>([]);
     const [faults, setFaults] = useState<Fault[]>([]);
 
-    const { selectEntity, fetchEntityData, fetchEntityOperations, fetchConfigurations, listEntityFaults, storeConfigurations } = useAppStore(
+    const {
+        selectEntity,
+        fetchEntityData,
+        fetchEntityOperations,
+        fetchConfigurations,
+        listEntityFaults,
+        storeConfigurations,
+    } = useAppStore(
         useShallow((state) => ({
             selectEntity: state.selectEntity,
             fetchEntityData: state.fetchEntityData,
@@ -80,16 +87,12 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
             try {
                 switch (tab) {
                     case 'data': {
-                        const dataRes = await fetchEntityData(entityType, entityId).catch(
-                            () => [] as ComponentTopic[]
-                        );
+                        const dataRes = await fetchEntityData(entityType, entityId).catch(() => [] as ComponentTopic[]);
                         setData(dataRes);
                         break;
                     }
                     case 'operations': {
-                        const opsRes = await fetchEntityOperations(entityType, entityId).catch(
-                            () => [] as Operation[]
-                        );
+                        const opsRes = await fetchEntityOperations(entityType, entityId).catch(() => [] as Operation[]);
                         setOperations(opsRes);
                         break;
                     }
@@ -114,7 +117,15 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
                 setIsLoading(false);
             }
         },
-        [fetchEntityData, fetchEntityOperations, fetchConfigurations, listEntityFaults, entityId, entityType, loadedTabs]
+        [
+            fetchEntityData,
+            fetchEntityOperations,
+            fetchConfigurations,
+            listEntityFaults,
+            entityId,
+            entityType,
+            loadedTabs,
+        ]
     );
 
     // Load resources when tab changes

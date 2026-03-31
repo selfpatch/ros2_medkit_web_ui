@@ -218,8 +218,7 @@ export function transformOperationsResponse(rawData: unknown): Operation[] {
             } else if (kind === 'action' && (rawTypeInfo.goal || rawTypeInfo.result)) {
                 typeInfo = {
                     schema: {
-                        goal:
-                            (rawTypeInfo.goal ? convertJsonSchemaToTopicSchema(rawTypeInfo.goal) : undefined) ?? {},
+                        goal: (rawTypeInfo.goal ? convertJsonSchemaToTopicSchema(rawTypeInfo.goal) : undefined) ?? {},
                         result:
                             (rawTypeInfo.result ? convertJsonSchemaToTopicSchema(rawTypeInfo.result) : undefined) ?? {},
                         feedback:
