@@ -17,7 +17,7 @@ import type {
     VersionInfo,
     SovdFunction,
 } from './types';
-import { createMedkitClient, type MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
+import { createMedkitClient, normalizeBaseUrl, type MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
 import type { SovdResourceEntityType } from './types';
 import {
     transformFaultsResponse,
@@ -1186,12 +1186,16 @@ export const useAppStore = create<AppState>()(
                 set({ isRefreshing: true });
 
                 try {
-                    const entityType = `${selectedEntity.type}s` as SovdResourceEntityType;
+                    const typeMap: Record<string, SovdResourceEntityType> = {
+                        area: 'areas',
+                        component: 'components',
+                        app: 'apps',
+                        function: 'functions',
+                    };
+                    const entityType = typeMap[selectedEntity.type];
                     const entityId = selectedEntity.id;
 
-                    // Only refresh actual entities (area, component, app, function)
-                    const validTypes: SovdResourceEntityType[] = ['areas', 'components', 'apps', 'functions'];
-                    if (!validTypes.includes(entityType)) {
+                    if (!entityType) {
                         // For non-entity nodes (topic, fault, parameter), just clear refreshing
                         set({ isRefreshing: false });
                         return;
@@ -1769,6 +1773,9 @@ export const useAppStore = create<AppState>()(
                         if (running) {
                             const message = error instanceof Error ? error.message : 'Fault stream error';
                             toast.error(`Fault stream error: ${message}`);
+                            // Clear stream state so polling fallback can activate
+                            cleanup();
+                            set({ faultStreamCleanup: null });
                         }
                     }
                 };
@@ -1792,24 +1799,7 @@ export const useAppStore = create<AppState>()(
                 if (!client) return [];
                 const { data, error: fetchError } = await getEntityData(client, entityType, entityId);
                 if (fetchError) return [];
-                console.warn(
-                    '[fetchEntityData] raw items:',
-                    (data as Record<string, unknown>)?.items ? 'present' : 'MISSING',
-                    'x-medkit in first:',
-                    JSON.stringify(
-                        ((data as Record<string, unknown>)?.items as Array<Record<string, unknown>>)?.[0]?.['x-medkit']
-                    ).slice(0, 200)
-                );
-                const result = transformDataResponse(data);
-                console.warn(
-                    '[fetchEntityData] transformed:',
-                    result.length,
-                    'items, first type_info:',
-                    !!result[0]?.type_info,
-                    'first type:',
-                    result[0]?.type
-                );
-                return result;
+                return transformDataResponse(data);
             },
 
             fetchEntityOperations: async (entityType: SovdResourceEntityType, entityId: string) => {
@@ -1857,7 +1847,15 @@ export const useAppStore = create<AppState>()(
             ) => {
                 const { client } = get();
                 if (!client) return;
-                await putEntityDataItem(client, entityType, entityId, dataId, request);
+                try {
+                    const { error } = await putEntityDataItem(client, entityType, entityId, dataId, request);
+                    if (error) {
+                        toast.error(`Failed to publish: ${(error as { message?: string }).message || 'Unknown error'}`);
+                    }
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : 'Unknown error';
+                    toast.error(`Failed to publish: ${message}`);
+                }
             },
 
             getServerCapabilities: async () => {
@@ -1891,12 +1889,20 @@ export const useAppStore = create<AppState>()(
                 const filename = fileDesc?.name || fileId;
 
                 // Download binary via fetch (openapi-fetch doesn't support blob responses)
-                const baseUrl = serverUrl.replace(/\/+$/, '');
+                const baseUrl = normalizeBaseUrl(serverUrl);
                 const downloadUrl = `${baseUrl}/${entityType}/${encodeURIComponent(entityId)}/bulk-data/${encodeURIComponent(category)}/${encodeURIComponent(fileId)}`;
-                const response = await fetch(downloadUrl);
-                if (!response.ok) return null;
-                const blob = await response.blob();
-                return { blob, filename };
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 300_000);
+                try {
+                    const response = await fetch(downloadUrl, { signal: controller.signal });
+                    clearTimeout(timer);
+                    if (!response.ok) return null;
+                    const blob = await response.blob();
+                    return { blob, filename };
+                } catch {
+                    clearTimeout(timer);
+                    return null;
+                }
             },
 
             getFunctionHosts: async (functionId: string) => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useShallow } from 'zustand/shallow';
 import { Database, Zap, Settings, AlertTriangle, Loader2, MessageSquare } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -56,6 +56,8 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
         configurations: false,
         faults: false,
     });
+    const loadedTabsRef = useRef(loadedTabs);
+    loadedTabsRef.current = loadedTabs;
     const [data, setData] = useState<ComponentTopic[]>([]);
     const [operations, setOperations] = useState<Operation[]>([]);
     const [faults, setFaults] = useState<Fault[]>([]);
@@ -81,7 +83,7 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
     // Lazy load resources for the active tab
     const loadTabResources = useCallback(
         async (tab: ResourceTab) => {
-            if (loadedTabs[tab]) return;
+            if (loadedTabsRef.current[tab]) return;
 
             setIsLoading(true);
             try {
@@ -117,15 +119,8 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
                 setIsLoading(false);
             }
         },
-        [
-            fetchEntityData,
-            fetchEntityOperations,
-            fetchConfigurations,
-            listEntityFaults,
-            entityId,
-            entityType,
-            loadedTabs,
-        ]
+
+        [fetchEntityData, fetchEntityOperations, fetchConfigurations, listEntityFaults, entityId, entityType]
     );
 
     // Load resources when tab changes
