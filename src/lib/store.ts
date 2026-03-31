@@ -205,7 +205,7 @@ export interface AppState {
  * Resources (data, operations, configurations, faults) are shown in the detail panel,
  * not as tree nodes.
  */
-function toTreeNode(entity: SovdEntity, parentPath: string = ''): EntityTreeNode {
+export function toTreeNode(entity: SovdEntity, parentPath: string = ''): EntityTreeNode {
     const path = parentPath ? `${parentPath}/${entity.id}` : `/${entity.id}`;
     const entityType = entity.type.toLowerCase();
 
@@ -240,7 +240,7 @@ function toTreeNode(entity: SovdEntity, parentPath: string = ''): EntityTreeNode
 /**
  * Recursively update a node in the tree
  */
-function updateNodeInTree(
+export function updateNodeInTree(
     nodes: EntityTreeNode[],
     targetPath: string,
     updater: (node: EntityTreeNode) => EntityTreeNode
@@ -262,7 +262,7 @@ function updateNodeInTree(
 /**
  * Find a node in the tree by path
  */
-function findNode(nodes: EntityTreeNode[], path: string): EntityTreeNode | null {
+export function findNode(nodes: EntityTreeNode[], path: string): EntityTreeNode | null {
     for (const node of nodes) {
         if (node.path === path) {
             return node;
@@ -557,7 +557,7 @@ function handleOperationSelection(ctx: SelectionContext): SelectionResult | null
  * Tree paths: /server/<areaId> (depth 1), /server/<areaId>/<componentId> (depth 2),
  * /server/<areaId>/<componentId>/<appId> (depth 3)
  */
-function inferEntityTypeFromDepth(depth: number): SovdResourceEntityType {
+export function inferEntityTypeFromDepth(depth: number): SovdResourceEntityType {
     if (depth <= 1) return 'areas';
     if (depth === 2) return 'components';
     return 'apps';
@@ -568,7 +568,7 @@ function inferEntityTypeFromDepth(depth: number): SovdResourceEntityType {
  * Tree paths: /server/<areaId>/<componentId>/<appId>/data/<topicName>
  * Returns: { entityType, entityId, resource?, resourceId? }
  */
-function parseTreePath(path: string): {
+export function parseTreePath(path: string): {
     entityType: SovdResourceEntityType;
     entityId: string;
     resource?: 'data' | 'operations' | 'configurations' | 'faults';
