@@ -958,15 +958,34 @@ export const useAppStore = create<AppState>()(
                             );
                             loadedEntities = components.map((e: SovdEntity) => toTreeNode(e, path));
                         } else if (isComponentOrSubcomponent) {
-                            // Load apps (hosts) for this component
-                            const appsRes = await client.GET('/components/{component_id}/hosts', {
-                                params: { path: { component_id: node.id } },
-                            });
+                            // Load subcomponents and apps (hosts) in parallel
+                            const [subcompsRes, appsRes] = await Promise.all([
+                                client
+                                    .GET('/components/{component_id}/subcomponents', {
+                                        params: { path: { component_id: node.id } },
+                                    })
+                                    .catch(() => ({ data: undefined })),
+                                client.GET('/components/{component_id}/hosts', {
+                                    params: { path: { component_id: node.id } },
+                                }),
+                            ]);
+
+                            const rawSubcomps = subcompsRes.data
+                                ? unwrapItems<Record<string, unknown>>(subcompsRes.data)
+                                : [];
+                            const subcomponents = rawSubcomps.map(
+                                (e) => ({ ...e, type: 'subcomponent' }) as unknown as SovdEntity
+                            );
+                            const subcompNodes = subcomponents.map((e: SovdEntity) => toTreeNode(e, path));
+
                             const rawApps = appsRes.data ? unwrapItems<Record<string, unknown>>(appsRes.data) : [];
                             const apps = rawApps.map((e) => ({ ...e, type: 'app' }) as unknown as SovdEntity);
-                            loadedEntities = apps.map((app: SovdEntity) =>
+                            const appNodes = apps.map((app: SovdEntity) =>
                                 toTreeNode({ ...app, type: 'app', hasChildren: false }, path)
                             );
+
+                            // Subcomponents first, then apps
+                            loadedEntities = [...subcompNodes, ...appNodes];
                         } else if (isFunction) {
                             // Load hosts (apps) for this function
                             const hostsRes = await client
