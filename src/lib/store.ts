@@ -860,10 +860,22 @@ export const useAppStore = create<AppState>()(
                         });
                     } else {
                         // Logical view: Areas -> Components -> Apps
+                        // Areas are optional - if none exist, fall back to components
                         const areasRes = await client.GET('/areas');
                         const rawAreas = areasRes.data ? unwrapItems<Record<string, unknown>>(areasRes.data) : [];
-                        const entities = rawAreas.map((e) => ({ ...e, type: 'area' }) as unknown as SovdEntity);
-                        children = entities.map((e: SovdEntity) => toTreeNode(e, '/server'));
+
+                        if (rawAreas.length > 0) {
+                            const entities = rawAreas.map((e) => ({ ...e, type: 'area' }) as unknown as SovdEntity);
+                            children = entities.map((e: SovdEntity) => toTreeNode(e, '/server'));
+                        } else {
+                            // No areas - load components directly under server
+                            const compsRes = await client.GET('/components');
+                            const rawComps = compsRes.data ? unwrapItems<Record<string, unknown>>(compsRes.data) : [];
+                            const entities = rawComps.map(
+                                (e) => ({ ...e, type: 'component' }) as unknown as SovdEntity
+                            );
+                            children = entities.map((e: SovdEntity) => toTreeNode(e, '/server'));
+                        }
                     }
 
                     // Create server root node
@@ -911,9 +923,8 @@ export const useAppStore = create<AppState>()(
                 // These load their direct children
                 const nodeType = node?.type?.toLowerCase() || '';
 
-                // Handle server node - children (areas) are already loaded in loadRootEntities
+                // Handle server node - children (areas or components) are already loaded in loadRootEntities
                 if (nodeType === 'server') {
-                    // Server children (areas) are pre-loaded, nothing to do
                     return;
                 }
 
