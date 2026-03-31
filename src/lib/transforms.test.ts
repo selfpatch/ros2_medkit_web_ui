@@ -386,7 +386,9 @@ describe('transformDataResponse', () => {
     });
 
     it('maps direction "publish" to isPublisher=true, isSubscriber=false', () => {
-        const result = transformDataResponse({ items: [makeDataItem({ 'x-medkit': { ros2: { direction: 'publish' } } })] });
+        const result = transformDataResponse({
+            items: [makeDataItem({ 'x-medkit': { ros2: { direction: 'publish' } } })],
+        });
         expect(result[0]?.isPublisher).toBe(true);
         expect(result[0]?.isSubscriber).toBe(false);
     });

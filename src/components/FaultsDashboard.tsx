@@ -409,7 +409,15 @@ export function FaultsDashboard() {
     const [groupByEntity, setGroupByEntity] = useState(true);
 
     // Use shared faults state from store
-    const { faults, isLoadingFaults, isConnected, fetchFaults, clearFault, getFaultWithEnvironmentData, hasFaultStream } = useAppStore(
+    const {
+        faults,
+        isLoadingFaults,
+        isConnected,
+        fetchFaults,
+        clearFault,
+        getFaultWithEnvironmentData,
+        hasFaultStream,
+    } = useAppStore(
         useShallow((state) => ({
             faults: state.faults,
             isLoadingFaults: state.isLoadingFaults,
@@ -490,11 +498,7 @@ export function FaultsDashboard() {
                     setLoadingDetails((prev) => new Set([...prev, faultCode]));
                     try {
                         const entityGroup = mapFaultEntityTypeToResourceType(fault.entity_type);
-                        const details = await getFaultWithEnvironmentData(
-                            entityGroup,
-                            fault.entity_id,
-                            faultCode
-                        );
+                        const details = await getFaultWithEnvironmentData(entityGroup, fault.entity_id, faultCode);
                         setFaultDetails((prev) => new Map(prev).set(faultCode, details as FaultResponse));
                     } catch (err) {
                         console.error('Failed to fetch fault details:', err);

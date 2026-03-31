@@ -321,11 +321,7 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
                             ? mapFaultEntityTypeToResourceType(fault.entity_type)
                             : entityType;
                         const detailEntityId = fault?.entity_id || entityId;
-                        const details = await getFaultWithEnvironmentData(
-                            detailEntityType,
-                            detailEntityId,
-                            faultCode
-                        );
+                        const details = await getFaultWithEnvironmentData(detailEntityType, detailEntityId, faultCode);
                         setFaultDetails((prev) => new Map(prev).set(faultCode, details as FaultResponse));
                     } catch (err) {
                         console.error('Failed to fetch fault details:', err);
