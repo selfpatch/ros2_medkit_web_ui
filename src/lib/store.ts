@@ -319,9 +319,10 @@ async function handleTopicSelection(ctx: SelectionContext, client: MedkitClient)
         const entityType = `${parentType}s` as SovdResourceEntityType;
         const entityId = parentNode?.id || '';
 
-        // Fetch the specific data item for this topic
+        // Fetch the specific data item and transform to ComponentTopic
         const { data: topicDetail } = await getEntityDataItem(client, entityType, entityId, topicName);
-        const topicData = topicDetail as unknown as ComponentTopic | null;
+        const transformed = topicDetail ? transformDataResponse({ items: [topicDetail] }) : [];
+        const topicData = transformed[0] || null;
 
         if (topicData) {
             // Update tree with full data merged with direction info
@@ -1753,15 +1754,27 @@ export const useAppStore = create<AppState>()(
                 const stream = client.streams.faults();
                 let running = true;
 
+                const cleanup = () => {
+                    running = false;
+                    stream.close();
+                };
+
                 const consume = async () => {
                     try {
                         for await (const event of stream) {
                             if (!running) break;
 
                             const rawData = event.data as Record<string, unknown>;
-                            const faultData = (rawData.fault || rawData) as Parameters<typeof transformFault>[0];
+                            const faultPayload = (rawData.fault ?? rawData) as unknown;
 
-                            if (!('fault_code' in faultData)) continue;
+                            if (
+                                typeof faultPayload !== 'object' ||
+                                faultPayload === null ||
+                                !('fault_code' in faultPayload)
+                            ) {
+                                continue;
+                            }
+                            const faultData = faultPayload as Parameters<typeof transformFault>[0];
                             const fault = transformFault(faultData);
 
                             if (event.event === 'fault_cleared') {
@@ -1811,12 +1824,6 @@ export const useAppStore = create<AppState>()(
                 };
 
                 consume();
-
-                const cleanup = () => {
-                    running = false;
-                    stream.close();
-                };
-
                 set({ faultStreamCleanup: cleanup });
             },
 

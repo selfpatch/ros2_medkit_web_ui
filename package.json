@@ -37,9 +37,8 @@
         "@radix-ui/react-slot": "^1.2.3",
         "@radix-ui/react-switch": "^1.2.6",
         "@radix-ui/react-tooltip": "^1.2.8",
-        "@selfpatch/ros2-medkit-client-ts": "^0.1.0",
+        "@selfpatch/ros2-medkit-client-ts": "^0.1.1",
         "@tailwindcss/vite": "^4.1.14",
-        "@testing-library/dom": "^10.4.1",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "cmdk": "^1.1.1",
@@ -55,6 +54,7 @@
     "devDependencies": {
         "@eslint/js": "^9.36.0",
         "@tailwindcss/postcss": "^4.1.14",
+        "@testing-library/dom": "^10.4.1",
         "@testing-library/jest-dom": "^6.9.1",
         "@testing-library/react": "^16.3.2",
         "@testing-library/user-event": "^14.6.1",

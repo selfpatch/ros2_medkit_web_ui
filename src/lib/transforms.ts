@@ -270,7 +270,7 @@ export function transformDataResponse(rawData: unknown): ComponentTopic[] {
         const topicName = item.name || item['x-medkit']?.ros2?.topic || item.id;
         return {
             topic: topicName,
-            timestamp: Date.now() * 1000000,
+            timestamp: Date.now(),
             data: null,
             status: 'metadata_only' as const,
             type: item['x-medkit']?.ros2?.type,
