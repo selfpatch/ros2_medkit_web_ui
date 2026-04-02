@@ -430,7 +430,8 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                 const fetchedData = Array.isArray(dataRes) ? dataRes : [];
                 setTopicsData(fetchedData);
 
-                setResourceCounts(counts);
+                // Use the already-fetched data length instead of a separate request
+                setResourceCounts({ ...counts, data: fetchedData.length });
             } catch {
                 // Silently handle errors - counts will stay at 0
             }

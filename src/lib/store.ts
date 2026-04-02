@@ -1955,8 +1955,10 @@ export const useAppStore = create<AppState>()(
                 const { client } = get();
                 if (!client) return { data: 0, operations: 0, configurations: 0, faults: 0 };
 
-                const [dataRes, opsRes, configRes, faultsRes] = await Promise.all([
-                    getEntityData(client, entityType, entityId).catch(() => ({ data: undefined, error: undefined })),
+                // Note: data count is NOT fetched here to avoid a duplicate request.
+                // The caller (EntityDetailPanel) already fetches entity data via fetchEntityData
+                // and overrides counts.data with the result length.
+                const [opsRes, configRes, faultsRes] = await Promise.all([
                     getEntityOperations(client, entityType, entityId).catch(() => ({
                         data: undefined,
                         error: undefined,
@@ -1969,7 +1971,7 @@ export const useAppStore = create<AppState>()(
                 ]);
 
                 return {
-                    data: dataRes.data ? unwrapItems(dataRes.data).length : 0,
+                    data: 0,
                     operations: opsRes.data ? unwrapItems(opsRes.data).length : 0,
                     configurations: configRes.data
                         ? transformConfigurationsResponse(configRes.data, entityId).parameters.length

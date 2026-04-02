@@ -68,6 +68,10 @@ export interface RawFaultItem {
     last_occurred?: number;
     occurrence_count?: number;
     reporting_sources?: string[];
+    /** Entity type if provided by the gateway (not currently included in
+     *  FaultManager::fault_to_json, but accepted for forward compatibility).
+     *  Falls back to 'app' since faults are reported by ROS 2 nodes (apps). */
+    entity_type?: string;
 }
 
 /**
@@ -115,6 +119,11 @@ export function transformFault(apiFault: RawFaultItem): Fault {
     const nodeName = source.split('/').pop() || 'unknown';
     const entity_id = nodeName.replace(/_/g, '-');
 
+    // Use entity_type from raw data if provided, otherwise default to 'app'.
+    // The gateway's fault_to_json does not currently include entity_type, but
+    // faults are always reported by ROS 2 nodes which map to apps.
+    const entity_type = apiFault.entity_type || 'app';
+
     return {
         code: apiFault.fault_code,
         message: apiFault.description,
@@ -122,7 +131,7 @@ export function transformFault(apiFault: RawFaultItem): Fault {
         status,
         timestamp: new Date(apiFault.first_occurred * 1000).toISOString(),
         entity_id,
-        entity_type: 'app',
+        entity_type,
         parameters: {
             occurrence_count: apiFault.occurrence_count,
             last_occurred: apiFault.last_occurred,
@@ -147,6 +156,7 @@ interface RawFaultsResponse {
  * Transform the raw gateway faults list response into `ListFaultsResponse`.
  */
 export function transformFaultsResponse(rawData: unknown): ListFaultsResponse {
+    if (!rawData || typeof rawData !== 'object') return { items: [], count: 0 };
     const data = rawData as RawFaultsResponse;
     const items = (data.items || []).map((f) => transformFault(f as RawFaultItem));
     return { items, count: data['x-medkit']?.count ?? items.length };
@@ -187,6 +197,7 @@ interface RawOperation {
  * Extracts `kind`, `path`, and `type` from the `x-medkit` vendor extension.
  */
 export function transformOperationsResponse(rawData: unknown): Operation[] {
+    if (!rawData || typeof rawData !== 'object') return [];
     const rawOps = unwrapItems<RawOperation>(rawData);
     return rawOps.map((op) => {
         const xMedkit = op['x-medkit'];
@@ -262,6 +273,7 @@ interface RawDataItem {
  * Extracts topic metadata (type, direction, schema) from the `x-medkit` extension.
  */
 export function transformDataResponse(rawData: unknown): ComponentTopic[] {
+    if (!rawData || typeof rawData !== 'object') return [];
     const dataItems = unwrapItems<RawDataItem>(rawData);
     return dataItems.map((item) => {
         const rawTypeInfo = item['x-medkit']?.type_info;
@@ -310,6 +322,9 @@ interface RawConfigurationsResponse {
  * is used as a fallback when `x-medkit` fields are absent.
  */
 export function transformConfigurationsResponse(rawData: unknown, entityId: string): ComponentConfigurations {
+    if (!rawData || typeof rawData !== 'object') {
+        return { component_id: entityId, node_name: entityId, parameters: [] };
+    }
     const data = rawData as RawConfigurationsResponse;
     const xMedkit = data['x-medkit'] || {};
     return {
@@ -349,6 +364,9 @@ interface RawBulkDataDescriptor {
  *   - `created_at`   → `creation_date`
  */
 export function transformBulkDataDescriptor(raw: unknown): BulkDataDescriptor {
+    if (!raw || typeof raw !== 'object') {
+        return { id: '', name: '', mimetype: '', size: 0, creation_date: '' };
+    }
     const r = raw as RawBulkDataDescriptor;
     return {
         id: r.id,

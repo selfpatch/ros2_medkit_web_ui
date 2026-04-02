@@ -89,8 +89,23 @@ describe('transformFault', () => {
         expect(result.timestamp).toBe(new Date(1700000000 * 1000).toISOString());
     });
 
-    it('sets entity_type to "app"', () => {
+    it('defaults entity_type to "app" when not in raw data', () => {
         const result = transformFault(makeFaultInput());
+        expect(result.entity_type).toBe('app');
+    });
+
+    it('uses entity_type from raw data when provided', () => {
+        const result = transformFault(makeFaultInput({ entity_type: 'component' }));
+        expect(result.entity_type).toBe('component');
+    });
+
+    it('uses entity_type "area" from raw data', () => {
+        const result = transformFault(makeFaultInput({ entity_type: 'area' }));
+        expect(result.entity_type).toBe('area');
+    });
+
+    it('falls back to "app" when entity_type is empty string', () => {
+        const result = transformFault(makeFaultInput({ entity_type: '' }));
         expect(result.entity_type).toBe('app');
     });
 
