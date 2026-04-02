@@ -112,12 +112,12 @@ describe('transformFault', () => {
     describe('entity_id extraction from reporting_sources', () => {
         it('extracts last segment of node path', () => {
             const result = transformFault(makeFaultInput({ reporting_sources: ['/powertrain/engine_monitor'] }));
-            expect(result.entity_id).toBe('engine-monitor');
+            expect(result.entity_id).toBe('engine_monitor');
         });
 
-        it('converts underscores to hyphens in entity_id', () => {
+        it('preserves underscores in entity_id', () => {
             const result = transformFault(makeFaultInput({ reporting_sources: ['/ns/my_node_name'] }));
-            expect(result.entity_id).toBe('my-node-name');
+            expect(result.entity_id).toBe('my_node_name');
         });
 
         it('uses "unknown" when reporting_sources is empty', () => {

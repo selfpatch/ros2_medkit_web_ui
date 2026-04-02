@@ -83,7 +83,7 @@ export interface RawFaultItem {
  *   - `severity` (number) + `severity_label` → `severity` (string)
  *   - `status` (CONFIRMED / PREFAILED / ...) → `status` (active / pending / cleared / healed)
  *   - `first_occurred` (unix seconds) → `timestamp` (ISO 8601)
- *   - `reporting_sources[0]` last path segment → `entity_id` (underscores replaced by hyphens)
+ *   - `reporting_sources[0]` last path segment → `entity_id`
  */
 export function transformFault(apiFault: RawFaultItem): Fault {
     // Map severity number/label to FaultSeverity.
@@ -113,11 +113,9 @@ export function transformFault(apiFault: RawFaultItem): Fault {
 
     // Extract entity info from reporting_sources.
     // reporting_sources contains ROS 2 node paths like "/bridge/diagnostic_bridge".
-    // We take the last segment and convert underscores to hyphens to match
-    // the SOVD app ID convention (e.g., "diagnostic_bridge" → "diagnostic-bridge").
+    // We take the last segment as entity_id (preserving underscores - they match SOVD IDs).
     const source = apiFault.reporting_sources?.[0] || '';
-    const nodeName = source.split('/').pop() || 'unknown';
-    const entity_id = nodeName.replace(/_/g, '-');
+    const entity_id = source.split('/').pop() || 'unknown';
 
     // Use entity_type from raw data if provided, otherwise default to 'app'.
     // The gateway's fault_to_json does not currently include entity_type, but
