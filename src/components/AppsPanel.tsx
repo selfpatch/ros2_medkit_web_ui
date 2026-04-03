@@ -278,7 +278,7 @@ export function AppsPanel({ appId, appName, fqn, nodeName, namespace, componentI
                             <div className="space-y-2">
                                 {topics.map((topic, idx) => {
                                     const cleanName = topic.topic.startsWith('/') ? topic.topic.slice(1) : topic.topic;
-                                    const encodedName = encodeURIComponent(topic.uniqueKey || cleanName);
+                                    const encodedName = encodeURIComponent(cleanName);
                                     const topicPath = `${path}/data/${encodedName}`;
 
                                     return (
