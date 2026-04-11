@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useShallow } from 'zustand/shallow';
-import { Cpu, Database, Zap, Settings, AlertTriangle, ChevronRight, Box, Network, FileCode } from 'lucide-react';
+import { AlertTriangle, Box, ChevronRight, Cpu, Database, FileCode, Network, Settings, Zap } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/lib/store';
-import { ConfigurationPanel } from '@/components/ConfigurationPanel';
-import { FaultsPanel } from '@/components/FaultsPanel';
-import { OperationsPanel } from '@/components/OperationsPanel';
+import {
+    RESOURCE_TABS,
+    renderResourceTabContent,
+    isResourceTabId,
+    type ResourceTabId,
+} from '@/components/resource-tabs';
 import type { ComponentTopic, Operation, Fault } from '@/lib/types';
 
-type AppTab = 'overview' | 'data' | 'operations' | 'configurations' | 'faults';
+type AppTab = 'overview' | ResourceTabId;
 
 interface TabConfig {
     id: AppTab;
@@ -18,13 +21,7 @@ interface TabConfig {
     icon: typeof Database;
 }
 
-const APP_TABS: TabConfig[] = [
-    { id: 'overview', label: 'Overview', icon: Cpu },
-    { id: 'data', label: 'Data', icon: Database },
-    { id: 'operations', label: 'Operations', icon: Zap },
-    { id: 'configurations', label: 'Config', icon: Settings },
-    { id: 'faults', label: 'Faults', icon: AlertTriangle },
-];
+const APP_TABS: TabConfig[] = [{ id: 'overview', label: 'Overview', icon: Cpu }, ...RESOURCE_TABS];
 
 interface AppsPanelProps {
     appId: string;
@@ -313,11 +310,11 @@ export function AppsPanel({ appId, appName, fqn, nodeName, namespace, componentI
                 </Card>
             )}
 
-            {activeTab === 'operations' && <OperationsPanel entityId={appId} entityType="apps" />}
-
-            {activeTab === 'configurations' && <ConfigurationPanel entityId={appId} entityType="apps" />}
-
-            {activeTab === 'faults' && <FaultsPanel entityId={appId} entityType="apps" />}
+            {/* Operations / Configurations / Faults / Logs delegated to the shared helper */}
+            {activeTab !== 'overview' &&
+                activeTab !== 'data' &&
+                isResourceTabId(activeTab) &&
+                renderResourceTabContent(activeTab, appId, 'apps')}
 
             {isLoading && <div className="text-center text-muted-foreground py-4">Loading app resources...</div>}
         </div>

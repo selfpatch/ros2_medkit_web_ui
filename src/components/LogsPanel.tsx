@@ -93,8 +93,13 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
             if (controller.signal.aborted) return;
 
             if (result.errorStatus !== undefined) {
-                if (result.errorStatus === 503) {
-                    setErrorStatus(503);
+                // 404 = entity has no /logs endpoint on this gateway.
+                // 503 = LogManager feature not available on this gateway.
+                // Both are "logs not available" states - show the unavailable card.
+                // Any other error (network failure, 5xx) keeps last-known entries
+                // and surfaces a "Last refresh failed" warning in the toolbar.
+                if (result.errorStatus === 503 || result.errorStatus === 404) {
+                    setErrorStatus(result.errorStatus);
                     setEntries([]);
                     setAggregation(undefined);
                 } else {
@@ -147,6 +152,18 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
         return () => clearInterval(id);
     }, [autoRefreshEnabled, isDocumentVisible, refreshIntervalMs, doFetch]);
 
+    // Reset config-row state when the entity changes so cached values from
+    // the previous entity do not leak into the new one (avoids saving stale
+    // config to a different entity).
+    useEffect(() => {
+        setConfigOpen(false);
+        setConfigLoaded(false);
+        setConfigLoading(false);
+        setConfigSeverity('debug');
+        setConfigMaxEntries(100);
+        setConfigSaving(false);
+    }, [entityId, entityType]);
+
     const trimmedSearch = messageSearch.trim().toLowerCase();
     const displayedEntries = trimmedSearch
         ? entries.filter((e) => e.message.toLowerCase().includes(trimmedSearch))
@@ -161,29 +178,36 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
         const payload = JSON.stringify(displayedEntries, null, 2);
         const blob = new Blob([payload], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
+        // Replace `:` and `.` with `-` to keep the filename valid on Windows
+        // NTFS and avoid browser-specific sanitization surprises.
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const a = document.createElement('a');
         a.href = url;
-        a.download = `logs-${entityType}-${entityId}-${new Date().toISOString()}.json`;
+        a.download = `logs-${entityType}-${entityId}-${timestamp}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     }, [displayedEntries, entityType, entityId]);
 
+    const loadConfig = useCallback(async () => {
+        setConfigLoading(true);
+        const cfg = await getLogsConfiguration(entityType, entityId);
+        if (cfg) {
+            setConfigSeverity(cfg.severity_filter);
+            setConfigMaxEntries(cfg.max_entries);
+            setConfigLoaded(true);
+        }
+        setConfigLoading(false);
+    }, [getLogsConfiguration, entityType, entityId]);
+
     const toggleConfig = useCallback(async () => {
         const next = !configOpen;
         setConfigOpen(next);
         if (next && !configLoaded) {
-            setConfigLoading(true);
-            const cfg = await getLogsConfiguration(entityType, entityId);
-            if (cfg) {
-                setConfigSeverity(cfg.severity_filter);
-                setConfigMaxEntries(cfg.max_entries);
-                setConfigLoaded(true);
-            }
-            setConfigLoading(false);
+            await loadConfig();
         }
-    }, [configOpen, configLoaded, getLogsConfiguration, entityType, entityId]);
+    }, [configOpen, configLoaded, loadConfig]);
 
     const configValid = configMaxEntries >= 1 && configMaxEntries <= 10000;
 
@@ -308,12 +332,14 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                 </CardContent>
             </Card>
         );
-    } else if (errorStatus === 503) {
+    } else if (errorStatus === 503 || errorStatus === 404) {
+        const message =
+            errorStatus === 503 ? 'Logs not available on this gateway' : 'Logs not available for this entity';
         body = (
             <Card>
                 <CardContent className="py-8 text-center">
                     <ScrollText className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                    <p className="text-sm text-muted-foreground">Logs not available on this gateway</p>
+                    <p className="text-sm text-muted-foreground">{message}</p>
                     <button
                         type="button"
                         onClick={() => void doFetch()}
@@ -357,78 +383,89 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                             sources
                         </div>
                     )}
-                    <table className="w-full text-sm">
-                        <thead className="text-xs uppercase text-muted-foreground border-b">
-                            <tr>
-                                <th className="text-left px-3 py-2 w-28">Time</th>
-                                <th className="text-left px-3 py-2 w-20">Severity</th>
-                                <th className="text-left px-3 py-2 w-48">Node</th>
-                                <th className="text-left px-3 py-2">Message</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {displayedEntries.map((entry) => {
-                                const isExpanded = expandedIds.has(entry.id);
-                                return (
-                                    <Fragment key={entry.id}>
-                                        <tr
-                                            className="border-b hover:bg-accent/30 cursor-pointer"
-                                            onClick={() => toggleExpand(entry.id)}
-                                        >
-                                            <td className="px-3 py-1.5 font-mono text-xs whitespace-nowrap">
-                                                {formatTime(entry.timestamp)}
-                                            </td>
-                                            <td className="px-3 py-1.5 text-xs uppercase">{entry.severity}</td>
-                                            <td
-                                                className="px-3 py-1.5 font-mono text-xs truncate max-w-48"
-                                                title={entry.context.node}
+                    <div className="max-h-[60vh] overflow-y-auto">
+                        <table className="w-full text-sm">
+                            <thead className="text-xs uppercase text-muted-foreground border-b sticky top-0 bg-card z-10">
+                                <tr>
+                                    <th className="text-left px-3 py-2 w-28">Time</th>
+                                    <th className="text-left px-3 py-2 w-20">Severity</th>
+                                    <th className="text-left px-3 py-2 w-48">Node</th>
+                                    <th className="text-left px-3 py-2">Message</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {displayedEntries.map((entry) => {
+                                    const isExpanded = expandedIds.has(entry.id);
+                                    return (
+                                        <Fragment key={entry.id}>
+                                            <tr
+                                                className="border-b hover:bg-accent/30 cursor-pointer focus:outline-none focus:bg-accent/40"
+                                                onClick={() => toggleExpand(entry.id)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault();
+                                                        toggleExpand(entry.id);
+                                                    }
+                                                }}
+                                                role="button"
+                                                tabIndex={0}
+                                                aria-expanded={isExpanded}
                                             >
-                                                {entry.context.node}
-                                            </td>
-                                            <td className="px-3 py-1.5 text-xs truncate" title={entry.message}>
-                                                {entry.message}
-                                            </td>
-                                        </tr>
-                                        {isExpanded && (
-                                            <tr className="border-b bg-muted/30">
-                                                <td colSpan={4} className="px-6 py-2 text-xs text-muted-foreground">
-                                                    {entry.context.function || entry.context.file ? (
-                                                        <div className="space-y-1">
-                                                            {entry.context.function && (
-                                                                <div>
-                                                                    Function:{' '}
-                                                                    <span className="font-mono">
-                                                                        {entry.context.function}
-                                                                    </span>
-                                                                </div>
-                                                            )}
-                                                            {entry.context.file && (
-                                                                <div>
-                                                                    Location:{' '}
-                                                                    <span className="font-mono">
-                                                                        {entry.context.file}
-                                                                        {entry.context.line
-                                                                            ? `:${entry.context.line}`
-                                                                            : ''}
-                                                                    </span>
-                                                                </div>
-                                                            )}
-                                                            <div>
-                                                                Full timestamp:{' '}
-                                                                <span className="font-mono">{entry.timestamp}</span>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <div>No source location</div>
-                                                    )}
+                                                <td className="px-3 py-1.5 font-mono text-xs whitespace-nowrap">
+                                                    {formatTime(entry.timestamp)}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-xs uppercase">{entry.severity}</td>
+                                                <td
+                                                    className="px-3 py-1.5 font-mono text-xs truncate max-w-48"
+                                                    title={entry.context.node}
+                                                >
+                                                    {entry.context.node}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-xs truncate" title={entry.message}>
+                                                    {entry.message}
                                                 </td>
                                             </tr>
-                                        )}
-                                    </Fragment>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+                                            {isExpanded && (
+                                                <tr className="border-b bg-muted/30">
+                                                    <td colSpan={4} className="px-6 py-2 text-xs text-muted-foreground">
+                                                        {entry.context.function || entry.context.file ? (
+                                                            <div className="space-y-1">
+                                                                {entry.context.function && (
+                                                                    <div>
+                                                                        Function:{' '}
+                                                                        <span className="font-mono">
+                                                                            {entry.context.function}
+                                                                        </span>
+                                                                    </div>
+                                                                )}
+                                                                {entry.context.file && (
+                                                                    <div>
+                                                                        Location:{' '}
+                                                                        <span className="font-mono">
+                                                                            {entry.context.file}
+                                                                            {entry.context.line
+                                                                                ? `:${entry.context.line}`
+                                                                                : ''}
+                                                                        </span>
+                                                                    </div>
+                                                                )}
+                                                                <div>
+                                                                    Full timestamp:{' '}
+                                                                    <span className="font-mono">{entry.timestamp}</span>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div>No source location</div>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
                 </CardContent>
             </Card>
         );
@@ -442,6 +479,17 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                     {configLoading ? (
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading configuration...
+                        </div>
+                    ) : !configLoaded ? (
+                        <div className="flex items-center gap-3 text-xs">
+                            <span className="text-destructive">Failed to load configuration.</span>
+                            <button
+                                type="button"
+                                onClick={() => void loadConfig()}
+                                className="underline text-muted-foreground hover:text-foreground"
+                            >
+                                Retry
+                            </button>
                         </div>
                     ) : (
                         <>
@@ -475,7 +523,7 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                             <Button
                                 size="sm"
                                 onClick={() => void handleConfigSave()}
-                                disabled={!configValid || configSaving}
+                                disabled={!configValid || configSaving || !configLoaded}
                             >
                                 Save
                             </Button>

@@ -7,7 +7,6 @@ import {
     ArrowUp,
     ArrowDown,
     Database,
-    Zap,
     Settings,
     RefreshCw,
     Box,
@@ -15,7 +14,6 @@ import {
     Cpu,
     GitBranch,
     Home,
-    AlertTriangle,
     Server,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -26,7 +24,7 @@ import { EntityDetailSkeleton } from '@/components/EntityDetailSkeleton';
 import { DataPanel } from '@/components/DataPanel';
 import { ConfigurationPanel } from '@/components/ConfigurationPanel';
 import { OperationsPanel } from '@/components/OperationsPanel';
-import { FaultsPanel } from '@/components/FaultsPanel';
+import { RESOURCE_TABS, renderResourceTabContent, type ResourceTabId } from '@/components/resource-tabs';
 import { AreasPanel } from '@/components/AreasPanel';
 import { AppsPanel } from '@/components/AppsPanel';
 import { FunctionsPanel } from '@/components/FunctionsPanel';
@@ -35,21 +33,16 @@ import { FaultsDashboard } from '@/components/FaultsDashboard';
 import { useAppStore, type AppState } from '@/lib/store';
 import type { ComponentTopic, Parameter, SovdResourceEntityType } from '@/lib/types';
 
-type ComponentTab = 'data' | 'operations' | 'configurations' | 'faults';
+type ComponentTab = ResourceTabId;
 
 interface TabConfig {
     id: ComponentTab;
     label: string;
     icon: typeof Database;
-    description: string;
+    description?: string;
 }
 
-const COMPONENT_TABS: TabConfig[] = [
-    { id: 'data', label: 'Data', icon: Database, description: 'Data items & messages' },
-    { id: 'operations', label: 'Operations', icon: Zap, description: 'Services & actions' },
-    { id: 'configurations', label: 'Config', icon: Settings, description: 'Parameters' },
-    { id: 'faults', label: 'Faults', icon: AlertTriangle, description: 'Diagnostic trouble codes' },
-];
+const COMPONENT_TABS: TabConfig[] = RESOURCE_TABS;
 
 /**
  * Determine entity type for API calls based on entity type
@@ -113,26 +106,18 @@ function ComponentTabContent({
     entityType,
     topicsData,
 }: ComponentTabContentProps) {
-    switch (activeTab) {
-        case 'data':
-            return (
-                <DataTabContent
-                    selectedPath={selectedPath}
-                    selectedEntity={selectedEntity}
-                    hasTopicsInfo={hasTopicsInfo}
-                    selectEntity={selectEntity}
-                    topicsData={topicsData}
-                />
-            );
-        case 'operations':
-            return <OperationsPanel entityId={entityId} entityType={entityType} />;
-        case 'configurations':
-            return <ConfigurationPanel entityId={entityId} entityType={entityType} />;
-        case 'faults':
-            return <FaultsPanel entityId={entityId} entityType={entityType} />;
-        default:
-            return null;
+    if (activeTab === 'data') {
+        return (
+            <DataTabContent
+                selectedPath={selectedPath}
+                selectedEntity={selectedEntity}
+                hasTopicsInfo={hasTopicsInfo}
+                selectEntity={selectEntity}
+                topicsData={topicsData}
+            />
+        );
     }
+    return <>{renderResourceTabContent(activeTab, entityId, entityType)}</>;
 }
 
 /**
@@ -351,12 +336,13 @@ interface EntityDetailPanelProps {
 
 export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntitySelect }: EntityDetailPanelProps) {
     const [activeTab, setActiveTab] = useState<ComponentTab>('data');
-    const [resourceCounts, setResourceCounts] = useState<{
-        data: number;
-        operations: number;
-        configurations: number;
-        faults: number;
-    }>({ data: 0, operations: 0, configurations: 0, faults: 0 });
+    const [resourceCounts, setResourceCounts] = useState<Record<ResourceTabId, number>>({
+        data: 0,
+        operations: 0,
+        configurations: 0,
+        faults: 0,
+        logs: 0,
+    });
     // Store fetched topics data for the Data tab
     const [topicsData, setTopicsData] = useState<ComponentTopic[]>([]);
 
@@ -393,9 +379,16 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
 
     // Fetch resource counts when entity changes
     useEffect(() => {
+        const emptyCounts: Record<ResourceTabId, number> = {
+            data: 0,
+            operations: 0,
+            configurations: 0,
+            faults: 0,
+            logs: 0,
+        };
         const doFetchResourceCounts = async () => {
             if (!selectedEntity) {
-                setResourceCounts({ data: 0, operations: 0, configurations: 0, faults: 0 });
+                setResourceCounts(emptyCounts);
                 setTopicsData([]);
                 return;
             }
@@ -408,7 +401,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
 
             // Only fetch counts for entity types that have resources
             if (!isComponent && !isApp && !isArea && !isFunction) {
-                setResourceCounts({ data: 0, operations: 0, configurations: 0, faults: 0 });
+                setResourceCounts(emptyCounts);
                 setTopicsData([]);
                 return;
             }
@@ -431,7 +424,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                 setTopicsData(fetchedData);
 
                 // Use the already-fetched data length instead of a separate request
-                setResourceCounts({ ...counts, data: fetchedData.length });
+                setResourceCounts({ ...counts, data: fetchedData.length, logs: 0 });
             } catch {
                 // Silently handle errors - counts will stay at 0
             }
