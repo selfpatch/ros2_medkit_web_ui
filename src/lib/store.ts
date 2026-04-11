@@ -1897,9 +1897,17 @@ export const useAppStore = create<AppState>()(
             getLogsConfiguration: async (entityType, entityId) => {
                 const { client } = get();
                 if (!client) return null;
-                const { data, error: fetchError } = await getEntityLogsConfiguration(client, entityType, entityId);
-                if (fetchError) return null;
-                return (data as LogsConfiguration) ?? null;
+                try {
+                    const { data, error: fetchError } = await getEntityLogsConfiguration(client, entityType, entityId);
+                    if (fetchError) {
+                        console.error('[store] getLogsConfiguration failed', fetchError);
+                        return null;
+                    }
+                    return (data as LogsConfiguration) ?? null;
+                } catch (err) {
+                    console.error('[store] getLogsConfiguration failed', err);
+                    return null;
+                }
             },
 
             updateLogsConfiguration: async (entityType, entityId, config) => {

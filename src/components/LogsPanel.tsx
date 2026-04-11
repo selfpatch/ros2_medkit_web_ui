@@ -539,9 +539,19 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
     );
 }
 
+/**
+ * Format an ISO 8601 timestamp as `HH:MM:SS.sss` (UTC).
+ *
+ * Gateway timestamps have nanosecond precision (e.g. `...56.789000000Z`).
+ * `new Date()` parsing of sub-millisecond fractional seconds is unreliable
+ * across JS engines, so we first normalize by truncating fractional seconds
+ * to 3 digits. On any parsing failure we return `--:--:--.---` instead of
+ * the raw ISO string, which would overflow the fixed-width Time column.
+ */
 function formatTime(isoTimestamp: string): string {
-    const date = new Date(isoTimestamp);
-    if (Number.isNaN(date.getTime())) return isoTimestamp;
+    const normalized = isoTimestamp.replace(/(\.\d{3})\d+(Z|[+-]\d{2}:?\d{2})/, '$1$2');
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) return '--:--:--.---';
     const h = String(date.getUTCHours()).padStart(2, '0');
     const m = String(date.getUTCMinutes()).padStart(2, '0');
     const s = String(date.getUTCSeconds()).padStart(2, '0');
