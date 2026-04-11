@@ -44,7 +44,11 @@ import {
     deleteEntityConfiguration,
     deleteEntityConfigurations,
     getEntityBulkData,
+    getEntityLogs,
+    getEntityLogsConfiguration,
+    putEntityLogsConfiguration,
 } from './api-dispatch';
+import type { LogCollection, LogsConfiguration, LogsFetchResult, LogsQueryParams } from './log-types';
 
 const STORAGE_KEY = 'ros2_medkit_web_ui_server_url';
 const EXECUTION_POLL_INTERVAL_MS = 1000;
@@ -166,6 +170,18 @@ export interface AppState {
         entityType: SovdResourceEntityType,
         entityId: string
     ) => Promise<{ items: Fault[]; count: number }>;
+    fetchEntityLogs: (
+        entityType: SovdResourceEntityType,
+        entityId: string,
+        params: LogsQueryParams,
+        signal?: AbortSignal
+    ) => Promise<LogsFetchResult>;
+    getLogsConfiguration: (entityType: SovdResourceEntityType, entityId: string) => Promise<LogsConfiguration | null>;
+    updateLogsConfiguration: (
+        entityType: SovdResourceEntityType,
+        entityId: string,
+        config: LogsConfiguration
+    ) => Promise<boolean>;
     getFaultWithEnvironmentData: (
         entityType: SovdResourceEntityType,
         entityId: string,
@@ -1853,6 +1869,57 @@ export const useAppStore = create<AppState>()(
                 const { data, error: fetchError } = await getEntityFaults(client, entityType, entityId);
                 if (fetchError) return { items: [], count: 0 };
                 return transformFaultsResponse(data);
+            },
+
+            fetchEntityLogs: async (entityType, entityId, params, signal) => {
+                const { client } = get();
+                if (!client) return { items: [], errorStatus: -1 };
+                try {
+                    const { data, error, response } = await getEntityLogs(client, entityType, entityId, params, signal);
+                    if (error) {
+                        return {
+                            items: [],
+                            errorStatus: response?.status ?? -1,
+                        };
+                    }
+                    const collection = (data as LogCollection) ?? { items: [] };
+                    return {
+                        items: collection.items ?? [],
+                        'x-medkit': collection['x-medkit'],
+                    };
+                } catch (err) {
+                    if ((err as { name?: string }).name === 'AbortError') throw err;
+                    console.error('[store] fetchEntityLogs failed', err);
+                    return { items: [], errorStatus: -1 };
+                }
+            },
+
+            getLogsConfiguration: async (entityType, entityId) => {
+                const { client } = get();
+                if (!client) return null;
+                const { data, error: fetchError } = await getEntityLogsConfiguration(client, entityType, entityId);
+                if (fetchError) return null;
+                return (data as LogsConfiguration) ?? null;
+            },
+
+            updateLogsConfiguration: async (entityType, entityId, config) => {
+                const { client } = get();
+                if (!client) return false;
+                try {
+                    const { error } = await putEntityLogsConfiguration(client, entityType, entityId, config);
+                    if (error) {
+                        const message = (error as { message?: string }).message ?? 'Unknown error';
+                        console.error('[store]', error);
+                        toast.error(`Failed to update logs configuration: ${message}`);
+                        return false;
+                    }
+                    return true;
+                } catch (err) {
+                    const message = err instanceof Error ? err.message : 'Unknown error';
+                    console.error('[store]', err);
+                    toast.error(`Failed to update logs configuration: ${message}`);
+                    return false;
+                }
             },
 
             getFaultWithEnvironmentData: async (
