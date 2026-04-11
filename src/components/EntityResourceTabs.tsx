@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useShallow } from 'zustand/shallow';
-import { Database, Zap, Settings, AlertTriangle, Loader2, MessageSquare } from 'lucide-react';
+import { Database, Zap, Settings, AlertTriangle, Loader2, MessageSquare, ScrollText } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '@/lib/store';
 import { ConfigurationPanel } from '@/components/ConfigurationPanel';
 import { OperationsPanel } from '@/components/OperationsPanel';
 import { FaultsPanel } from '@/components/FaultsPanel';
+import { LogsPanel } from '@/components/LogsPanel';
 import type { SovdResourceEntityType } from '@/lib/types';
 import type { ComponentTopic, Operation, Fault } from '@/lib/types';
 
-type ResourceTab = 'data' | 'operations' | 'configurations' | 'faults';
+type ResourceTab = 'data' | 'operations' | 'configurations' | 'faults' | 'logs';
 
 interface TabConfig {
     id: ResourceTab;
@@ -23,6 +24,7 @@ const RESOURCE_TABS: TabConfig[] = [
     { id: 'operations', label: 'Operations', icon: Zap },
     { id: 'configurations', label: 'Config', icon: Settings },
     { id: 'faults', label: 'Faults', icon: AlertTriangle },
+    { id: 'logs', label: 'Logs', icon: ScrollText },
 ];
 
 interface EntityResourceTabsProps {
@@ -39,6 +41,7 @@ interface LoadedResources {
     operations: boolean;
     configurations: boolean;
     faults: boolean;
+    logs: boolean;
 }
 
 /**
@@ -55,6 +58,7 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
         operations: false,
         configurations: false,
         faults: false,
+        logs: false,
     });
     const loadedTabsRef = useRef(loadedTabs);
     loadedTabsRef.current = loadedTabs;
@@ -109,6 +113,10 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
                             count: 0,
                         }));
                         setFaults(faultsRes.items || []);
+                        break;
+                    }
+                    case 'logs': {
+                        // LogsPanel owns its own fetching; no parent-level count fetch.
                         break;
                     }
                 }
@@ -237,6 +245,9 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
 
                     {/* Faults Tab */}
                     {activeTab === 'faults' && <FaultsPanel entityId={entityId} entityType={entityType} />}
+
+                    {/* Logs Tab */}
+                    {activeTab === 'logs' && <LogsPanel entityId={entityId} entityType={entityType} />}
                 </>
             )}
         </div>

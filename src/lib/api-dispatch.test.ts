@@ -34,6 +34,9 @@ import {
     deleteEntityExecution,
     getEntityBulkDataCategories,
     getEntityBulkData,
+    getEntityLogs,
+    getEntityLogsConfiguration,
+    putEntityLogsConfiguration,
 } from './api-dispatch';
 
 // ---------------------------------------------------------------------------
@@ -596,5 +599,132 @@ describe('error propagation', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const result = await deleteEntityFault(client as any, 'functions', 'f1', 'FC_001');
         expect(result?.error).toEqual(err);
+    });
+});
+
+// =============================================================================
+// getEntityLogs
+// =============================================================================
+
+describe('getEntityLogs', () => {
+    let client: MockClient;
+    beforeEach(() => {
+        client = createMockClient();
+    });
+
+    it('dispatches to /apps/{app_id}/logs', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityLogs(client as any, 'apps', 'motor_ctrl', { severity: 'warning' });
+        expect(client.GET).toHaveBeenCalledWith('/apps/{app_id}/logs', {
+            params: {
+                path: { app_id: 'motor_ctrl' },
+                query: { severity: 'warning' },
+            },
+        });
+    });
+
+    it('dispatches to /components/{component_id}/logs with context param', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityLogs(client as any, 'components', 'powertrain', { context: 'engine' });
+        expect(client.GET).toHaveBeenCalledWith('/components/{component_id}/logs', {
+            params: {
+                path: { component_id: 'powertrain' },
+                query: { context: 'engine' },
+            },
+        });
+    });
+
+    it('dispatches to /areas/{area_id}/logs', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityLogs(client as any, 'areas', 'chassis', {});
+        expect(client.GET).toHaveBeenCalledWith('/areas/{area_id}/logs', {
+            params: {
+                path: { area_id: 'chassis' },
+                query: {},
+            },
+        });
+    });
+
+    it('dispatches to /functions/{function_id}/logs', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityLogs(client as any, 'functions', 'braking', {});
+        expect(client.GET).toHaveBeenCalledWith('/functions/{function_id}/logs', {
+            params: {
+                path: { function_id: 'braking' },
+                query: {},
+            },
+        });
+    });
+
+    it('passes AbortSignal through', async () => {
+        const controller = new AbortController();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityLogs(client as any, 'apps', 'motor', { severity: 'error' }, controller.signal);
+        expect(client.GET).toHaveBeenCalledWith(
+            '/apps/{app_id}/logs',
+            expect.objectContaining({
+                signal: controller.signal,
+            })
+        );
+    });
+});
+
+// =============================================================================
+// getEntityLogsConfiguration
+// =============================================================================
+
+describe('getEntityLogsConfiguration', () => {
+    let client: MockClient;
+    beforeEach(() => {
+        client = createMockClient();
+    });
+
+    it('dispatches to /apps/{app_id}/logs/configuration', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityLogsConfiguration(client as any, 'apps', 'motor');
+        expect(client.GET).toHaveBeenCalledWith('/apps/{app_id}/logs/configuration', {
+            params: { path: { app_id: 'motor' } },
+        });
+    });
+
+    it('dispatches to /components, /areas, /functions', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityLogsConfiguration(client as any, 'components', 'c1');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityLogsConfiguration(client as any, 'areas', 'a1');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityLogsConfiguration(client as any, 'functions', 'f1');
+        expect(client.GET).toHaveBeenNthCalledWith(1, '/components/{component_id}/logs/configuration', {
+            params: { path: { component_id: 'c1' } },
+        });
+        expect(client.GET).toHaveBeenNthCalledWith(2, '/areas/{area_id}/logs/configuration', {
+            params: { path: { area_id: 'a1' } },
+        });
+        expect(client.GET).toHaveBeenNthCalledWith(3, '/functions/{function_id}/logs/configuration', {
+            params: { path: { function_id: 'f1' } },
+        });
+    });
+});
+
+// =============================================================================
+// putEntityLogsConfiguration
+// =============================================================================
+
+describe('putEntityLogsConfiguration', () => {
+    let client: MockClient;
+    beforeEach(() => {
+        client = createMockClient();
+    });
+
+    it('PUTs to /apps/{app_id}/logs/configuration with body', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await putEntityLogsConfiguration(client as any, 'apps', 'motor', {
+            severity_filter: 'warning',
+            max_entries: 500,
+        });
+        expect(client.PUT).toHaveBeenCalledWith('/apps/{app_id}/logs/configuration', {
+            params: { path: { app_id: 'motor' } },
+            body: { severity_filter: 'warning', max_entries: 500 },
+        });
     });
 });

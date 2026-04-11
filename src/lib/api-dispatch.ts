@@ -23,6 +23,7 @@
 
 import type { MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
 import type { SovdResourceEntityType } from './types';
+import type { LogsQueryParams, LogsConfiguration } from './log-types';
 
 // =============================================================================
 // Entity Detail
@@ -491,6 +492,96 @@ export function getEntityBulkData(
         case 'functions':
             return client.GET('/functions/{function_id}/bulk-data/{category_id}', {
                 params: { path: { function_id: entityId, category_id: categoryId } },
+            });
+    }
+}
+
+// =============================================================================
+// Logs
+// =============================================================================
+
+export function getEntityLogs(
+    client: MedkitClient,
+    entityType: SovdResourceEntityType,
+    entityId: string,
+    params: LogsQueryParams,
+    signal?: AbortSignal
+) {
+    const query: Record<string, string> = {};
+    if (params.severity) query.severity = params.severity;
+    if (params.context) query.context = params.context;
+
+    switch (entityType) {
+        case 'apps':
+            return client.GET('/apps/{app_id}/logs', {
+                params: { path: { app_id: entityId }, query },
+                signal,
+            });
+        case 'components':
+            return client.GET('/components/{component_id}/logs', {
+                params: { path: { component_id: entityId }, query },
+                signal,
+            });
+        case 'areas':
+            return client.GET('/areas/{area_id}/logs', {
+                params: { path: { area_id: entityId }, query },
+                signal,
+            });
+        case 'functions':
+            return client.GET('/functions/{function_id}/logs', {
+                params: { path: { function_id: entityId }, query },
+                signal,
+            });
+    }
+}
+
+export function getEntityLogsConfiguration(client: MedkitClient, entityType: SovdResourceEntityType, entityId: string) {
+    switch (entityType) {
+        case 'apps':
+            return client.GET('/apps/{app_id}/logs/configuration', {
+                params: { path: { app_id: entityId } },
+            });
+        case 'components':
+            return client.GET('/components/{component_id}/logs/configuration', {
+                params: { path: { component_id: entityId } },
+            });
+        case 'areas':
+            return client.GET('/areas/{area_id}/logs/configuration', {
+                params: { path: { area_id: entityId } },
+            });
+        case 'functions':
+            return client.GET('/functions/{function_id}/logs/configuration', {
+                params: { path: { function_id: entityId } },
+            });
+    }
+}
+
+export function putEntityLogsConfiguration(
+    client: MedkitClient,
+    entityType: SovdResourceEntityType,
+    entityId: string,
+    config: LogsConfiguration
+) {
+    switch (entityType) {
+        case 'apps':
+            return client.PUT('/apps/{app_id}/logs/configuration', {
+                params: { path: { app_id: entityId } },
+                body: config,
+            });
+        case 'components':
+            return client.PUT('/components/{component_id}/logs/configuration', {
+                params: { path: { component_id: entityId } },
+                body: config,
+            });
+        case 'areas':
+            return client.PUT('/areas/{area_id}/logs/configuration', {
+                params: { path: { area_id: entityId } },
+                body: config,
+            });
+        case 'functions':
+            return client.PUT('/functions/{function_id}/logs/configuration', {
+                params: { path: { function_id: entityId } },
+                body: config,
             });
     }
 }

@@ -38,6 +38,21 @@ export type GenericError = components['schemas']['GenericError'];
  */
 export type SovdError = GenericError;
 
+/**
+ * Log-related types from local definitions.
+ * See log-types.ts for detailed documentation.
+ */
+export type {
+    LogEntry,
+    LogContext,
+    LogCollection,
+    LogsFetchResult,
+    LogsConfiguration,
+    LogsQueryParams,
+    LogSeverity,
+    XMedkitAggregation,
+} from './log-types';
+
 // =============================================================================
 // Section 2 & 3: Manual type definitions
 // API types with significant differences from the generated schema, and
