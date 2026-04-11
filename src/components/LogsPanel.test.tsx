@@ -164,6 +164,19 @@ describe('LogsPanel', () => {
         expect(screen.getByText(/temp_sensor\.cpp:42/)).toBeInTheDocument();
     });
 
+    it('formats nanosecond ISO timestamps as HH:MM:SS.sss in the Time column', async () => {
+        mockFetchEntityLogs.mockResolvedValue(sampleResult());
+        render(<LogsPanel entityId="c1" entityType="components" />);
+
+        // sampleResult has two entries with nanosecond-precision timestamps:
+        // - '2026-04-10T12:34:56.789000000Z' => 12:34:56.789
+        // - '2026-04-10T12:34:57.123000000Z' => 12:34:57.123
+        await waitFor(() => {
+            expect(screen.getByText('12:34:56.789')).toBeInTheDocument();
+            expect(screen.getByText('12:34:57.123')).toBeInTheDocument();
+        });
+    });
+
     it('shows "No source location" for entries with empty context', async () => {
         mockFetchEntityLogs.mockResolvedValue(sampleResult());
         const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
