@@ -94,6 +94,17 @@ describe('LogsPanel', () => {
         expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
     });
 
+    it('shows "Logs not available for this entity" on 404 response', async () => {
+        mockFetchEntityLogs.mockResolvedValue({ items: [], errorStatus: 404 });
+
+        render(<LogsPanel entityId="motor" entityType="apps" />);
+
+        await waitFor(() => {
+            expect(screen.getByText(/Logs not available for this entity/i)).toBeInTheDocument();
+        });
+        expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+    });
+
     it('shows empty state when initial fetch returns no entries', async () => {
         mockFetchEntityLogs.mockResolvedValue(emptyResult());
         render(<LogsPanel entityId="motor" entityType="apps" />);
@@ -571,6 +582,122 @@ describe('LogsPanel', () => {
         await user.type(maxEntriesInput, '10001');
 
         expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
+    });
+
+    it('shows a "Failed to load configuration" state when config GET returns null', async () => {
+        mockFetchEntityLogs.mockResolvedValue(emptyResult());
+        mockGetLogsConfiguration.mockResolvedValue(null);
+        const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+        render(<LogsPanel entityId="motor" entityType="apps" />);
+        await user.click(screen.getByRole('button', { name: /settings/i }));
+
+        await waitFor(() => {
+            expect(screen.getByText(/Failed to load configuration/i)).toBeInTheDocument();
+        });
+        // No Save button rendered while the config failed to load.
+        expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
+    });
+
+    it('resets config-row state when entityId changes', async () => {
+        mockFetchEntityLogs.mockResolvedValue(emptyResult());
+        mockGetLogsConfiguration
+            .mockResolvedValueOnce({ severity_filter: 'info', max_entries: 200 })
+            .mockResolvedValueOnce({ severity_filter: 'warning', max_entries: 500 });
+        const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+        const { rerender } = render(<LogsPanel entityId="motor_a" entityType="apps" />);
+
+        // Open gear on entity A, load config
+        await user.click(screen.getByRole('button', { name: /settings/i }));
+        await waitFor(() => {
+            expect(screen.getByDisplayValue('200')).toBeInTheDocument();
+        });
+
+        // Navigate to entity B
+        rerender(<LogsPanel entityId="motor_b" entityType="apps" />);
+
+        // Config row should have been closed by the entity-change reset
+        expect(screen.queryByDisplayValue('200')).not.toBeInTheDocument();
+        expect(screen.queryByDisplayValue('500')).not.toBeInTheDocument();
+
+        // Open gear on entity B - it should re-fetch with the new value
+        await user.click(screen.getByRole('button', { name: /settings/i }));
+        await waitFor(() => {
+            expect(screen.getByDisplayValue('500')).toBeInTheDocument();
+        });
+        expect(mockGetLogsConfiguration).toHaveBeenCalledTimes(2);
+        expect(mockGetLogsConfiguration).toHaveBeenNthCalledWith(2, 'apps', 'motor_b');
+    });
+
+    it('download filename uses filesystem-safe timestamp (no colons or dots)', async () => {
+        mockFetchEntityLogs.mockResolvedValue(sampleResult());
+        const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+        vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:fake');
+        vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+        const capturedFilenames: string[] = [];
+        const originalCreateElement = document.createElement.bind(document);
+        vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+            const el = originalCreateElement(tagName) as HTMLElement;
+            if (tagName === 'a') {
+                const anchor = el as HTMLAnchorElement;
+                anchor.click = vi.fn();
+                Object.defineProperty(anchor, 'download', {
+                    set(value: string) {
+                        capturedFilenames.push(value);
+                    },
+                    get() {
+                        return capturedFilenames[capturedFilenames.length - 1] ?? '';
+                    },
+                });
+            }
+            return el;
+        });
+
+        render(<LogsPanel entityId="motor" entityType="apps" />);
+        await waitFor(() => {
+            expect(screen.getByText('Temperature above 80C')).toBeInTheDocument();
+        });
+
+        await user.click(screen.getByRole('button', { name: /download/i }));
+
+        expect(capturedFilenames.length).toBeGreaterThan(0);
+        const filename = capturedFilenames[capturedFilenames.length - 1] ?? '';
+        // ISO timestamp with dots/colons replaced by hyphens.
+        expect(filename).toMatch(/^logs-apps-motor-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.json$/);
+        // Must NOT contain colons in the timestamp portion (before `.json`).
+        const base = filename.replace(/\.json$/, '');
+        expect(base).not.toContain(':');
+    });
+
+    it('log row is keyboard-focusable and toggles on Enter key', async () => {
+        mockFetchEntityLogs.mockResolvedValue(sampleResult());
+        const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+        render(<LogsPanel entityId="powertrain" entityType="components" />);
+
+        await waitFor(() => {
+            expect(screen.getByText('Temperature above 80C')).toBeInTheDocument();
+        });
+
+        // Find the row by its button role (tabIndex=0 + role="button")
+        const rows = screen.getAllByRole('button').filter((el) => el.tagName === 'TR');
+        expect(rows.length).toBeGreaterThan(0);
+        const firstRow = rows[0];
+        if (!firstRow) throw new Error('expected at least one log row');
+        expect(firstRow).toHaveAttribute('tabIndex', '0');
+        expect(firstRow).toHaveAttribute('aria-expanded', 'false');
+
+        firstRow.focus();
+        await user.keyboard('{Enter}');
+
+        expect(screen.getByText(/checkTemp/)).toBeInTheDocument();
+        // After expansion, aria-expanded should be true on the first row.
+        const rowsAfter = screen.getAllByRole('button').filter((el) => el.tagName === 'TR');
+        const firstRowAfter = rowsAfter[0];
+        if (!firstRowAfter) throw new Error('expected at least one log row');
+        expect(firstRowAfter).toHaveAttribute('aria-expanded', 'true');
     });
 
     it('renders aggregation header for areas', async () => {

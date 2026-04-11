@@ -1,23 +1,26 @@
 import { useState, useEffect } from 'react';
 import { useShallow } from 'zustand/shallow';
 import {
-    GitBranch,
+    AlertTriangle,
+    ChevronRight,
     Cpu,
     Database,
-    Zap,
-    ChevronRight,
-    Users,
+    GitBranch,
     Info,
-    Settings,
-    AlertTriangle,
     Loader2,
+    Settings,
+    Users,
+    Zap,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '@/lib/store';
-import { ConfigurationPanel } from '@/components/ConfigurationPanel';
-import { OperationsPanel } from '@/components/OperationsPanel';
-import { FaultsPanel } from '@/components/FaultsPanel';
+import {
+    RESOURCE_TABS,
+    renderResourceTabContent,
+    isResourceTabId,
+    type ResourceTabId,
+} from '@/components/resource-tabs';
 import type { ComponentTopic, Operation, Fault } from '@/lib/types';
 
 /** Host app object returned from /functions/{id}/hosts */
@@ -27,7 +30,7 @@ interface FunctionHost {
     href: string;
 }
 
-type FunctionTab = 'overview' | 'hosts' | 'data' | 'operations' | 'configurations' | 'faults';
+type FunctionTab = 'overview' | 'hosts' | ResourceTabId;
 
 interface TabConfig {
     id: FunctionTab;
@@ -38,10 +41,7 @@ interface TabConfig {
 const FUNCTION_TABS: TabConfig[] = [
     { id: 'overview', label: 'Overview', icon: Info },
     { id: 'hosts', label: 'Hosts', icon: Cpu },
-    { id: 'data', label: 'Data', icon: Database },
-    { id: 'operations', label: 'Operations', icon: Zap },
-    { id: 'configurations', label: 'Config', icon: Settings },
-    { id: 'faults', label: 'Faults', icon: AlertTriangle },
+    ...RESOURCE_TABS,
 ];
 
 interface FunctionsPanelProps {
@@ -357,11 +357,12 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                 </Card>
             )}
 
-            {activeTab === 'operations' && <OperationsPanel entityId={functionId} entityType="functions" />}
-
-            {activeTab === 'configurations' && <ConfigurationPanel entityId={functionId} entityType="functions" />}
-
-            {activeTab === 'faults' && <FaultsPanel entityId={functionId} entityType="functions" />}
+            {/* Operations / Configurations / Faults / Logs delegated to the shared helper */}
+            {activeTab !== 'overview' &&
+                activeTab !== 'hosts' &&
+                activeTab !== 'data' &&
+                isResourceTabId(activeTab) &&
+                renderResourceTabContent(activeTab, functionId, 'functions')}
 
             {isLoading && (
                 <Card>

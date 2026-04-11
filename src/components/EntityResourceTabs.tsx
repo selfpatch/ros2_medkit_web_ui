@@ -1,31 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useShallow } from 'zustand/shallow';
-import { Database, Zap, Settings, AlertTriangle, Loader2, MessageSquare, ScrollText } from 'lucide-react';
+import { Database, Loader2, MessageSquare } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '@/lib/store';
-import { ConfigurationPanel } from '@/components/ConfigurationPanel';
-import { OperationsPanel } from '@/components/OperationsPanel';
-import { FaultsPanel } from '@/components/FaultsPanel';
-import { LogsPanel } from '@/components/LogsPanel';
+import { RESOURCE_TABS, renderResourceTabContent, type ResourceTabId } from '@/components/resource-tabs';
 import type { SovdResourceEntityType } from '@/lib/types';
 import type { ComponentTopic, Operation, Fault } from '@/lib/types';
-
-type ResourceTab = 'data' | 'operations' | 'configurations' | 'faults' | 'logs';
-
-interface TabConfig {
-    id: ResourceTab;
-    label: string;
-    icon: typeof Database;
-}
-
-const RESOURCE_TABS: TabConfig[] = [
-    { id: 'data', label: 'Data', icon: Database },
-    { id: 'operations', label: 'Operations', icon: Zap },
-    { id: 'configurations', label: 'Config', icon: Settings },
-    { id: 'faults', label: 'Faults', icon: AlertTriangle },
-    { id: 'logs', label: 'Logs', icon: ScrollText },
-];
 
 interface EntityResourceTabsProps {
     entityId: string;
@@ -51,7 +32,7 @@ interface LoadedResources {
  * Resources are lazy-loaded per tab to avoid unnecessary API calls.
  */
 export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate }: EntityResourceTabsProps) {
-    const [activeTab, setActiveTab] = useState<ResourceTab>('data');
+    const [activeTab, setActiveTab] = useState<ResourceTabId>('data');
     const [isLoading, setIsLoading] = useState(false);
     const [loadedTabs, setLoadedTabs] = useState<LoadedResources>({
         data: false,
@@ -86,7 +67,7 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
 
     // Lazy load resources for the active tab
     const loadTabResources = useCallback(
-        async (tab: ResourceTab) => {
+        async (tab: ResourceTabId) => {
             if (loadedTabsRef.current[tab]) return;
 
             setIsLoading(true);
@@ -235,19 +216,8 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
                         </Card>
                     )}
 
-                    {/* Operations Tab */}
-                    {activeTab === 'operations' && <OperationsPanel entityId={entityId} entityType={entityType} />}
-
-                    {/* Configurations Tab */}
-                    {activeTab === 'configurations' && (
-                        <ConfigurationPanel entityId={entityId} entityType={entityType} />
-                    )}
-
-                    {/* Faults Tab */}
-                    {activeTab === 'faults' && <FaultsPanel entityId={entityId} entityType={entityType} />}
-
-                    {/* Logs Tab */}
-                    {activeTab === 'logs' && <LogsPanel entityId={entityId} entityType={entityType} />}
+                    {/* Operations / Configurations / Faults / Logs delegated to shared helper */}
+                    {activeTab !== 'data' && renderResourceTabContent(activeTab, entityId, entityType)}
                 </>
             )}
         </div>
