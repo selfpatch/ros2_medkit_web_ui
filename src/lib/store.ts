@@ -615,18 +615,36 @@ export function parseTreePath(path: string): {
 
 /**
  * Filter apps that belong to a given component by checking
- * `x-medkit.component_id` or `_links.is-located-on`.
+ * the top-level `component_id` field, `x-medkit.component_id`,
+ * or `_links.is-located-on`.
  *
  * Used as a fallback when `/components/{id}/hosts` returns empty
  * (peer-sourced components).
  */
 export function filterAppsByComponent(apps: Record<string, unknown>[], componentId: string): Record<string, unknown>[] {
     return apps.filter((app) => {
+        if (app['component_id'] === componentId) return true;
         const xMedkit = app['x-medkit'] as Record<string, unknown> | undefined;
         if (xMedkit?.component_id === componentId) return true;
         const links = app['_links'] as Record<string, string> | undefined;
         return links?.['is-located-on']?.endsWith(`/components/${componentId}`);
     });
+}
+
+/**
+ * Detect whether a component node is peer-sourced (aggregated from a
+ * remote gateway). Peer-sourced components have `x-medkit.source`
+ * starting with `"peer:"`.
+ *
+ * Components with unknown source metadata are treated as peer-sourced
+ * so the fallback still discovers their apps; this errs on the side of
+ * completeness over saving one extra request.
+ */
+export function isPeerSourcedComponent(node: Record<string, unknown>): boolean {
+    const xMedkit = node['x-medkit'] as Record<string, unknown> | undefined;
+    const source = xMedkit?.source;
+    if (typeof source !== 'string') return true;
+    return source.startsWith('peer:');
 }
 
 /** Fallback: fetch entity details from API when not in tree */
@@ -1016,7 +1034,13 @@ export const useAppStore = create<AppState>()(
                             // Fallback for peer-sourced components: /hosts may return
                             // empty while apps still reference this component via
                             // x-medkit.component_id. Fetch all apps and filter.
-                            if (rawApps.length === 0) {
+                            // Gated on isPeerSourcedComponent so we don't pay the
+                            // full /apps fetch for components that legitimately
+                            // have no apps (e.g. manifest or plugin components).
+                            if (
+                                rawApps.length === 0 &&
+                                isPeerSourcedComponent(node as unknown as Record<string, unknown>)
+                            ) {
                                 const allAppsRes = await client.GET('/apps').catch(() => ({ data: undefined }));
                                 const allApps = allAppsRes.data
                                     ? unwrapItems<Record<string, unknown>>(allAppsRes.data)
