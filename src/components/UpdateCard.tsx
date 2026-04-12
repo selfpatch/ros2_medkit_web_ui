@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
@@ -121,6 +121,12 @@ export function UpdateCard({ entry, baseUrl, onAction }: UpdateCardProps) {
         setDetailOpen(open);
     }, []);
 
+    useEffect(() => {
+        return () => {
+            detailAbortRef.current?.abort();
+        };
+    }, []);
+
     const isFailed = status?.status === 'failed';
 
     return (
@@ -137,9 +143,9 @@ export function UpdateCard({ entry, baseUrl, onAction }: UpdateCardProps) {
 
             <CardContent className="py-2 px-4 space-y-3">
                 {status === null && (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Loading...</span>
+                    <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                        <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                        <span>Status unavailable</span>
                     </div>
                 )}
 
@@ -148,6 +154,7 @@ export function UpdateCard({ entry, baseUrl, onAction }: UpdateCardProps) {
                         {status.progress !== undefined && (
                             <div
                                 role="progressbar"
+                                aria-label={`Progress for update ${id}`}
                                 aria-valuenow={status.progress}
                                 aria-valuemin={0}
                                 aria-valuemax={100}
