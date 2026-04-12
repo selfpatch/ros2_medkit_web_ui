@@ -613,6 +613,22 @@ export function parseTreePath(path: string): {
     return { entityType, entityId };
 }
 
+/**
+ * Filter apps that belong to a given component by checking
+ * `x-medkit.component_id` or `_links.is-located-on`.
+ *
+ * Used as a fallback when `/components/{id}/hosts` returns empty
+ * (peer-sourced components).
+ */
+export function filterAppsByComponent(apps: Record<string, unknown>[], componentId: string): Record<string, unknown>[] {
+    return apps.filter((app) => {
+        const xMedkit = app['x-medkit'] as Record<string, unknown> | undefined;
+        if (xMedkit?.component_id === componentId) return true;
+        const links = app['_links'] as Record<string, string> | undefined;
+        return links?.['is-located-on']?.endsWith(`/components/${componentId}`);
+    });
+}
+
 /** Fallback: fetch entity details from API when not in tree */
 async function fetchEntityFromApi(
     path: string,
@@ -995,7 +1011,19 @@ export const useAppStore = create<AppState>()(
                             );
                             const subcompNodes = subcomponents.map((e: SovdEntity) => toTreeNode(e, path));
 
-                            const rawApps = appsRes.data ? unwrapItems<Record<string, unknown>>(appsRes.data) : [];
+                            let rawApps = appsRes.data ? unwrapItems<Record<string, unknown>>(appsRes.data) : [];
+
+                            // Fallback for peer-sourced components: /hosts may return
+                            // empty while apps still reference this component via
+                            // x-medkit.component_id. Fetch all apps and filter.
+                            if (rawApps.length === 0) {
+                                const allAppsRes = await client.GET('/apps').catch(() => ({ data: undefined }));
+                                const allApps = allAppsRes.data
+                                    ? unwrapItems<Record<string, unknown>>(allAppsRes.data)
+                                    : [];
+                                rawApps = filterAppsByComponent(allApps, node.id);
+                            }
+
                             const apps = rawApps.map((e) => ({ ...e, type: 'app' }) as unknown as SovdEntity);
                             const appNodes = apps.map((app: SovdEntity) =>
                                 toTreeNode({ ...app, type: 'app', hasChildren: false }, path)

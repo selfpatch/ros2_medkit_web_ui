@@ -13,7 +13,14 @@
 // limitations under the License.
 
 import { describe, it, expect } from 'vitest';
-import { toTreeNode, updateNodeInTree, findNode, inferEntityTypeFromDepth, parseTreePath } from './store';
+import {
+    toTreeNode,
+    updateNodeInTree,
+    findNode,
+    inferEntityTypeFromDepth,
+    parseTreePath,
+    filterAppsByComponent,
+} from './store';
 import type { SovdEntity, EntityTreeNode } from './types';
 
 // =============================================================================
@@ -406,5 +413,47 @@ describe('parseTreePath', () => {
         const result = parseTreePath('/server/chassis');
         expect(result.entityType).toBe('areas');
         expect(result.entityId).toBe('chassis');
+    });
+});
+
+// =============================================================================
+// filterAppsByComponent
+// =============================================================================
+
+describe('filterAppsByComponent', () => {
+    const apps: Record<string, unknown>[] = [
+        { id: 'local-app', 'x-medkit': { component_id: 'ecu-primary' } },
+        { id: 'data_viewer', 'x-medkit': { component_id: 'ecu-rtmaps' } },
+        { id: 'lidar_sim', _links: { 'is-located-on': '/api/v1/components/ecu-rtmaps' } },
+        { id: 'orphan-app', 'x-medkit': {} },
+        { id: 'bare-app' },
+    ];
+
+    it('matches apps by x-medkit.component_id', () => {
+        const result = filterAppsByComponent(apps, 'ecu-primary');
+        expect(result.map((a) => a.id)).toEqual(['local-app']);
+    });
+
+    it('matches apps by _links.is-located-on', () => {
+        const result = filterAppsByComponent(apps, 'ecu-rtmaps');
+        expect(result.map((a) => a.id)).toEqual(['data_viewer', 'lidar_sim']);
+    });
+
+    it('returns empty array when no apps match', () => {
+        const result = filterAppsByComponent(apps, 'nonexistent');
+        expect(result).toEqual([]);
+    });
+
+    it('handles empty apps list', () => {
+        const result = filterAppsByComponent([], 'ecu-primary');
+        expect(result).toEqual([]);
+    });
+
+    it('does not match partial component ID in _links', () => {
+        const tricky: Record<string, unknown>[] = [
+            { id: 'partial', _links: { 'is-located-on': '/api/v1/components/ecu-rtmaps-extended' } },
+        ];
+        const result = filterAppsByComponent(tricky, 'ecu-rtmaps');
+        expect(result).toEqual([]);
     });
 });
