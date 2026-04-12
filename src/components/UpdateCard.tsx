@@ -1,0 +1,167 @@
+// Copyright 2026 bburda
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Package, Loader2, AlertCircle } from 'lucide-react';
+import type { UpdateEntry, UpdateStatusValue } from '@/lib/types';
+
+export type UpdateAction = 'prepare' | 'execute' | 'automated' | 'delete';
+
+interface UpdateCardProps {
+    entry: UpdateEntry;
+    onAction?: (id: string, action: UpdateAction) => void;
+}
+
+type BadgeVariant = 'outline' | 'default' | 'secondary' | 'destructive';
+
+function statusBadgeVariant(status: UpdateStatusValue): BadgeVariant {
+    switch (status) {
+        case 'pending':
+            return 'outline';
+        case 'inProgress':
+            return 'default';
+        case 'completed':
+            return 'secondary';
+        case 'failed':
+            return 'destructive';
+    }
+}
+
+function progressBarColor(status: UpdateStatusValue): string {
+    switch (status) {
+        case 'inProgress':
+            return 'bg-blue-500';
+        case 'completed':
+            return 'bg-green-500';
+        case 'failed':
+            return 'bg-red-500';
+        default:
+            return 'bg-gray-400';
+    }
+}
+
+function actionButtonsForStatus(status: UpdateStatusValue): UpdateAction[] {
+    switch (status) {
+        case 'pending':
+            return ['prepare', 'automated', 'delete'];
+        case 'inProgress':
+            return [];
+        case 'completed':
+            return ['delete'];
+        case 'failed':
+            return ['prepare', 'delete'];
+    }
+}
+
+function actionLabel(action: UpdateAction): string {
+    switch (action) {
+        case 'prepare':
+            return 'Prepare';
+        case 'execute':
+            return 'Execute';
+        case 'automated':
+            return 'Automated';
+        case 'delete':
+            return 'Delete';
+    }
+}
+
+export function UpdateCard({ entry, onAction }: UpdateCardProps) {
+    const { id, status } = entry;
+
+    const isFailed = status?.status === 'failed';
+
+    return (
+        <Card className={isFailed ? 'border-red-300 dark:border-red-800' : undefined}>
+            <CardHeader className="py-3 px-4">
+                <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2 min-w-0">
+                        <Package className="h-4 w-4 shrink-0" />
+                        <span className="truncate">{id}</span>
+                    </CardTitle>
+                    {status && <Badge variant={statusBadgeVariant(status.status)}>{status.status}</Badge>}
+                </div>
+            </CardHeader>
+
+            <CardContent className="py-2 px-4 space-y-3">
+                {status === null && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Loading...</span>
+                    </div>
+                )}
+
+                {status !== null && status !== undefined && (
+                    <>
+                        {status.progress !== undefined && (
+                            <div
+                                role="progressbar"
+                                aria-valuenow={status.progress}
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                                className="w-full h-2 rounded-full bg-muted overflow-hidden"
+                            >
+                                <div
+                                    className={`h-full ${progressBarColor(status.status)} transition-all`}
+                                    style={{ width: `${status.progress}%` }}
+                                />
+                            </div>
+                        )}
+
+                        {status.sub_progress && status.sub_progress.length > 0 && (
+                            <ul className="space-y-1">
+                                {status.sub_progress.map((sub) => (
+                                    <li key={sub.name} className="flex items-center gap-2 text-xs">
+                                        <span className="w-24 shrink-0 text-muted-foreground truncate">{sub.name}</span>
+                                        <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                                            <div
+                                                className={`h-full ${progressBarColor(status.status)}`}
+                                                style={{ width: `${sub.progress}%` }}
+                                            />
+                                        </div>
+                                        <span className="w-9 text-right tabular-nums">{sub.progress}%</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+
+                        {status.error && (
+                            <div className="flex items-start gap-2 text-sm text-red-600 dark:text-red-400">
+                                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                                <span>{status.error}</span>
+                            </div>
+                        )}
+
+                        {onAction && (
+                            <div className="flex flex-wrap gap-2 pt-1">
+                                {actionButtonsForStatus(status.status).map((action) => (
+                                    <Button
+                                        key={action}
+                                        size="sm"
+                                        variant={action === 'delete' ? 'destructive' : 'outline'}
+                                        onClick={() => onAction(id, action)}
+                                    >
+                                        {actionLabel(action)}
+                                    </Button>
+                                ))}
+                            </div>
+                        )}
+                    </>
+                )}
+            </CardContent>
+        </Card>
+    );
+}
