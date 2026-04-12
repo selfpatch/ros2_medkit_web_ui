@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import { Package, RefreshCw, AlertTriangle, Server } from 'lucide-react';
 import { toast } from 'react-toastify';
@@ -39,6 +39,16 @@ export function UpdatesDashboard() {
     const { updates, isLoading, error, notAvailable, refresh } = useUpdatesPolling(baseUrl);
     const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
 
+    // AbortController for mutation actions (prepare/execute/automated/delete).
+    // Aborted on unmount so in-flight requests don't resolve into setBusyIds
+    // on an unmounted component or issue stale toast notifications.
+    const actionAbortRef = useRef<AbortController | null>(null);
+    useEffect(() => {
+        const controller = new AbortController();
+        actionAbortRef.current = controller;
+        return () => controller.abort();
+    }, []);
+
     const summary = useMemo(() => {
         let active = 0;
         let failed = 0;
@@ -59,22 +69,27 @@ export function UpdatesDashboard() {
                 const confirmed = window.confirm(`Delete update "${id}"? This cannot be undone.`);
                 if (!confirmed) return;
             }
+            const signal = actionAbortRef.current?.signal;
             setBusyIds((prev) => new Set(prev).add(id));
             try {
-                if (action === 'prepare') await triggerPrepare(baseUrl, id);
-                else if (action === 'execute') await triggerExecute(baseUrl, id);
-                else if (action === 'automated') await triggerAutomated(baseUrl, id);
-                else if (action === 'delete') await deleteUpdate(baseUrl, id);
+                if (action === 'prepare') await triggerPrepare(baseUrl, id, undefined, signal);
+                else if (action === 'execute') await triggerExecute(baseUrl, id, undefined, signal);
+                else if (action === 'automated') await triggerAutomated(baseUrl, id, undefined, signal);
+                else if (action === 'delete') await deleteUpdate(baseUrl, id, signal);
+                if (signal?.aborted) return;
                 toast.success(`${action} triggered for ${id}`);
                 refresh();
             } catch (err) {
+                if (signal?.aborted || (err as { name?: string })?.name === 'AbortError') return;
                 toast.error(err instanceof Error ? err.message : String(err));
             } finally {
-                setBusyIds((prev) => {
-                    const next = new Set(prev);
-                    next.delete(id);
-                    return next;
-                });
+                if (!signal?.aborted) {
+                    setBusyIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(id);
+                        return next;
+                    });
+                }
             }
         },
         [baseUrl, refresh]
