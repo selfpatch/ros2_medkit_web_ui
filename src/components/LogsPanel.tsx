@@ -190,9 +190,17 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
         URL.revokeObjectURL(url);
     }, [displayedEntries, entityType, entityId]);
 
+    const configEntityRef = useRef({ entityId, entityType });
+    configEntityRef.current = { entityId, entityType };
+
     const loadConfig = useCallback(async () => {
         setConfigLoading(true);
         const cfg = await getLogsConfiguration(entityType, entityId);
+        // Guard: if the entity changed while the GET was in-flight, discard
+        // the result so we don't apply config from the wrong entity.
+        if (configEntityRef.current.entityId !== entityId || configEntityRef.current.entityType !== entityType) {
+            return;
+        }
         if (cfg) {
             setConfigSeverity(cfg.severity_filter);
             setConfigMaxEntries(cfg.max_entries);

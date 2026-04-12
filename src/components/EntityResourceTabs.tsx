@@ -4,7 +4,7 @@ import { Database, Loader2, MessageSquare } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '@/lib/store';
-import { RESOURCE_TABS, renderResourceTabContent, type ResourceTabId } from '@/components/resource-tabs';
+import { RESOURCE_TABS, renderResourceTabContent, type ResourceTabId } from '@/components/ResourceTabs';
 import type { SovdResourceEntityType } from '@/lib/types';
 import type { ComponentTopic, Operation, Fault } from '@/lib/types';
 
