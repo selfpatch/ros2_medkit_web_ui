@@ -224,25 +224,25 @@ export function EntityTreeSidebar({
 
             {/* Quick Actions */}
             {isConnected && (
-                <div className="p-2 border-t flex gap-1">
+                <div className="px-2 py-1.5 border-t flex gap-1">
                     <Button
                         variant="ghost"
                         size="sm"
-                        className="flex-1 justify-start gap-2"
+                        className="flex-1 justify-center gap-1.5 h-8 text-xs"
                         onClick={onFaultsDashboardClick}
                     >
-                        <AlertTriangle className="w-4 h-4 text-amber-500" />
-                        <span>Faults</span>
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                        Faults Dashboard
                         <FaultsCountBadge />
                     </Button>
                     <Button
                         variant="ghost"
                         size="sm"
-                        className="flex-1 justify-start gap-2"
+                        className="flex-1 justify-center gap-1.5 h-8 text-xs"
                         onClick={onUpdatesDashboardClick}
                     >
-                        <Package className="w-4 h-4 text-blue-500" />
-                        <span>Updates</span>
+                        <Package className="w-3.5 h-3.5 text-blue-500" />
+                        Software Updates
                     </Button>
                 </div>
             )}

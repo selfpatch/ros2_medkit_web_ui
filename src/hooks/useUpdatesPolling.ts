@@ -41,8 +41,6 @@ export function useUpdatesPolling(baseUrl: string | null, intervalMs?: number): 
     const hasLoadedRef = useRef(false);
     // AbortController for in-flight fetches
     const abortRef = useRef<AbortController | null>(null);
-    // Ref to trigger immediate refresh
-    const refreshCountRef = useRef(0);
     const [refreshTick, setRefreshTick] = useState(0);
 
     const doFetch = useCallback(
@@ -147,7 +145,6 @@ export function useUpdatesPolling(baseUrl: string | null, intervalMs?: number): 
     }, [baseUrl]);
 
     const refresh = useCallback(() => {
-        refreshCountRef.current += 1;
         setRefreshTick((t) => t + 1);
     }, []);
 
