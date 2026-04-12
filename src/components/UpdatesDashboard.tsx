@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import { Package, RefreshCw, AlertTriangle, Server } from 'lucide-react';
 import { toast } from 'react-toastify';
@@ -37,6 +37,7 @@ export function UpdatesDashboard() {
     const baseUrl = isConnected && serverUrl ? normalizeBaseUrl(serverUrl) : null;
 
     const { updates, isLoading, error, notAvailable, refresh } = useUpdatesPolling(baseUrl);
+    const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
 
     const summary = useMemo(() => {
         let active = 0;
@@ -58,6 +59,7 @@ export function UpdatesDashboard() {
                 const confirmed = window.confirm(`Delete update "${id}"? This cannot be undone.`);
                 if (!confirmed) return;
             }
+            setBusyIds((prev) => new Set(prev).add(id));
             try {
                 if (action === 'prepare') await triggerPrepare(baseUrl, id);
                 else if (action === 'execute') await triggerExecute(baseUrl, id);
@@ -67,6 +69,12 @@ export function UpdatesDashboard() {
                 refresh();
             } catch (err) {
                 toast.error(err instanceof Error ? err.message : String(err));
+            } finally {
+                setBusyIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(id);
+                    return next;
+                });
             }
         },
         [baseUrl, refresh]
@@ -167,7 +175,13 @@ export function UpdatesDashboard() {
             {header}
             <div className="grid gap-4 md:grid-cols-2">
                 {updates.map((entry) => (
-                    <UpdateCard key={entry.id} entry={entry} baseUrl={baseUrl} onAction={handleAction} />
+                    <UpdateCard
+                        key={entry.id}
+                        entry={entry}
+                        baseUrl={baseUrl}
+                        busy={busyIds.has(entry.id)}
+                        onAction={handleAction}
+                    />
                 ))}
             </div>
         </div>
