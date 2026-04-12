@@ -20,12 +20,12 @@ import type { UpdateStatus } from './types';
  * 501 (no backend) from other errors.
  */
 export class UpdatesApiError extends Error {
-    constructor(
-        message: string,
-        public readonly status: number
-    ) {
+    readonly status: number;
+
+    constructor(message: string, status: number) {
         super(message);
         this.name = 'UpdatesApiError';
+        this.status = status;
     }
 }
 
