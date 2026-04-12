@@ -69,7 +69,7 @@ describe('EntityResourceTabs', () => {
         render(<EntityResourceTabs entityId="ecu-primary" entityType="components" />);
 
         await waitFor(() => {
-            expect(mockFetchEntityData).toHaveBeenCalledWith('components', 'ecu-primary');
+            expect(mockFetchEntityData).toHaveBeenCalledWith('components', 'ecu-primary', expect.anything());
         });
 
         await waitFor(() => {
@@ -104,7 +104,7 @@ describe('EntityResourceTabs', () => {
         rerender(<EntityResourceTabs entityId="ecu-mcu" entityType="components" />);
 
         await waitFor(() => {
-            expect(mockFetchEntityData).toHaveBeenCalledWith('components', 'ecu-mcu');
+            expect(mockFetchEntityData).toHaveBeenCalledWith('components', 'ecu-mcu', expect.anything());
         });
 
         await waitFor(() => {
@@ -113,5 +113,45 @@ describe('EntityResourceTabs', () => {
 
         // Old data should be gone
         expect(screen.queryByText('/engine/temperature')).not.toBeInTheDocument();
+    });
+
+    it('does not apply stale fetch result when entity changes mid-flight', async () => {
+        // First fetch returns a promise we control, so we can switch entities
+        // while it is still in-flight and verify the old result is discarded.
+        let resolveFirst: (value: ComponentTopic[]) => void = () => {};
+        const firstPromise = new Promise<ComponentTopic[]>((resolve) => {
+            resolveFirst = resolve;
+        });
+        mockFetchEntityData.mockReturnValueOnce(firstPromise);
+
+        const { rerender } = render(<EntityResourceTabs entityId="ecu-primary" entityType="components" />);
+
+        // Switch entity while the first fetch is still pending
+        const secondTopics: ComponentTopic[] = [
+            {
+                topic: '/brake/pressure',
+                timestamp: Date.now(),
+                data: null,
+                status: 'metadata_only',
+                type: 'sensor_msgs/msg/FluidPressure',
+            },
+        ];
+        mockFetchEntityData.mockResolvedValueOnce(secondTopics);
+        rerender(<EntityResourceTabs entityId="ecu-mcu" entityType="components" />);
+
+        // New entity's fetch resolves and renders
+        await waitFor(() => {
+            expect(screen.getByText('/brake/pressure')).toBeInTheDocument();
+        });
+
+        // Late-resolve the first (aborted) fetch - it must NOT overwrite the
+        // current entity's data.
+        resolveFirst(sampleTopics());
+        // Give the microtask queue a chance to run the (hopefully discarded) setData.
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(screen.queryByText('/engine/temperature')).not.toBeInTheDocument();
+        expect(screen.getByText('/brake/pressure')).toBeInTheDocument();
     });
 });

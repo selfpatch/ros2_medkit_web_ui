@@ -65,34 +65,47 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
         }))
     );
 
+    // AbortController for in-flight fetches. Aborted (and replaced) whenever
+    // the entity changes so stale responses never overwrite fresh ones.
+    const abortRef = useRef<AbortController | null>(null);
+
     // Lazy load resources for the active tab
     const loadTabResources = useCallback(
         async (tab: ResourceTabId) => {
             if (loadedTabsRef.current[tab]) return;
 
+            const signal = abortRef.current?.signal;
             setIsLoading(true);
             try {
                 switch (tab) {
                     case 'data': {
-                        const dataRes = await fetchEntityData(entityType, entityId).catch(() => [] as ComponentTopic[]);
+                        const dataRes = await fetchEntityData(entityType, entityId, signal).catch(
+                            () => [] as ComponentTopic[]
+                        );
+                        if (signal?.aborted) return;
                         setData(dataRes);
                         break;
                     }
                     case 'operations': {
-                        const opsRes = await fetchEntityOperations(entityType, entityId).catch(() => [] as Operation[]);
+                        const opsRes = await fetchEntityOperations(entityType, entityId, signal).catch(
+                            () => [] as Operation[]
+                        );
+                        if (signal?.aborted) return;
                         setOperations(opsRes);
                         break;
                     }
                     case 'configurations': {
-                        await fetchConfigurations(entityId, entityType);
+                        await fetchConfigurations(entityId, entityType, signal);
+                        if (signal?.aborted) return;
                         // Configurations are stored in the store's configurations map
                         break;
                     }
                     case 'faults': {
-                        const faultsRes = await listEntityFaults(entityType, entityId).catch(() => ({
+                        const faultsRes = await listEntityFaults(entityType, entityId, signal).catch(() => ({
                             items: [] as Fault[],
                             count: 0,
                         }));
+                        if (signal?.aborted) return;
                         setFaults(faultsRes.items || []);
                         break;
                     }
@@ -101,11 +114,13 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
                         break;
                     }
                 }
+                if (signal?.aborted) return;
                 setLoadedTabs((prev) => ({ ...prev, [tab]: true }));
             } catch (error) {
+                if (signal?.aborted) return;
                 console.error(`Failed to load ${tab} resources:`, error);
             } finally {
-                setIsLoading(false);
+                if (!signal?.aborted) setIsLoading(false);
             }
         },
 
@@ -115,6 +130,11 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
     // Reset tab state when the entity changes so stale data from the
     // previous entity does not leak into the new one.
     useEffect(() => {
+        // Abort any fetches still running for the previous entity. The
+        // next load effect will spin up a fresh controller.
+        abortRef.current?.abort();
+        abortRef.current = new AbortController();
+
         const reset: LoadedResources = {
             data: false,
             operations: false,
@@ -132,6 +152,11 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
         setOperations([]);
         setFaults([]);
     }, [entityId, entityType]);
+
+    // Abort in-flight fetches on unmount.
+    useEffect(() => {
+        return () => abortRef.current?.abort();
+    }, []);
 
     // Load resources when tab changes
     useEffect(() => {

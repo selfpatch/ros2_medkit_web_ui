@@ -120,7 +120,7 @@ export interface AppState {
     clearSelection: () => void;
 
     // Configurations actions
-    fetchConfigurations: (entityId: string, entityType?: SovdResourceEntityType) => Promise<void>;
+    fetchConfigurations: (entityId: string, entityType?: SovdResourceEntityType, signal?: AbortSignal) => Promise<void>;
     setParameter: (
         entityId: string,
         paramName: string,
@@ -164,11 +164,20 @@ export interface AppState {
     unsubscribeFaultStream: () => void;
 
     // Component-facing actions (replace direct client usage in components)
-    fetchEntityData: (entityType: SovdResourceEntityType, entityId: string) => Promise<ComponentTopic[]>;
-    fetchEntityOperations: (entityType: SovdResourceEntityType, entityId: string) => Promise<Operation[]>;
+    fetchEntityData: (
+        entityType: SovdResourceEntityType,
+        entityId: string,
+        signal?: AbortSignal
+    ) => Promise<ComponentTopic[]>;
+    fetchEntityOperations: (
+        entityType: SovdResourceEntityType,
+        entityId: string,
+        signal?: AbortSignal
+    ) => Promise<Operation[]>;
     listEntityFaults: (
         entityType: SovdResourceEntityType,
-        entityId: string
+        entityId: string,
+        signal?: AbortSignal
     ) => Promise<{ items: Fault[]; count: number }>;
     fetchEntityLogs: (
         entityType: SovdResourceEntityType,
@@ -647,6 +656,34 @@ export function isPeerSourcedComponent(node: Record<string, unknown>): boolean {
     return source.startsWith('peer:');
 }
 
+/**
+ * Module-level dedupe for `GET /apps`. When multiple peer-sourced
+ * components are expanded concurrently, each needs the full apps list
+ * for its fallback; without dedupe that would trigger N identical
+ * requests. Holding the in-flight promise here collapses them into one.
+ *
+ * The promise is cleared on settlement so subsequent expansions refetch
+ * fresh data (no stale caching across time).
+ */
+let inFlightAppsRequest: Promise<Record<string, unknown>[]> | null = null;
+
+/** Reset the dedupe cache. Exposed for tests. */
+export function __resetAppsRequestCache(): void {
+    inFlightAppsRequest = null;
+}
+
+export async function fetchAllAppsDeduped(client: MedkitClient): Promise<Record<string, unknown>[]> {
+    if (inFlightAppsRequest) return inFlightAppsRequest;
+    inFlightAppsRequest = client
+        .GET('/apps')
+        .then((res) => (res.data ? unwrapItems<Record<string, unknown>>(res.data) : []))
+        .catch(() => [] as Record<string, unknown>[])
+        .finally(() => {
+            inFlightAppsRequest = null;
+        });
+    return inFlightAppsRequest;
+}
+
 /** Fallback: fetch entity details from API when not in tree */
 async function fetchEntityFromApi(
     path: string,
@@ -1037,14 +1074,13 @@ export const useAppStore = create<AppState>()(
                             // Gated on isPeerSourcedComponent so we don't pay the
                             // full /apps fetch for components that legitimately
                             // have no apps (e.g. manifest or plugin components).
+                            // Uses fetchAllAppsDeduped so concurrent expansions of
+                            // multiple peer components share a single /apps request.
                             if (
                                 rawApps.length === 0 &&
                                 isPeerSourcedComponent(node as unknown as Record<string, unknown>)
                             ) {
-                                const allAppsRes = await client.GET('/apps').catch(() => ({ data: undefined }));
-                                const allApps = allAppsRes.data
-                                    ? unwrapItems<Record<string, unknown>>(allAppsRes.data)
-                                    : [];
+                                const allApps = await fetchAllAppsDeduped(client);
                                 rawApps = filterAppsByComponent(allApps, node.id);
                             }
 
@@ -1325,20 +1361,34 @@ export const useAppStore = create<AppState>()(
             // CONFIGURATIONS ACTIONS (ROS 2 Parameters)
             // ===========================================================================
 
-            fetchConfigurations: async (entityId: string, entityType: SovdResourceEntityType = 'components') => {
+            fetchConfigurations: async (
+                entityId: string,
+                entityType: SovdResourceEntityType = 'components',
+                signal?: AbortSignal
+            ) => {
                 const { client, configurations } = get();
                 if (!client) return;
 
                 set({ isLoadingConfigurations: true });
 
                 try {
-                    const { data, error: fetchError } = await getEntityConfigurations(client, entityType, entityId);
+                    const { data, error: fetchError } = await getEntityConfigurations(
+                        client,
+                        entityType,
+                        entityId,
+                        signal
+                    );
+                    if (signal?.aborted) return;
                     if (fetchError) throw new Error(fetchError.message || 'Failed to load configurations');
                     const result = transformConfigurationsResponse(data, entityId);
                     const newConfigs = new Map(configurations);
                     newConfigs.set(entityId, result.parameters);
                     set({ configurations: newConfigs, isLoadingConfigurations: false });
                 } catch (error) {
+                    if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+                        set({ isLoadingConfigurations: false });
+                        return;
+                    }
                     const message = error instanceof Error ? error.message : 'Unknown error';
                     console.error('[store]', error);
                     toast.error(`Failed to load configurations: ${message}`);
@@ -1899,26 +1949,30 @@ export const useAppStore = create<AppState>()(
             // COMPONENT-FACING ACTIONS (replace direct client usage)
             // =================================================================
 
-            fetchEntityData: async (entityType: SovdResourceEntityType, entityId: string) => {
+            fetchEntityData: async (entityType: SovdResourceEntityType, entityId: string, signal?: AbortSignal) => {
                 const { client } = get();
                 if (!client) return [];
-                const { data, error: fetchError } = await getEntityData(client, entityType, entityId);
+                const { data, error: fetchError } = await getEntityData(client, entityType, entityId, signal);
                 if (fetchError) return [];
                 return transformDataResponse(data);
             },
 
-            fetchEntityOperations: async (entityType: SovdResourceEntityType, entityId: string) => {
+            fetchEntityOperations: async (
+                entityType: SovdResourceEntityType,
+                entityId: string,
+                signal?: AbortSignal
+            ) => {
                 const { client } = get();
                 if (!client) return [];
-                const { data, error: fetchError } = await getEntityOperations(client, entityType, entityId);
+                const { data, error: fetchError } = await getEntityOperations(client, entityType, entityId, signal);
                 if (fetchError) return [];
                 return transformOperationsResponse(data);
             },
 
-            listEntityFaults: async (entityType: SovdResourceEntityType, entityId: string) => {
+            listEntityFaults: async (entityType: SovdResourceEntityType, entityId: string, signal?: AbortSignal) => {
                 const { client } = get();
                 if (!client) return { items: [], count: 0 };
-                const { data, error: fetchError } = await getEntityFaults(client, entityType, entityId);
+                const { data, error: fetchError } = await getEntityFaults(client, entityType, entityId, signal);
                 if (fetchError) return { items: [], count: 0 };
                 return transformFaultsResponse(data);
             },

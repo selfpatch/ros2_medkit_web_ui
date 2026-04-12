@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
     toTreeNode,
     updateNodeInTree,
@@ -21,8 +21,11 @@ import {
     parseTreePath,
     filterAppsByComponent,
     isPeerSourcedComponent,
+    fetchAllAppsDeduped,
+    __resetAppsRequestCache,
 } from './store';
 import type { SovdEntity, EntityTreeNode } from './types';
+import type { MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
 
 // =============================================================================
 // Helper factories
@@ -462,6 +465,59 @@ describe('filterAppsByComponent', () => {
         ];
         const result = filterAppsByComponent(tricky, 'ecu-rtmaps');
         expect(result).toEqual([]);
+    });
+});
+
+// =============================================================================
+// fetchAllAppsDeduped
+// =============================================================================
+
+describe('fetchAllAppsDeduped', () => {
+    beforeEach(() => {
+        __resetAppsRequestCache();
+    });
+
+    it('shares one in-flight request across concurrent calls', async () => {
+        let resolveGet: (value: { data: { items: Record<string, unknown>[] } }) => void = () => {};
+        const getSpy = vi.fn(
+            () =>
+                new Promise<{ data: { items: Record<string, unknown>[] } }>((resolve) => {
+                    resolveGet = resolve;
+                })
+        );
+        const client = { GET: getSpy } as unknown as MedkitClient;
+
+        // Fire three concurrent callers
+        const p1 = fetchAllAppsDeduped(client);
+        const p2 = fetchAllAppsDeduped(client);
+        const p3 = fetchAllAppsDeduped(client);
+
+        // Exactly one underlying HTTP call
+        expect(getSpy).toHaveBeenCalledTimes(1);
+
+        // Resolve and verify all three callers receive the same data
+        const apps = [{ id: 'one' }, { id: 'two' }];
+        resolveGet({ data: { items: apps } });
+        await expect(p1).resolves.toEqual(apps);
+        await expect(p2).resolves.toEqual(apps);
+        await expect(p3).resolves.toEqual(apps);
+    });
+
+    it('clears cache after settle so the next caller refetches', async () => {
+        const getSpy = vi.fn().mockResolvedValue({ data: { items: [{ id: 'a' }] } });
+        const client = { GET: getSpy } as unknown as MedkitClient;
+
+        await fetchAllAppsDeduped(client);
+        await fetchAllAppsDeduped(client);
+
+        expect(getSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns empty array on fetch failure', async () => {
+        const getSpy = vi.fn().mockRejectedValue(new Error('network down'));
+        const client = { GET: getSpy } as unknown as MedkitClient;
+
+        await expect(fetchAllAppsDeduped(client)).resolves.toEqual([]);
     });
 });
 
