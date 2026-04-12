@@ -45,6 +45,23 @@ vi.mock('react-toastify', () => ({
     },
 }));
 
+const mockTriggerPrepare = vi.fn();
+const mockDeleteUpdate = vi.fn();
+
+vi.mock('@/lib/updates-api', () => ({
+    triggerPrepare: (...args: unknown[]) => mockTriggerPrepare(...args),
+    triggerExecute: vi.fn(),
+    triggerAutomated: vi.fn(),
+    deleteUpdate: (...args: unknown[]) => mockDeleteUpdate(...args),
+    UpdatesApiError: class extends Error {
+        readonly status: number;
+        constructor(message: string, status: number) {
+            super(message);
+            this.status = status;
+        }
+    },
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -56,6 +73,7 @@ function makeResult(overrides: Partial<UseUpdatesPollingResult> = {}): UseUpdate
         error: null,
         notAvailable: false,
         refresh: vi.fn(),
+        effectiveInterval: 5000,
         ...overrides,
     };
 }
@@ -149,5 +167,36 @@ describe('UpdatesDashboard', () => {
         render(<UpdatesDashboard />);
 
         expect(screen.getByText(/Network timeout/)).toBeInTheDocument();
+    });
+
+    it('shows toast on successful action', async () => {
+        const user = userEvent.setup();
+        const refresh = vi.fn();
+        mockTriggerPrepare.mockResolvedValue(undefined);
+        mockUseUpdatesPolling.mockReturnValue(makeResult({ updates: [makeEntry('fw-v2', 'pending')], refresh }));
+        const { toast } = await import('react-toastify');
+
+        render(<UpdatesDashboard />);
+
+        const prepareBtn = screen.getByRole('button', { name: /prepare/i });
+        await user.click(prepareBtn);
+
+        expect(mockTriggerPrepare).toHaveBeenCalled();
+        expect(toast.success).toHaveBeenCalled();
+        expect(refresh).toHaveBeenCalled();
+    });
+
+    it('shows toast on failed action', async () => {
+        const user = userEvent.setup();
+        mockTriggerPrepare.mockRejectedValue(new Error('Update in progress'));
+        mockUseUpdatesPolling.mockReturnValue(makeResult({ updates: [makeEntry('fw-v2', 'pending')] }));
+        const { toast } = await import('react-toastify');
+
+        render(<UpdatesDashboard />);
+
+        const prepareBtn = screen.getByRole('button', { name: /prepare/i });
+        await user.click(prepareBtn);
+
+        expect(toast.error).toHaveBeenCalled();
     });
 });

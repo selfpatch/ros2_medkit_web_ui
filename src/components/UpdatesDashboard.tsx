@@ -54,6 +54,10 @@ export function UpdatesDashboard() {
     const handleAction = useCallback(
         async (id: string, action: UpdateAction) => {
             if (!baseUrl) return;
+            if (action === 'delete') {
+                const confirmed = window.confirm(`Delete update "${id}"? This cannot be undone.`);
+                if (!confirmed) return;
+            }
             try {
                 if (action === 'prepare') await triggerPrepare(baseUrl, id);
                 else if (action === 'execute') await triggerExecute(baseUrl, id);
