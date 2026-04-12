@@ -20,6 +20,7 @@ import {
     inferEntityTypeFromDepth,
     parseTreePath,
     filterAppsByComponent,
+    isPeerSourcedComponent,
 } from './store';
 import type { SovdEntity, EntityTreeNode } from './types';
 
@@ -425,9 +426,15 @@ describe('filterAppsByComponent', () => {
         { id: 'local-app', 'x-medkit': { component_id: 'ecu-primary' } },
         { id: 'data_viewer', 'x-medkit': { component_id: 'ecu-rtmaps' } },
         { id: 'lidar_sim', _links: { 'is-located-on': '/api/v1/components/ecu-rtmaps' } },
+        { id: 'top-level-app', component_id: 'ecu-tesla' },
         { id: 'orphan-app', 'x-medkit': {} },
         { id: 'bare-app' },
     ];
+
+    it('matches apps by top-level component_id', () => {
+        const result = filterAppsByComponent(apps, 'ecu-tesla');
+        expect(result.map((a) => a.id)).toEqual(['top-level-app']);
+    });
 
     it('matches apps by x-medkit.component_id', () => {
         const result = filterAppsByComponent(apps, 'ecu-primary');
@@ -455,5 +462,28 @@ describe('filterAppsByComponent', () => {
         ];
         const result = filterAppsByComponent(tricky, 'ecu-rtmaps');
         expect(result).toEqual([]);
+    });
+});
+
+// =============================================================================
+// isPeerSourcedComponent
+// =============================================================================
+
+describe('isPeerSourcedComponent', () => {
+    it('returns true for peer-sourced components', () => {
+        expect(isPeerSourcedComponent({ 'x-medkit': { source: 'peer:ecu-rtmaps' } })).toBe(true);
+    });
+
+    it('returns false for manifest-sourced components', () => {
+        expect(isPeerSourcedComponent({ 'x-medkit': { source: 'manifest' } })).toBe(false);
+    });
+
+    it('returns false for plugin-sourced components', () => {
+        expect(isPeerSourcedComponent({ 'x-medkit': { source: 'plugin' } })).toBe(false);
+    });
+
+    it('returns true when source metadata is missing (err on the side of completeness)', () => {
+        expect(isPeerSourcedComponent({})).toBe(true);
+        expect(isPeerSourcedComponent({ 'x-medkit': {} })).toBe(true);
     });
 });
