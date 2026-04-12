@@ -115,8 +115,19 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
     // Reset tab state when the entity changes so stale data from the
     // previous entity does not leak into the new one.
     useEffect(() => {
+        const reset: LoadedResources = {
+            data: false,
+            operations: false,
+            configurations: false,
+            faults: false,
+            logs: false,
+        };
         setActiveTab('data');
-        setLoadedTabs({ data: false, operations: false, configurations: false, faults: false, logs: false });
+        setLoadedTabs(reset);
+        // Synchronously update the ref so the load effect (which fires in
+        // the same commit) sees the cleared flags instead of stale `true`
+        // values from the previous entity.
+        loadedTabsRef.current = reset;
         setData([]);
         setOperations([]);
         setFaults([]);
