@@ -13,7 +13,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useSearchShortcut } from '@/hooks/useSearchShortcut';
 import { useAppStore } from '@/lib/store';
 
-type ViewMode = 'entity' | 'faults-dashboard';
+type ViewMode = 'entity' | 'faults-dashboard' | 'updates-dashboard';
 
 function App() {
     const { isConnected, serverUrl, connect, clearSelection, selectedPath } = useAppStore(
@@ -41,6 +41,15 @@ function App() {
         clearSelection();
         setViewMode('faults-dashboard');
         // Close sidebar on mobile when navigating
+        if (window.innerWidth < 768) {
+            setSidebarOpen(false);
+        }
+    }, [clearSelection]);
+
+    // Handle updates dashboard navigation
+    const handleUpdatesDashboardClick = useCallback(() => {
+        clearSelection();
+        setViewMode('updates-dashboard');
         if (window.innerWidth < 768) {
             setSidebarOpen(false);
         }
@@ -109,6 +118,7 @@ function App() {
                         <EntityTreeSidebar
                             onSettingsClick={() => setShowConnectionDialog(true)}
                             onFaultsDashboardClick={handleFaultsDashboardClick}
+                            onUpdatesDashboardClick={handleUpdatesDashboardClick}
                         />
                     </div>
 

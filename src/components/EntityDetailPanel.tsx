@@ -30,6 +30,7 @@ import { AppsPanel } from '@/components/AppsPanel';
 import { FunctionsPanel } from '@/components/FunctionsPanel';
 import { ServerInfoPanel } from '@/components/ServerInfoPanel';
 import { FaultsDashboard } from '@/components/FaultsDashboard';
+import { UpdatesDashboard } from '@/components/UpdatesDashboard';
 import { useAppStore, type AppState } from '@/lib/store';
 import type { ComponentTopic, Parameter, SovdResourceEntityType } from '@/lib/types';
 
@@ -330,7 +331,7 @@ function ParameterDetailCard({ entity, entityId, entityType }: ParameterDetailCa
 
 interface EntityDetailPanelProps {
     onConnectClick: () => void;
-    viewMode?: 'entity' | 'faults-dashboard';
+    viewMode?: 'entity' | 'faults-dashboard' | 'updates-dashboard';
     onEntitySelect?: () => void;
 }
 
@@ -460,6 +461,17 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             <main className="flex-1 overflow-y-auto p-6 bg-background">
                 <div className="max-w-4xl mx-auto">
                     <FaultsDashboard />
+                </div>
+            </main>
+        );
+    }
+
+    // Updates Dashboard view
+    if (viewMode === 'updates-dashboard' && !selectedPath) {
+        return (
+            <main className="flex-1 overflow-y-auto p-6 bg-background">
+                <div className="max-w-4xl mx-auto">
+                    <UpdatesDashboard />
                 </div>
             </main>
         );

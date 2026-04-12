@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useShallow } from 'zustand/shallow';
-import { Server, Settings, RefreshCw, Search, X, AlertTriangle, Layers, GitBranch } from 'lucide-react';
+import { Server, Settings, RefreshCw, Search, X, AlertTriangle, Layers, GitBranch, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EntityTreeNode } from '@/components/EntityTreeNode';
@@ -14,6 +14,7 @@ import type { EntityTreeNode as EntityTreeNodeType } from '@/lib/types';
 interface EntityTreeSidebarProps {
     onSettingsClick: () => void;
     onFaultsDashboardClick?: () => void;
+    onUpdatesDashboardClick?: () => void;
 }
 
 /**
@@ -41,7 +42,11 @@ function filterTree(nodes: EntityTreeNodeType[], query: string): EntityTreeNodeT
     return result;
 }
 
-export function EntityTreeSidebar({ onSettingsClick, onFaultsDashboardClick }: EntityTreeSidebarProps) {
+export function EntityTreeSidebar({
+    onSettingsClick,
+    onFaultsDashboardClick,
+    onUpdatesDashboardClick,
+}: EntityTreeSidebarProps) {
     const [searchQuery, setSearchQuery] = useState('');
     const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -217,9 +222,9 @@ export function EntityTreeSidebar({ onSettingsClick, onFaultsDashboardClick }: E
                 )}
             </div>
 
-            {/* Quick Actions - Faults Dashboard */}
+            {/* Quick Actions */}
             {isConnected && (
-                <div className="p-2 border-t">
+                <div className="p-2 border-t space-y-0.5">
                     <Button
                         variant="ghost"
                         size="sm"
@@ -229,6 +234,15 @@ export function EntityTreeSidebar({ onSettingsClick, onFaultsDashboardClick }: E
                         <AlertTriangle className="w-4 h-4 text-amber-500" />
                         <span>Faults Dashboard</span>
                         <FaultsCountBadge />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start gap-2"
+                        onClick={onUpdatesDashboardClick}
+                    >
+                        <Package className="w-4 h-4 text-blue-500" />
+                        <span>Software Updates</span>
                     </Button>
                 </div>
             )}
