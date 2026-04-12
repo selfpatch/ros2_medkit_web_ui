@@ -42,6 +42,11 @@ async function ensureOk(res: Response): Promise<void> {
     }
 }
 
+function updatePath(baseUrl: string, id: string, suffix?: string): string {
+    const encoded = encodeURIComponent(id);
+    return suffix ? `${baseUrl}/updates/${encoded}/${suffix}` : `${baseUrl}/updates/${encoded}`;
+}
+
 /** GET /updates - returns list of update IDs */
 export async function fetchUpdateIds(baseUrl: string, signal?: AbortSignal): Promise<string[]> {
     const res = await fetch(`${baseUrl}/updates`, { signal });
@@ -52,7 +57,7 @@ export async function fetchUpdateIds(baseUrl: string, signal?: AbortSignal): Pro
 
 /** GET /updates/{id}/status - returns update status with progress */
 export async function fetchUpdateStatus(baseUrl: string, id: string, signal?: AbortSignal): Promise<UpdateStatus> {
-    const res = await fetch(`${baseUrl}/updates/${id}/status`, { signal });
+    const res = await fetch(updatePath(baseUrl, id, 'status'), { signal });
     await ensureOk(res);
     return res.json();
 }
@@ -63,14 +68,14 @@ export async function fetchUpdateDetail(
     id: string,
     signal?: AbortSignal
 ): Promise<Record<string, unknown>> {
-    const res = await fetch(`${baseUrl}/updates/${id}`, { signal });
+    const res = await fetch(updatePath(baseUrl, id), { signal });
     await ensureOk(res);
     return res.json();
 }
 
 /** PUT /updates/{id}/prepare - start preparation (202) */
 export async function triggerPrepare(baseUrl: string, id: string, data?: unknown): Promise<void> {
-    const res = await fetch(`${baseUrl}/updates/${id}/prepare`, {
+    const res = await fetch(updatePath(baseUrl, id, 'prepare'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data ?? {}),
@@ -80,7 +85,7 @@ export async function triggerPrepare(baseUrl: string, id: string, data?: unknown
 
 /** PUT /updates/{id}/execute - start execution (202) */
 export async function triggerExecute(baseUrl: string, id: string, data?: unknown): Promise<void> {
-    const res = await fetch(`${baseUrl}/updates/${id}/execute`, {
+    const res = await fetch(updatePath(baseUrl, id, 'execute'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data ?? {}),
@@ -90,7 +95,7 @@ export async function triggerExecute(baseUrl: string, id: string, data?: unknown
 
 /** PUT /updates/{id}/automated - start automated update (202) */
 export async function triggerAutomated(baseUrl: string, id: string, data?: unknown): Promise<void> {
-    const res = await fetch(`${baseUrl}/updates/${id}/automated`, {
+    const res = await fetch(updatePath(baseUrl, id, 'automated'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data ?? {}),
@@ -100,6 +105,6 @@ export async function triggerAutomated(baseUrl: string, id: string, data?: unkno
 
 /** DELETE /updates/{id} - remove update (204) */
 export async function deleteUpdate(baseUrl: string, id: string): Promise<void> {
-    const res = await fetch(`${baseUrl}/updates/${id}`, { method: 'DELETE' });
+    const res = await fetch(updatePath(baseUrl, id), { method: 'DELETE' });
     await ensureOk(res);
 }

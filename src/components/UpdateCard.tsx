@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
@@ -88,20 +88,38 @@ export function UpdateCard({ entry, baseUrl, onAction }: UpdateCardProps) {
     const [detailOpen, setDetailOpen] = useState(false);
     const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
     const [detailLoading, setDetailLoading] = useState(false);
+    const detailAbortRef = useRef<AbortController | null>(null);
 
     const handleViewDetails = useCallback(async () => {
         if (!baseUrl) return;
+        detailAbortRef.current?.abort();
+        const controller = new AbortController();
+        detailAbortRef.current = controller;
+        setDetail(null);
         setDetailOpen(true);
         setDetailLoading(true);
         try {
-            const data = await fetchUpdateDetail(baseUrl, id);
-            setDetail(data);
+            const data = await fetchUpdateDetail(baseUrl, id, controller.signal);
+            if (!controller.signal.aborted) {
+                setDetail(data);
+            }
         } catch {
-            setDetail({ error: 'Failed to load details' });
+            if (!controller.signal.aborted) {
+                setDetail({ error: 'Failed to load details' });
+            }
         } finally {
-            setDetailLoading(false);
+            if (!controller.signal.aborted) {
+                setDetailLoading(false);
+            }
         }
     }, [baseUrl, id]);
+
+    const handleDetailClose = useCallback((open: boolean) => {
+        if (!open) {
+            detailAbortRef.current?.abort();
+        }
+        setDetailOpen(open);
+    }, []);
 
     const isFailed = status?.status === 'failed';
 
@@ -189,7 +207,7 @@ export function UpdateCard({ entry, baseUrl, onAction }: UpdateCardProps) {
                 )}
             </CardContent>
 
-            <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+            <Dialog open={detailOpen} onOpenChange={handleDetailClose}>
                 <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Update: {id}</DialogTitle>
