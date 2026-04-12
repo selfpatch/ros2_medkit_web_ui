@@ -377,6 +377,12 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
         }
     }, [selectedPath, onEntitySelect]);
 
+    // Reset the component-view resource tab to Data when the entity changes,
+    // so switching between components doesn't show stale tab state.
+    useEffect(() => {
+        setActiveTab('data');
+    }, [selectedEntity?.id]);
+
     // Fetch resource counts when entity changes
     useEffect(() => {
         const emptyCounts: Record<ResourceTabId, number> = {
@@ -645,12 +651,18 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
 
                     {/* Area Entity View */}
                     {isArea && !hasError && (
-                        <AreasPanel areaId={selectedEntity.id} areaName={selectedEntity.name} path={selectedPath} />
+                        <AreasPanel
+                            key={selectedEntity.id}
+                            areaId={selectedEntity.id}
+                            areaName={selectedEntity.name}
+                            path={selectedPath}
+                        />
                     )}
 
                     {/* App Entity View */}
                     {isApp && !hasError && (
                         <AppsPanel
+                            key={selectedEntity.id}
                             appId={selectedEntity.id}
                             appName={selectedEntity.name}
                             fqn={selectedEntity.fqn as string | undefined}
@@ -665,6 +677,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                     {/* Function Entity View */}
                     {isFunction && !hasError && (
                         <FunctionsPanel
+                            key={selectedEntity.id}
                             functionId={selectedEntity.id}
                             functionName={selectedEntity.name}
                             description={selectedEntity.description as string | undefined}

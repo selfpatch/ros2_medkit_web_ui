@@ -112,6 +112,16 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
         [fetchEntityData, fetchEntityOperations, fetchConfigurations, listEntityFaults, entityId, entityType]
     );
 
+    // Reset tab state when the entity changes so stale data from the
+    // previous entity does not leak into the new one.
+    useEffect(() => {
+        setActiveTab('data');
+        setLoadedTabs({ data: false, operations: false, configurations: false, faults: false, logs: false });
+        setData([]);
+        setOperations([]);
+        setFaults([]);
+    }, [entityId, entityType]);
+
     // Load resources when tab changes
     useEffect(() => {
         loadTabResources(activeTab);
