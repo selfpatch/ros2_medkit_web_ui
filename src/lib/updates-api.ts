@@ -69,31 +69,31 @@ export async function fetchUpdateDetail(
 }
 
 /** PUT /updates/{id}/prepare - start preparation (202) */
-export async function triggerPrepare(baseUrl: string, id: string): Promise<void> {
+export async function triggerPrepare(baseUrl: string, id: string, data?: unknown): Promise<void> {
     const res = await fetch(`${baseUrl}/updates/${id}/prepare`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(data ?? {}),
     });
     await ensureOk(res);
 }
 
 /** PUT /updates/{id}/execute - start execution (202) */
-export async function triggerExecute(baseUrl: string, id: string): Promise<void> {
+export async function triggerExecute(baseUrl: string, id: string, data?: unknown): Promise<void> {
     const res = await fetch(`${baseUrl}/updates/${id}/execute`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(data ?? {}),
     });
     await ensureOk(res);
 }
 
 /** PUT /updates/{id}/automated - start automated update (202) */
-export async function triggerAutomated(baseUrl: string, id: string): Promise<void> {
+export async function triggerAutomated(baseUrl: string, id: string, data?: unknown): Promise<void> {
     const res = await fetch(`${baseUrl}/updates/${id}/automated`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(data ?? {}),
     });
     await ensureOk(res);
 }

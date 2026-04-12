@@ -22,14 +22,13 @@ export interface UseUpdatesPollingResult {
     error: string | null;
     notAvailable: boolean;
     refresh: () => void;
+    effectiveInterval: number;
 }
 
-const DEFAULT_INTERVAL_MS = 2000;
+const IDLE_INTERVAL_MS = 5000;
+const ACTIVE_INTERVAL_MS = 2000;
 
-export function useUpdatesPolling(
-    baseUrl: string | null,
-    intervalMs: number = DEFAULT_INTERVAL_MS
-): UseUpdatesPollingResult {
+export function useUpdatesPolling(baseUrl: string | null, intervalMs?: number): UseUpdatesPollingResult {
     const [updates, setUpdates] = useState<UpdateEntry[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -121,16 +120,20 @@ export function useUpdatesPolling(
         };
     }, [baseUrl, isVisible, refreshTick, doFetch]);
 
+    // Adaptive polling: 2s when any update is active, 5s otherwise
+    const hasActiveUpdate = updates.some((u) => u.status?.status === 'inProgress' || u.status?.status === 'pending');
+    const effectiveInterval = intervalMs ?? (hasActiveUpdate ? ACTIVE_INTERVAL_MS : IDLE_INTERVAL_MS);
+
     // Interval polling (only when visible and baseUrl is set)
     useEffect(() => {
         if (!baseUrl || !isVisible) return;
 
         const id = setInterval(() => {
             void doFetch(false);
-        }, intervalMs);
+        }, effectiveInterval);
 
         return () => clearInterval(id);
-    }, [baseUrl, isVisible, intervalMs, doFetch]);
+    }, [baseUrl, isVisible, effectiveInterval, doFetch]);
 
     // Reset state when baseUrl changes to null
     useEffect(() => {
@@ -148,5 +151,5 @@ export function useUpdatesPolling(
         setRefreshTick((t) => t + 1);
     }, []);
 
-    return { updates, isLoading, error, notAvailable, refresh };
+    return { updates, isLoading, error, notAvailable, refresh, effectiveInterval };
 }
