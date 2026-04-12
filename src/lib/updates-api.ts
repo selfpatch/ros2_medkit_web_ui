@@ -51,15 +51,19 @@ function updatePath(baseUrl: string, id: string, suffix?: string): string {
 export async function fetchUpdateIds(baseUrl: string, signal?: AbortSignal): Promise<string[]> {
     const res = await fetch(`${baseUrl}/updates`, { signal });
     await ensureOk(res);
-    const data: { items: string[] } = await res.json();
-    return data.items;
+    const data = await res.json();
+    return Array.isArray(data?.items) ? data.items : [];
 }
 
 /** GET /updates/{id}/status - returns update status with progress */
 export async function fetchUpdateStatus(baseUrl: string, id: string, signal?: AbortSignal): Promise<UpdateStatus> {
     const res = await fetch(updatePath(baseUrl, id, 'status'), { signal });
     await ensureOk(res);
-    return res.json();
+    const data = await res.json();
+    if (typeof data?.status !== 'string') {
+        throw new UpdatesApiError('Invalid status response', 0);
+    }
+    return data as UpdateStatus;
 }
 
 /** GET /updates/{id} - returns plugin-defined detail object */
@@ -74,37 +78,45 @@ export async function fetchUpdateDetail(
 }
 
 /** PUT /updates/{id}/prepare - start preparation (202) */
-export async function triggerPrepare(baseUrl: string, id: string, data?: unknown): Promise<void> {
+export async function triggerPrepare(baseUrl: string, id: string, data?: unknown, signal?: AbortSignal): Promise<void> {
     const res = await fetch(updatePath(baseUrl, id, 'prepare'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data ?? {}),
+        signal,
     });
     await ensureOk(res);
 }
 
 /** PUT /updates/{id}/execute - start execution (202) */
-export async function triggerExecute(baseUrl: string, id: string, data?: unknown): Promise<void> {
+export async function triggerExecute(baseUrl: string, id: string, data?: unknown, signal?: AbortSignal): Promise<void> {
     const res = await fetch(updatePath(baseUrl, id, 'execute'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data ?? {}),
+        signal,
     });
     await ensureOk(res);
 }
 
 /** PUT /updates/{id}/automated - start automated update (202) */
-export async function triggerAutomated(baseUrl: string, id: string, data?: unknown): Promise<void> {
+export async function triggerAutomated(
+    baseUrl: string,
+    id: string,
+    data?: unknown,
+    signal?: AbortSignal
+): Promise<void> {
     const res = await fetch(updatePath(baseUrl, id, 'automated'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data ?? {}),
+        signal,
     });
     await ensureOk(res);
 }
 
 /** DELETE /updates/{id} - remove update (204) */
-export async function deleteUpdate(baseUrl: string, id: string): Promise<void> {
-    const res = await fetch(updatePath(baseUrl, id), { method: 'DELETE' });
+export async function deleteUpdate(baseUrl: string, id: string, signal?: AbortSignal): Promise<void> {
+    const res = await fetch(updatePath(baseUrl, id), { method: 'DELETE', signal });
     await ensureOk(res);
 }

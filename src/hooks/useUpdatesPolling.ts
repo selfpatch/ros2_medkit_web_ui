@@ -41,15 +41,20 @@ export function useUpdatesPolling(baseUrl: string | null, intervalMs?: number): 
     const hasLoadedRef = useRef(false);
     // AbortController for in-flight fetches
     const abortRef = useRef<AbortController | null>(null);
+    const fetchingRef = useRef(false);
     const [refreshTick, setRefreshTick] = useState(0);
 
     const doFetch = useCallback(
-        async (isInitial: boolean) => {
+        async (isInitial: boolean, force: boolean = false) => {
             if (!baseUrl) return;
+
+            // Skip if a fetch is already in flight (prevents starvation on slow networks)
+            if (fetchingRef.current && !force) return;
 
             abortRef.current?.abort();
             const controller = new AbortController();
             abortRef.current = controller;
+            fetchingRef.current = true;
 
             if (isInitial && !hasLoadedRef.current) {
                 setIsLoading(true);
@@ -90,6 +95,7 @@ export function useUpdatesPolling(baseUrl: string | null, intervalMs?: number): 
                     setError(err instanceof Error ? err.message : String(err));
                 }
             } finally {
+                fetchingRef.current = false;
                 if (!controller.signal.aborted) {
                     setIsLoading(false);
                 }
@@ -113,7 +119,7 @@ export function useUpdatesPolling(baseUrl: string | null, intervalMs?: number): 
         if (!isVisible) return;
 
         const isInitial = !hasLoadedRef.current;
-        void doFetch(isInitial);
+        void doFetch(isInitial, true);
 
         return () => {
             abortRef.current?.abort();

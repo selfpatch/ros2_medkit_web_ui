@@ -26,6 +26,7 @@ export type UpdateAction = 'prepare' | 'execute' | 'automated' | 'delete';
 interface UpdateCardProps {
     entry: UpdateEntry;
     baseUrl?: string | null;
+    busy?: boolean;
     onAction?: (id: string, action: UpdateAction) => void;
 }
 
@@ -70,6 +71,10 @@ function actionButtonsForStatus(status: UpdateStatusValue): UpdateAction[] {
     }
 }
 
+function clampProgress(value: number): number {
+    return Math.min(100, Math.max(0, value));
+}
+
 function actionLabel(action: UpdateAction): string {
     switch (action) {
         case 'prepare':
@@ -83,7 +88,7 @@ function actionLabel(action: UpdateAction): string {
     }
 }
 
-export function UpdateCard({ entry, baseUrl, onAction }: UpdateCardProps) {
+export function UpdateCard({ entry, baseUrl, busy, onAction }: UpdateCardProps) {
     const { id, status } = entry;
     const [detailOpen, setDetailOpen] = useState(false);
     const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
@@ -151,21 +156,25 @@ export function UpdateCard({ entry, baseUrl, onAction }: UpdateCardProps) {
 
                 {status !== null && status !== undefined && (
                     <>
-                        {status.progress !== undefined && (
-                            <div
-                                role="progressbar"
-                                aria-label={`Progress for update ${id}`}
-                                aria-valuenow={status.progress}
-                                aria-valuemin={0}
-                                aria-valuemax={100}
-                                className="w-full h-2 rounded-full bg-muted overflow-hidden"
-                            >
-                                <div
-                                    className={`h-full ${progressBarColor(status.status)} transition-all`}
-                                    style={{ width: `${status.progress}%` }}
-                                />
-                            </div>
-                        )}
+                        {status.progress !== undefined &&
+                            (() => {
+                                const clamped = clampProgress(status.progress);
+                                return (
+                                    <div
+                                        role="progressbar"
+                                        aria-label={`Progress for update ${id}`}
+                                        aria-valuenow={clamped}
+                                        aria-valuemin={0}
+                                        aria-valuemax={100}
+                                        className="w-full h-2 rounded-full bg-muted overflow-hidden"
+                                    >
+                                        <div
+                                            className={`h-full ${progressBarColor(status.status)} transition-all`}
+                                            style={{ width: `${clamped}%` }}
+                                        />
+                                    </div>
+                                );
+                            })()}
 
                         {status.sub_progress && status.sub_progress.length > 0 && (
                             <ul className="space-y-1">
@@ -175,10 +184,12 @@ export function UpdateCard({ entry, baseUrl, onAction }: UpdateCardProps) {
                                         <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
                                             <div
                                                 className={`h-full ${progressBarColor(status.status)}`}
-                                                style={{ width: `${sub.progress}%` }}
+                                                style={{ width: `${clampProgress(sub.progress)}%` }}
                                             />
                                         </div>
-                                        <span className="w-9 text-right tabular-nums">{sub.progress}%</span>
+                                        <span className="w-9 text-right tabular-nums">
+                                            {clampProgress(sub.progress)}%
+                                        </span>
                                     </li>
                                 ))}
                             </ul>
@@ -198,6 +209,7 @@ export function UpdateCard({ entry, baseUrl, onAction }: UpdateCardProps) {
                                         key={action}
                                         size="sm"
                                         variant={action === 'delete' ? 'destructive' : 'outline'}
+                                        disabled={busy}
                                         onClick={() => onAction(id, action)}
                                     >
                                         {actionLabel(action)}
