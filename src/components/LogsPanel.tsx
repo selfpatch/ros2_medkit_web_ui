@@ -152,9 +152,9 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
         return () => clearInterval(id);
     }, [autoRefreshEnabled, isDocumentVisible, refreshIntervalMs, doFetch]);
 
-    // Reset config-row state when the entity changes so cached values from
-    // the previous entity do not leak into the new one (avoids saving stale
-    // config to a different entity).
+    // Reset ALL local state when the entity changes so nothing from the
+    // previous entity leaks into the new one (config, toolbar filters,
+    // expanded rows, display cap).
     useEffect(() => {
         setConfigOpen(false);
         setConfigLoaded(false);
@@ -162,12 +162,26 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
         setConfigSeverity('debug');
         setConfigMaxEntries(100);
         setConfigSaving(false);
+        setSeverity('debug');
+        setContextDraft('');
+        setContextFilter('');
+        setMessageSearch('');
+        setExpandedIds(new Set());
+        setShowAllEntries(false);
     }, [entityId, entityType]);
 
     const trimmedSearch = messageSearch.trim().toLowerCase();
-    const displayedEntries = trimmedSearch
+    const filteredEntries = trimmedSearch
         ? entries.filter((e) => e.message.toLowerCase().includes(trimmedSearch))
         : entries;
+
+    const DISPLAY_CAP = 200;
+    const [showAllEntries, setShowAllEntries] = useState(false);
+    const displayedEntries =
+        showAllEntries || filteredEntries.length <= DISPLAY_CAP
+            ? filteredEntries
+            : filteredEntries.slice(0, DISPLAY_CAP);
+    const isCapped = !showAllEntries && filteredEntries.length > DISPLAY_CAP;
 
     const handleClear = useCallback(() => {
         setEntries([]);
@@ -473,6 +487,17 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                                 })}
                             </tbody>
                         </table>
+                        {isCapped && (
+                            <div className="px-4 py-2 text-center border-t">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAllEntries(true)}
+                                    className="text-xs underline text-muted-foreground hover:text-foreground"
+                                >
+                                    Showing {DISPLAY_CAP} of {filteredEntries.length} entries - click to show all
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </CardContent>
             </Card>
