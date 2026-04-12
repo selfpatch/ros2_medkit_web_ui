@@ -967,5 +967,5 @@ export interface UpdateStatus {
  */
 export interface UpdateEntry {
     id: string;
-    status: UpdateStatus | null; // null while status is loading
+    status: UpdateStatus | null; // null = status fetch failed
 }

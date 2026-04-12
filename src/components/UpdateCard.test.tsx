@@ -30,15 +30,15 @@ describe('UpdateCard', () => {
         expect(screen.getByText(/update-abc-123/)).toBeInTheDocument();
     });
 
-    it('shows loading state when status is null', () => {
+    it('shows status unavailable when status is null', () => {
         const entry: UpdateEntry = {
-            id: 'update-loading',
+            id: 'update-failed-status',
             status: null,
         };
 
         render(<UpdateCard entry={entry} />);
 
-        expect(screen.getByText('Loading...')).toBeInTheDocument();
+        expect(screen.getByText('Status unavailable')).toBeInTheDocument();
     });
 
     it('shows pending badge', () => {
