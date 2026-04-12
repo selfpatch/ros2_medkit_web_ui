@@ -10,7 +10,7 @@ import {
     renderResourceTabContent,
     isResourceTabId,
     type ResourceTabId,
-} from '@/components/resource-tabs';
+} from '@/components/ResourceTabs';
 import type { ComponentTopic, Operation, Fault } from '@/lib/types';
 
 type AppTab = 'overview' | ResourceTabId;

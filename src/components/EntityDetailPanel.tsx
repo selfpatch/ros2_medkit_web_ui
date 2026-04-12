@@ -24,7 +24,7 @@ import { EntityDetailSkeleton } from '@/components/EntityDetailSkeleton';
 import { DataPanel } from '@/components/DataPanel';
 import { ConfigurationPanel } from '@/components/ConfigurationPanel';
 import { OperationsPanel } from '@/components/OperationsPanel';
-import { RESOURCE_TABS, renderResourceTabContent, type ResourceTabId } from '@/components/resource-tabs';
+import { RESOURCE_TABS, renderResourceTabContent, type ResourceTabId } from '@/components/ResourceTabs';
 import { AreasPanel } from '@/components/AreasPanel';
 import { AppsPanel } from '@/components/AppsPanel';
 import { FunctionsPanel } from '@/components/FunctionsPanel';
