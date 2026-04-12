@@ -82,9 +82,11 @@ export function useUpdatesPolling(baseUrl: string | null, intervalMs?: number): 
                 if ((err as { name?: string }).name === 'AbortError') return;
 
                 if (err instanceof UpdatesApiError && err.status === 501) {
+                    setError(null);
                     setNotAvailable(true);
                     setUpdates([]);
                 } else {
+                    setNotAvailable(false);
                     setError(err instanceof Error ? err.message : String(err));
                 }
             } finally {

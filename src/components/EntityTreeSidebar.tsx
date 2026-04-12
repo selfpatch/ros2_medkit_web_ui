@@ -235,15 +235,17 @@ export function EntityTreeSidebar({
                         Faults Dashboard
                         <FaultsCountBadge />
                     </Button>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="flex-1 justify-center gap-1.5 h-8 text-xs"
-                        onClick={onUpdatesDashboardClick}
-                    >
-                        <Package className="w-3.5 h-3.5 text-blue-500" />
-                        Software Updates
-                    </Button>
+                    {onUpdatesDashboardClick && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="flex-1 justify-center gap-1.5 h-8 text-xs"
+                            onClick={onUpdatesDashboardClick}
+                        >
+                            <Package className="w-3.5 h-3.5 text-blue-500" />
+                            Software Updates
+                        </Button>
+                    )}
                 </div>
             )}
         </aside>
