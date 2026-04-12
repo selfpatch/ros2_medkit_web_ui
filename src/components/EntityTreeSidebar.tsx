@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useShallow } from 'zustand/shallow';
-import { Server, Settings, RefreshCw, Search, X, AlertTriangle, Layers, GitBranch } from 'lucide-react';
+import { Server, Settings, RefreshCw, Search, X, AlertTriangle, Layers, GitBranch, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EntityTreeNode } from '@/components/EntityTreeNode';
@@ -14,6 +14,7 @@ import type { EntityTreeNode as EntityTreeNodeType } from '@/lib/types';
 interface EntityTreeSidebarProps {
     onSettingsClick: () => void;
     onFaultsDashboardClick?: () => void;
+    onUpdatesDashboardClick?: () => void;
 }
 
 /**
@@ -41,7 +42,11 @@ function filterTree(nodes: EntityTreeNodeType[], query: string): EntityTreeNodeT
     return result;
 }
 
-export function EntityTreeSidebar({ onSettingsClick, onFaultsDashboardClick }: EntityTreeSidebarProps) {
+export function EntityTreeSidebar({
+    onSettingsClick,
+    onFaultsDashboardClick,
+    onUpdatesDashboardClick,
+}: EntityTreeSidebarProps) {
     const [searchQuery, setSearchQuery] = useState('');
     const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -217,19 +222,32 @@ export function EntityTreeSidebar({ onSettingsClick, onFaultsDashboardClick }: E
                 )}
             </div>
 
-            {/* Quick Actions - Faults Dashboard */}
+            {/* Quick Actions */}
             {isConnected && (
-                <div className="p-2 border-t">
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full justify-start gap-2"
-                        onClick={onFaultsDashboardClick}
-                    >
-                        <AlertTriangle className="w-4 h-4 text-amber-500" />
-                        <span>Faults Dashboard</span>
-                        <FaultsCountBadge />
-                    </Button>
+                <div className="px-2 py-1.5 border-t flex gap-1">
+                    {onFaultsDashboardClick && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="flex-1 justify-center gap-1.5 h-8 text-xs"
+                            onClick={onFaultsDashboardClick}
+                        >
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                            Faults Dashboard
+                            <FaultsCountBadge />
+                        </Button>
+                    )}
+                    {onUpdatesDashboardClick && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="flex-1 justify-center gap-1.5 h-8 text-xs"
+                            onClick={onUpdatesDashboardClick}
+                        >
+                            <Package className="w-3.5 h-3.5 text-blue-500" />
+                            Software Updates
+                        </Button>
+                    )}
                 </div>
             )}
         </aside>

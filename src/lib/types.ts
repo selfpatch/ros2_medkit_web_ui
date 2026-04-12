@@ -933,3 +933,39 @@ export interface TokenRevokeRequest {
     /** Token type hint */
     token_type_hint?: 'refresh_token' | 'access_token';
 }
+
+// =============================================================================
+// Section 10: Software Updates (SOVD spec)
+// =============================================================================
+
+/**
+ * Update status values from SOVD spec
+ */
+export type UpdateStatusValue = 'pending' | 'inProgress' | 'completed' | 'failed';
+
+/**
+ * Sub-step progress for an update operation
+ */
+export interface UpdateSubProgress {
+    name: string;
+    progress: number; // 0-100
+}
+
+/**
+ * Status response from GET /updates/{id}/status
+ */
+export interface UpdateStatus {
+    status: UpdateStatusValue;
+    progress?: number; // 0-100
+    sub_progress?: UpdateSubProgress[];
+    error?: string;
+}
+
+/**
+ * Combined view: update ID + its polled status
+ * Assembled by useUpdatesPolling hook
+ */
+export interface UpdateEntry {
+    id: string;
+    status: UpdateStatus | null; // null = status fetch failed
+}
