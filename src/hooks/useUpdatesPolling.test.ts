@@ -15,7 +15,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { useUpdatesPolling } from './useUpdatesPolling';
-import type { UpdateStatus } from '@/lib/types';
+import type { UpdateEntry, UpdateStatus } from '@/lib/types';
 
 vi.mock('@/lib/updates-api', async (importOriginal) => {
     const original = await importOriginal<typeof import('@/lib/updates-api')>();
@@ -280,9 +280,9 @@ describe('useUpdatesPolling', () => {
 
         expect(result.current.updates).toHaveLength(3);
 
-        const okEntry = result.current.updates.find((u) => u.id === 'update-ok');
-        const failEntry = result.current.updates.find((u) => u.id === 'update-fail');
-        const ok2Entry = result.current.updates.find((u) => u.id === 'update-ok-2');
+        const okEntry = result.current.updates.find((u: UpdateEntry) => u.id === 'update-ok');
+        const failEntry = result.current.updates.find((u: UpdateEntry) => u.id === 'update-fail');
+        const ok2Entry = result.current.updates.find((u: UpdateEntry) => u.id === 'update-ok-2');
 
         expect(okEntry?.status).toEqual(STATUS_PENDING);
         expect(failEntry?.status).toBeNull();
