@@ -46,19 +46,29 @@ export function getEntityDetail(client: MedkitClient, entityType: SovdResourceEn
 // Configurations
 // =============================================================================
 
-export function getEntityConfigurations(client: MedkitClient, entityType: SovdResourceEntityType, entityId: string) {
+export function getEntityConfigurations(
+    client: MedkitClient,
+    entityType: SovdResourceEntityType,
+    entityId: string,
+    signal?: AbortSignal
+) {
     switch (entityType) {
         case 'apps':
-            return client.GET('/apps/{app_id}/configurations', { params: { path: { app_id: entityId } } });
+            return client.GET('/apps/{app_id}/configurations', { params: { path: { app_id: entityId } }, signal });
         case 'components':
             return client.GET('/components/{component_id}/configurations', {
                 params: { path: { component_id: entityId } },
+                signal,
             });
         case 'areas':
-            return client.GET('/areas/{area_id}/configurations', { params: { path: { area_id: entityId } } });
+            return client.GET('/areas/{area_id}/configurations', {
+                params: { path: { area_id: entityId } },
+                signal,
+            });
         case 'functions':
             return client.GET('/functions/{function_id}/configurations', {
                 params: { path: { function_id: entityId } },
+                signal,
             });
     }
 }
@@ -167,16 +177,27 @@ export function deleteEntityConfigurations(client: MedkitClient, entityType: Sov
 // Data
 // =============================================================================
 
-export function getEntityData(client: MedkitClient, entityType: SovdResourceEntityType, entityId: string) {
+export function getEntityData(
+    client: MedkitClient,
+    entityType: SovdResourceEntityType,
+    entityId: string,
+    signal?: AbortSignal
+) {
     switch (entityType) {
         case 'apps':
-            return client.GET('/apps/{app_id}/data', { params: { path: { app_id: entityId } } });
+            return client.GET('/apps/{app_id}/data', { params: { path: { app_id: entityId } }, signal });
         case 'components':
-            return client.GET('/components/{component_id}/data', { params: { path: { component_id: entityId } } });
+            return client.GET('/components/{component_id}/data', {
+                params: { path: { component_id: entityId } },
+                signal,
+            });
         case 'areas':
-            return client.GET('/areas/{area_id}/data', { params: { path: { area_id: entityId } } });
+            return client.GET('/areas/{area_id}/data', { params: { path: { area_id: entityId } }, signal });
         case 'functions':
-            return client.GET('/functions/{function_id}/data', { params: { path: { function_id: entityId } } });
+            return client.GET('/functions/{function_id}/data', {
+                params: { path: { function_id: entityId } },
+                signal,
+            });
     }
 }
 
@@ -241,19 +262,29 @@ export function putEntityDataItem(
 // Operations
 // =============================================================================
 
-export function getEntityOperations(client: MedkitClient, entityType: SovdResourceEntityType, entityId: string) {
+export function getEntityOperations(
+    client: MedkitClient,
+    entityType: SovdResourceEntityType,
+    entityId: string,
+    signal?: AbortSignal
+) {
     switch (entityType) {
         case 'apps':
-            return client.GET('/apps/{app_id}/operations', { params: { path: { app_id: entityId } } });
+            return client.GET('/apps/{app_id}/operations', { params: { path: { app_id: entityId } }, signal });
         case 'components':
             return client.GET('/components/{component_id}/operations', {
                 params: { path: { component_id: entityId } },
+                signal,
             });
         case 'areas':
-            return client.GET('/areas/{area_id}/operations', { params: { path: { area_id: entityId } } });
+            return client.GET('/areas/{area_id}/operations', {
+                params: { path: { area_id: entityId } },
+                signal,
+            });
         case 'functions':
             return client.GET('/functions/{function_id}/operations', {
                 params: { path: { function_id: entityId } },
+                signal,
             });
     }
 }
@@ -359,19 +390,26 @@ export function deleteEntityExecution(
 // Faults
 // =============================================================================
 
-export function getEntityFaults(client: MedkitClient, entityType: SovdResourceEntityType, entityId: string) {
+export function getEntityFaults(
+    client: MedkitClient,
+    entityType: SovdResourceEntityType,
+    entityId: string,
+    signal?: AbortSignal
+) {
     switch (entityType) {
         case 'apps':
-            return client.GET('/apps/{app_id}/faults', { params: { path: { app_id: entityId } } });
+            return client.GET('/apps/{app_id}/faults', { params: { path: { app_id: entityId } }, signal });
         case 'components':
             return client.GET('/components/{component_id}/faults', {
                 params: { path: { component_id: entityId } },
+                signal,
             });
         case 'areas':
-            return client.GET('/areas/{area_id}/faults', { params: { path: { area_id: entityId } } });
+            return client.GET('/areas/{area_id}/faults', { params: { path: { area_id: entityId } }, signal });
         case 'functions':
             return client.GET('/functions/{function_id}/faults', {
                 params: { path: { function_id: entityId } },
+                signal,
             });
     }
 }
