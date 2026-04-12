@@ -62,6 +62,7 @@ describe('LogsPanel', () => {
     });
 
     afterEach(() => {
+        vi.restoreAllMocks();
         vi.useRealTimers();
     });
 
