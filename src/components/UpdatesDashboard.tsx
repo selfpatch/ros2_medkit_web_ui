@@ -14,7 +14,7 @@
 
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/shallow';
-import { Package, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Package, RefreshCw, AlertTriangle, Server } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { normalizeBaseUrl } from '@selfpatch/ros2-medkit-client-ts';
 import { Card, CardContent } from '@/components/ui/card';
@@ -86,6 +86,16 @@ export function UpdatesDashboard() {
             </Button>
         </div>
     );
+
+    if (!isConnected) {
+        return (
+            <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
+                <Server className="h-10 w-10 mb-3 opacity-50" />
+                <p className="font-medium">Not connected</p>
+                <p className="text-sm mt-1">Connect to a gateway to view software updates.</p>
+            </div>
+        );
+    }
 
     if (isLoading && updates.length === 0) {
         return (
