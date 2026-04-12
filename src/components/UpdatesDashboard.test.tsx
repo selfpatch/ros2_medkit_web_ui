@@ -199,4 +199,54 @@ describe('UpdatesDashboard', () => {
 
         expect(toast.error).toHaveBeenCalled();
     });
+
+    it('passes an AbortSignal to mutation actions', async () => {
+        const user = userEvent.setup();
+        mockTriggerPrepare.mockResolvedValue(undefined);
+        mockUseUpdatesPolling.mockReturnValue(makeResult({ updates: [makeEntry('fw-v2', 'pending')] }));
+
+        render(<UpdatesDashboard />);
+
+        const prepareBtn = screen.getByRole('button', { name: /prepare/i });
+        await user.click(prepareBtn);
+
+        // triggerPrepare is called with (baseUrl, id, data, signal) - assert signal is an AbortSignal
+        const call = mockTriggerPrepare.mock.calls[0]!;
+        const signal = call[3];
+        expect(signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('aborts in-flight mutations on unmount', async () => {
+        const user = userEvent.setup();
+        let resolvePrepare: () => void = () => {};
+        mockTriggerPrepare.mockImplementation(
+            () =>
+                new Promise<void>((resolve) => {
+                    resolvePrepare = resolve;
+                })
+        );
+        mockUseUpdatesPolling.mockReturnValue(makeResult({ updates: [makeEntry('fw-v2', 'pending')] }));
+        const { toast } = await import('react-toastify');
+        vi.mocked(toast.success).mockClear();
+
+        const { unmount } = render(<UpdatesDashboard />);
+
+        const prepareBtn = screen.getByRole('button', { name: /prepare/i });
+        await user.click(prepareBtn);
+
+        // Capture the signal before unmount
+        const signal = mockTriggerPrepare.mock.calls[0]![3] as AbortSignal;
+        expect(signal.aborted).toBe(false);
+
+        unmount();
+
+        expect(signal.aborted).toBe(true);
+
+        // Late-resolve the prepare call - must NOT fire a success toast on
+        // the unmounted component.
+        resolvePrepare();
+        await new Promise((r) => setTimeout(r, 0));
+
+        expect(toast.success).not.toHaveBeenCalled();
+    });
 });
