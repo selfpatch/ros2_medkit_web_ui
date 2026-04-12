@@ -14,7 +14,7 @@
 
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/shallow';
-import { Package, RefreshCw, AlertTriangle, Loader2 } from 'lucide-react';
+import { Package, RefreshCw, AlertTriangle } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { normalizeBaseUrl } from '@selfpatch/ros2-medkit-client-ts';
 import { Card, CardContent } from '@/components/ui/card';
@@ -142,7 +142,7 @@ export function UpdatesDashboard() {
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
-                            <Loader2 className="h-10 w-10 mb-3 opacity-30" />
+                            <Package className="h-10 w-10 mb-3 opacity-30" />
                             <p className="font-medium">No software updates registered</p>
                             <p className="text-sm mt-1">Updates appear here once the gateway reports them.</p>
                         </div>
@@ -157,7 +157,7 @@ export function UpdatesDashboard() {
             {header}
             <div className="grid gap-4 md:grid-cols-2">
                 {updates.map((entry) => (
-                    <UpdateCard key={entry.id} entry={entry} onAction={handleAction} />
+                    <UpdateCard key={entry.id} entry={entry} baseUrl={baseUrl} onAction={handleAction} />
                 ))}
             </div>
         </div>

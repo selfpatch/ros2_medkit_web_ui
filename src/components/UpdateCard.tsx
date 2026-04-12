@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Package, Loader2, AlertCircle } from 'lucide-react';
+import { Package, Loader2, AlertCircle, FileText } from 'lucide-react';
+import { fetchUpdateDetail } from '@/lib/updates-api';
 import type { UpdateEntry, UpdateStatusValue } from '@/lib/types';
 
 export type UpdateAction = 'prepare' | 'execute' | 'automated' | 'delete';
 
 interface UpdateCardProps {
     entry: UpdateEntry;
+    baseUrl?: string | null;
     onAction?: (id: string, action: UpdateAction) => void;
 }
 
@@ -56,13 +60,13 @@ function progressBarColor(status: UpdateStatusValue): string {
 function actionButtonsForStatus(status: UpdateStatusValue): UpdateAction[] {
     switch (status) {
         case 'pending':
-            return ['prepare', 'automated', 'delete'];
+            return ['prepare', 'execute', 'automated', 'delete'];
         case 'inProgress':
             return [];
         case 'completed':
             return ['delete'];
         case 'failed':
-            return ['prepare', 'delete'];
+            return ['prepare', 'execute', 'delete'];
     }
 }
 
@@ -79,8 +83,25 @@ function actionLabel(action: UpdateAction): string {
     }
 }
 
-export function UpdateCard({ entry, onAction }: UpdateCardProps) {
+export function UpdateCard({ entry, baseUrl, onAction }: UpdateCardProps) {
     const { id, status } = entry;
+    const [detailOpen, setDetailOpen] = useState(false);
+    const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+    const [detailLoading, setDetailLoading] = useState(false);
+
+    const handleViewDetails = useCallback(async () => {
+        if (!baseUrl) return;
+        setDetailOpen(true);
+        setDetailLoading(true);
+        try {
+            const data = await fetchUpdateDetail(baseUrl, id);
+            setDetail(data);
+        } catch {
+            setDetail({ error: 'Failed to load details' });
+        } finally {
+            setDetailLoading(false);
+        }
+    }, [baseUrl, id]);
 
     const isFailed = status?.status === 'failed';
 
@@ -145,9 +166,9 @@ export function UpdateCard({ entry, onAction }: UpdateCardProps) {
                             </div>
                         )}
 
-                        {onAction && (
-                            <div className="flex flex-wrap gap-2 pt-1">
-                                {actionButtonsForStatus(status.status).map((action) => (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                            {onAction &&
+                                actionButtonsForStatus(status.status).map((action) => (
                                     <Button
                                         key={action}
                                         size="sm"
@@ -157,11 +178,34 @@ export function UpdateCard({ entry, onAction }: UpdateCardProps) {
                                         {actionLabel(action)}
                                     </Button>
                                 ))}
-                            </div>
-                        )}
+                            {baseUrl && (
+                                <Button size="sm" variant="ghost" onClick={handleViewDetails}>
+                                    <FileText className="h-3.5 w-3.5 mr-1" />
+                                    Details
+                                </Button>
+                            )}
+                        </div>
                     </>
                 )}
             </CardContent>
+
+            <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+                <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>Update: {id}</DialogTitle>
+                    </DialogHeader>
+                    {detailLoading ? (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading details...
+                        </div>
+                    ) : (
+                        <pre className="text-xs bg-muted rounded-md p-3 overflow-x-auto whitespace-pre-wrap">
+                            {JSON.stringify(detail, null, 2)}
+                        </pre>
+                    )}
+                </DialogContent>
+            </Dialog>
         </Card>
     );
 }
