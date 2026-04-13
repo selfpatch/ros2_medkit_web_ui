@@ -193,6 +193,10 @@ interface RawOperation {
  * Transform the raw operations list response into `Operation[]`.
  *
  * Extracts `kind`, `path`, and `type` from the `x-medkit` vendor extension.
+ *
+ * NOTE: currently only reads `x-medkit.ros2.*`. Extending the generic
+ * middleware fallback here (parity with `transformDataResponse`) is tracked
+ * separately.
  */
 export function transformOperationsResponse(rawData: unknown): Operation[] {
     if (!rawData || typeof rawData !== 'object') return [];
@@ -254,12 +258,27 @@ export function transformOperationsResponse(rawData: unknown): Operation[] {
 
 /**
  * Raw data item shape from the gateway data endpoint.
+ *
+ * Fields under `x-medkit` are generic SOVD vendor extensions. Gateways may
+ * populate any subset depending on the underlying middleware; the UI treats
+ * them as optional metadata and falls back to ROS 2 semantics when they are
+ * absent.
  */
 interface RawDataItem {
     id: string;
     name?: string;
     category?: string;
+    /** Current value inlined by the gateway when available. */
+    value?: unknown;
     'x-medkit'?: {
+        /** Middleware identifier (e.g. 'ros2'); consumers treat any other value as non-ROS 2. */
+        middleware?: string;
+        /** Access mode ('read' | 'write' | 'readwrite'). */
+        access?: string;
+        /** Vendor-provided type label, used when no ROS 2 message type is available. */
+        type?: string;
+        /** Direction: 'publish'/'subscribe'/'both' or 'input'/'output' as alternative terms. */
+        direction?: string;
         ros2?: { topic?: string; type?: string; direction?: string };
         type_info?: { schema?: unknown; default_value?: unknown };
     };
@@ -269,21 +288,31 @@ interface RawDataItem {
  * Transform the raw data list response into `ComponentTopic[]`.
  *
  * Extracts topic metadata (type, direction, schema) from the `x-medkit` extension.
+ * When the gateway inlines a `value`, the resulting topic is marked as `status:
+ * 'data'` so that non-streaming middlewares render their current value immediately.
  */
 export function transformDataResponse(rawData: unknown): ComponentTopic[] {
     if (!rawData || typeof rawData !== 'object') return [];
     const dataItems = unwrapItems<RawDataItem>(rawData);
     return dataItems.map((item) => {
-        const rawTypeInfo = item['x-medkit']?.type_info;
+        const xm = item['x-medkit'];
+        const rawTypeInfo = xm?.type_info;
         const convertedSchema = rawTypeInfo?.schema ? convertJsonSchemaToTopicSchema(rawTypeInfo.schema) : undefined;
-        const direction = item['x-medkit']?.ros2?.direction;
-        const topicName = item.name || item['x-medkit']?.ros2?.topic || item.id;
+        // `input`/`output` are alternative direction terms used by non-ROS 2 middlewares.
+        const direction = xm?.ros2?.direction ?? xm?.direction;
+        const topicName = item.name || xm?.ros2?.topic || item.id;
+        // Prefer the ROS 2 message type when present so canonical topics stay
+        // recognisable; the generic vendor label only fills the gap when no
+        // ROS 2 type was published. This keeps precedence consistent with
+        // `direction` above.
+        const typeLabel = xm?.ros2?.type ?? xm?.type;
+        const hasValue = item.value !== undefined;
         return {
             topic: topicName,
             timestamp: Date.now(),
-            data: null,
-            status: 'metadata_only' as const,
-            type: item['x-medkit']?.ros2?.type,
+            data: hasValue ? item.value : null,
+            status: hasValue ? ('data' as const) : ('metadata_only' as const),
+            type: typeLabel,
             type_info: convertedSchema
                 ? {
                       schema: convertedSchema,
@@ -291,8 +320,8 @@ export function transformDataResponse(rawData: unknown): ComponentTopic[] {
                   }
                 : undefined,
             // Direction-based fields for apps/functions.
-            isPublisher: direction === 'publish' || direction === 'both',
-            isSubscriber: direction === 'subscribe' || direction === 'both',
+            isPublisher: direction === 'publish' || direction === 'both' || direction === 'output',
+            isSubscriber: direction === 'subscribe' || direction === 'both' || direction === 'input',
             uniqueKey: direction ? `${topicName}:${direction}` : topicName,
         };
     });
@@ -318,6 +347,10 @@ interface RawConfigurationsResponse {
  *
  * All meaningful data lives in the `x-medkit` extension. The `entityId` parameter
  * is used as a fallback when `x-medkit` fields are absent.
+ *
+ * NOTE: currently only reads `x-medkit.ros2.*`. Extending the generic
+ * middleware fallback here (parity with `transformDataResponse`) is tracked
+ * separately.
  */
 export function transformConfigurationsResponse(rawData: unknown, entityId: string): ComponentConfigurations {
     if (!rawData || typeof rawData !== 'object') {

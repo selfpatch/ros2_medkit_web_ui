@@ -437,6 +437,76 @@ describe('transformDataResponse', () => {
         const result = transformDataResponse({ items: [] });
         expect(result).toEqual([]);
     });
+
+    describe('generic vendor middleware extensions', () => {
+        it('marks status="data" and passes value through when gateway inlines value', () => {
+            const raw = {
+                id: 'sensor/temperature',
+                name: 'sensor/temperature',
+                value: 42.5,
+                'x-medkit': { middleware: 'generic', access: 'read', type: 'float32' },
+            };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.status).toBe('data');
+            expect(result[0]?.data).toBe(42.5);
+        });
+
+        it('keeps status="metadata_only" when value is absent', () => {
+            const raw = { id: 'x', name: 'x', 'x-medkit': { middleware: 'generic' } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.status).toBe('metadata_only');
+            expect(result[0]?.data).toBeNull();
+        });
+
+        it('preserves null value with status="data"', () => {
+            const raw = { id: 'x', name: 'x', value: null };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.status).toBe('data');
+            expect(result[0]?.data).toBeNull();
+        });
+
+        it('uses x-medkit.type as type label when ros2.type is absent', () => {
+            const raw = {
+                id: 'payload',
+                name: 'payload',
+                'x-medkit': { middleware: 'generic', type: 'u16' },
+            };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.type).toBe('u16');
+        });
+
+        it('prefers ros2.type over x-medkit.type when both present', () => {
+            const raw = {
+                id: 'x',
+                name: 'x',
+                'x-medkit': { type: 'generic-label', ros2: { type: 'std_msgs/msg/Int32' } },
+            };
+            const result = transformDataResponse({ items: [raw] });
+            // ROS 2 type is preferred so canonical topics stay recognisable.
+            // Keeps precedence consistent with `direction`.
+            expect(result[0]?.type).toBe('std_msgs/msg/Int32');
+        });
+
+        it('treats direction "output" as publish', () => {
+            const raw = { id: 'x', name: 'x', 'x-medkit': { direction: 'output' } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.isPublisher).toBe(true);
+            expect(result[0]?.isSubscriber).toBe(false);
+        });
+
+        it('treats direction "input" as subscribe', () => {
+            const raw = { id: 'x', name: 'x', 'x-medkit': { direction: 'input' } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.isPublisher).toBe(false);
+            expect(result[0]?.isSubscriber).toBe(true);
+        });
+
+        it('reads direction from x-medkit.direction when ros2.direction is absent', () => {
+            const raw = { id: 'x', name: 'x', 'x-medkit': { direction: 'publish' } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.uniqueKey).toBe('x:publish');
+        });
+    });
 });
 
 // =============================================================================
