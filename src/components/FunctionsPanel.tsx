@@ -1,17 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useShallow } from 'zustand/shallow';
-import {
-    AlertTriangle,
-    ChevronRight,
-    Cpu,
-    Database,
-    GitBranch,
-    Info,
-    Loader2,
-    Settings,
-    Users,
-    Zap,
-} from 'lucide-react';
+import { AlertTriangle, ChevronRight, Cpu, Database, GitBranch, Info, Loader2, Users, Zap } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '@/lib/store';
@@ -38,10 +27,12 @@ interface TabConfig {
     icon: typeof Database;
 }
 
+// Functions are capability aggregations without their own configuration surface,
+// so Config is intentionally omitted to avoid 404s on `/functions/{id}/configurations`.
 const FUNCTION_TABS: TabConfig[] = [
     { id: 'overview', label: 'Overview', icon: Info },
     { id: 'hosts', label: 'Hosts', icon: Cpu },
-    ...RESOURCE_TABS,
+    ...RESOURCE_TABS.filter((t) => t.id !== 'configurations'),
 ];
 
 interface FunctionsPanelProps {
@@ -68,23 +59,13 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
     const [faults, setFaults] = useState<Fault[]>([]);
     const [isLoading, setIsLoading] = useState(false);
 
-    const {
-        selectEntity,
-        getFunctionHosts,
-        fetchEntityData,
-        fetchEntityOperations,
-        fetchConfigurations,
-        listEntityFaults,
-        storeConfigurations,
-    } = useAppStore(
+    const { selectEntity, getFunctionHosts, fetchEntityData, fetchEntityOperations, listEntityFaults } = useAppStore(
         useShallow((state) => ({
             selectEntity: state.selectEntity,
             getFunctionHosts: state.getFunctionHosts,
             fetchEntityData: state.fetchEntityData,
             fetchEntityOperations: state.fetchEntityOperations,
-            fetchConfigurations: state.fetchConfigurations,
             listEntityFaults: state.listEntityFaults,
-            storeConfigurations: state.configurations,
         }))
     );
 
@@ -94,12 +75,12 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
             setIsLoading(true);
 
             try {
-                // Load hosts, data, operations, configurations, and faults in parallel
-                const [hostsData, topicsData, opsData, , faultsData] = await Promise.all([
+                // Functions do not expose a configurations collection; skip that fetch
+                // to avoid 404s on `/functions/{id}/configurations`.
+                const [hostsData, topicsData, opsData, faultsData] = await Promise.all([
                     getFunctionHosts(functionId).catch(() => [] as unknown[]),
                     fetchEntityData('functions', functionId).catch(() => [] as ComponentTopic[]),
                     fetchEntityOperations('functions', functionId).catch(() => [] as Operation[]),
-                    fetchConfigurations(functionId, 'functions'),
                     listEntityFaults('functions', functionId).catch(() => ({ items: [] as Fault[], count: 0 })),
                 ]);
 
@@ -124,7 +105,7 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
         };
 
         loadFunctionData();
-    }, [getFunctionHosts, fetchEntityData, fetchEntityOperations, fetchConfigurations, listEntityFaults, functionId]);
+    }, [getFunctionHosts, fetchEntityData, fetchEntityOperations, listEntityFaults, functionId]);
 
     const handleResourceClick = (resourcePath: string) => {
         if (onNavigate) {
@@ -166,7 +147,6 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                             if (tab.id === 'hosts') count = hosts.length;
                             if (tab.id === 'data') count = topics.length;
                             if (tab.id === 'operations') count = operations.length;
-                            if (tab.id === 'configurations') count = storeConfigurations.get(functionId)?.length || 0;
                             if (tab.id === 'faults') count = faults.length;
 
                             return (
@@ -214,7 +194,7 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                         )}
 
                         {/* Resource Summary */}
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                             <button
                                 onClick={() => setActiveTab('hosts')}
                                 className="p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left"
@@ -238,16 +218,6 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                                 <Zap className="w-4 h-4 text-amber-500 mb-1" />
                                 <div className="text-2xl font-semibold">{operations.length}</div>
                                 <div className="text-xs text-muted-foreground">Operations</div>
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('configurations')}
-                                className="p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left"
-                            >
-                                <Settings className="w-4 h-4 text-violet-500 mb-1" />
-                                <div className="text-2xl font-semibold">
-                                    {storeConfigurations.get(functionId)?.length || 0}
-                                </div>
-                                <div className="text-xs text-muted-foreground">Configs</div>
                             </button>
                             <button
                                 onClick={() => setActiveTab('faults')}
