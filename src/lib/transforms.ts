@@ -64,8 +64,10 @@ export interface RawFaultItem {
     severity: number;
     severity_label: string;
     status: string;
-    first_occurred: number;
-    last_occurred?: number;
+    /** Accepted as unix seconds (number), ISO 8601 string, or missing/invalid;
+     *  `transformFault` normalises all of these to an ISO timestamp. */
+    first_occurred: number | string | null | undefined;
+    last_occurred?: number | string | null;
     occurrence_count?: number;
     reporting_sources?: string[];
     /** Entity type if provided by the gateway (not currently included in
@@ -127,7 +129,26 @@ export function transformFault(apiFault: RawFaultItem): Fault {
         message: apiFault.description,
         severity,
         status,
-        timestamp: new Date(apiFault.first_occurred * 1000).toISOString(),
+        timestamp: (() => {
+            try {
+                if (typeof apiFault.first_occurred === 'number' && apiFault.first_occurred > 0) {
+                    return new Date(apiFault.first_occurred * 1000).toISOString();
+                }
+                if (typeof apiFault.first_occurred === 'string') {
+                    const parsed = new Date(apiFault.first_occurred);
+                    if (!Number.isNaN(parsed.getTime())) {
+                        return parsed.toISOString();
+                    }
+                }
+            } catch {
+                // fall through to the warn + fallback below
+            }
+            // Log a breadcrumb so operators correlating with syslog can tell
+            // the timestamp was fabricated by the UI and not reported by the
+            // gateway. Dev tools only; fallback keeps rendering alive.
+            console.warn('[transformFault] invalid first_occurred, falling back to now:', apiFault.first_occurred);
+            return new Date().toISOString();
+        })(),
         entity_id,
         entity_type,
         parameters: {

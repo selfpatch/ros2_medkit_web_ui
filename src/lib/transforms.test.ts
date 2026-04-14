@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
     unwrapItems,
     transformFault,
@@ -87,6 +87,58 @@ describe('transformFault', () => {
     it('maps first_occurred unix timestamp to ISO 8601 string', () => {
         const result = transformFault(makeFaultInput({ first_occurred: 1700000000 }));
         expect(result.timestamp).toBe(new Date(1700000000 * 1000).toISOString());
+    });
+
+    describe('timestamp defensive parsing', () => {
+        // All fallback branches must return an ISO string close to "now".
+        // Asserting recency (not just "doesn't throw") actually verifies the
+        // fallback fired and produced a sane value.
+        const expectRecent = (iso: string) => {
+            const ts = new Date(iso).getTime();
+            const now = Date.now();
+            expect(ts).toBeGreaterThan(now - 5000);
+            expect(ts).toBeLessThanOrEqual(now);
+        };
+
+        // Suppress the dev-tools breadcrumb console.warn in fallback cases.
+        let warnSpy: ReturnType<typeof vi.spyOn>;
+        beforeEach(() => {
+            warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        });
+        afterEach(() => {
+            warnSpy.mockRestore();
+        });
+
+        it('falls back to current time when first_occurred is 0', () => {
+            const result = transformFault(makeFaultInput({ first_occurred: 0 }));
+            expectRecent(result.timestamp);
+            expect(warnSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it('falls back to current time when first_occurred is negative', () => {
+            const result = transformFault(makeFaultInput({ first_occurred: -1 }));
+            expectRecent(result.timestamp);
+            expect(warnSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it('parses ISO 8601 string first_occurred', () => {
+            const iso = '2026-04-13T10:00:00.000Z';
+            const result = transformFault(makeFaultInput({ first_occurred: iso }));
+            expect(result.timestamp).toBe(iso);
+            expect(warnSpy).not.toHaveBeenCalled();
+        });
+
+        it('falls back to current time when first_occurred is an invalid string', () => {
+            const result = transformFault(makeFaultInput({ first_occurred: 'not-a-date' }));
+            expectRecent(result.timestamp);
+            expect(warnSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it('falls back to current time when first_occurred is missing', () => {
+            const result = transformFault(makeFaultInput({ first_occurred: undefined }));
+            expectRecent(result.timestamp);
+            expect(warnSpy).toHaveBeenCalledTimes(1);
+        });
     });
 
     it('defaults entity_type to "app" when not in raw data', () => {
