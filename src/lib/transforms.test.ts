@@ -21,6 +21,7 @@ import {
     transformDataResponse,
     transformConfigurationsResponse,
     transformBulkDataDescriptor,
+    type RawFaultItem,
 } from './transforms';
 
 // =============================================================================
@@ -269,6 +270,63 @@ describe('transformFault', () => {
         it('defaults to active for unknown status', () => {
             const result = transformFault(makeFaultInput({ status: 'UNKNOWN_STATUS' }));
             expect(result.status).toBe('active');
+        });
+
+        it('reads aggregatedStatus when status is an object', () => {
+            const result = transformFault(makeFaultInput({ status: { aggregatedStatus: 'active', extra: '1' } }));
+            expect(result.status).toBe('active');
+        });
+
+        it('maps object aggregatedStatus "passive" to pending', () => {
+            const result = transformFault(makeFaultInput({ status: { aggregatedStatus: 'passive' } }));
+            expect(result.status).toBe('pending');
+        });
+
+        it('does not throw when status is null', () => {
+            const result = transformFault(makeFaultInput({ status: null }));
+            expect(result.status).toBe('active');
+        });
+
+        it('does not throw when status is missing', () => {
+            const result = transformFault(makeFaultInput({ status: undefined }));
+            expect(result.status).toBe('active');
+        });
+    });
+
+    describe('field aliases', () => {
+        it('accepts code as a fallback for fault_code', () => {
+            const result = transformFault({
+                code: 'ALT_CODE',
+                description: 'x',
+                severity: 1,
+                severity_label: 'warn',
+                status: 'CONFIRMED',
+                first_occurred: 1700000000,
+            } as unknown as RawFaultItem);
+            expect(result.code).toBe('ALT_CODE');
+        });
+
+        it('accepts fault_name as a fallback for description', () => {
+            const result = transformFault({
+                fault_code: 'F1',
+                fault_name: 'Alternative description',
+                severity: 1,
+                severity_label: 'warn',
+                status: 'CONFIRMED',
+                first_occurred: 1700000000,
+            } as unknown as RawFaultItem);
+            expect(result.message).toBe('Alternative description');
+        });
+
+        it('does not throw when severity is undefined', () => {
+            const result = transformFault({
+                fault_code: 'F1',
+                description: 'x',
+                severity_label: 'warn',
+                status: 'CONFIRMED',
+                first_occurred: 1700000000,
+            } as unknown as RawFaultItem);
+            expect(result.severity).toBe('warning');
         });
     });
 
@@ -557,6 +615,30 @@ describe('transformDataResponse', () => {
             const raw = { id: 'x', name: 'x', 'x-medkit': { direction: 'publish' } };
             const result = transformDataResponse({ items: [raw] });
             expect(result[0]?.uniqueKey).toBe('x:publish');
+        });
+
+        it('passes through access="read"', () => {
+            const raw = { id: 'x', name: 'x', 'x-medkit': { access: 'read' } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.access).toBe('read');
+        });
+
+        it('passes through access="readwrite"', () => {
+            const raw = { id: 'x', name: 'x', 'x-medkit': { access: 'readwrite' } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.access).toBe('readwrite');
+        });
+
+        it('lowercases access for case-insensitive matching', () => {
+            const raw = { id: 'x', name: 'x', 'x-medkit': { access: 'WRITE' } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.access).toBe('write');
+        });
+
+        it('drops unrecognised access values', () => {
+            const raw = { id: 'x', name: 'x', 'x-medkit': { access: 'execute' } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.access).toBeUndefined();
         });
     });
 });

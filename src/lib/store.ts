@@ -213,7 +213,8 @@ export interface AppState {
     getFunctionHosts: (functionId: string) => Promise<unknown[]>;
     prefetchResourceCounts: (
         entityType: SovdResourceEntityType,
-        entityId: string
+        entityId: string,
+        signal?: AbortSignal
     ) => Promise<{ data: number; operations: number; configurations: number; faults: number }>;
 }
 
@@ -2132,7 +2133,11 @@ export const useAppStore = create<AppState>()(
                 return data ? unwrapItems<unknown>(data) : [];
             },
 
-            prefetchResourceCounts: async (entityType: SovdResourceEntityType, entityId: string) => {
+            prefetchResourceCounts: async (
+                entityType: SovdResourceEntityType,
+                entityId: string,
+                signal?: AbortSignal
+            ) => {
                 const { client } = get();
                 if (!client) return { data: 0, operations: 0, configurations: 0, faults: 0 };
 
@@ -2140,24 +2145,42 @@ export const useAppStore = create<AppState>()(
                 // The caller (EntityDetailPanel) already fetches entity data via fetchEntityData
                 // and overrides counts.data with the result length.
                 const [opsRes, configRes, faultsRes] = await Promise.all([
-                    getEntityOperations(client, entityType, entityId).catch(() => ({
+                    getEntityOperations(client, entityType, entityId, signal).catch(() => ({
                         data: undefined,
                         error: undefined,
                     })),
-                    getEntityConfigurations(client, entityType, entityId).catch(() => ({
+                    getEntityConfigurations(client, entityType, entityId, signal).catch(() => ({
                         data: undefined,
                         error: undefined,
                     })),
-                    getEntityFaults(client, entityType, entityId).catch(() => ({ data: undefined, error: undefined })),
+                    getEntityFaults(client, entityType, entityId, signal).catch(() => ({
+                        data: undefined,
+                        error: undefined,
+                    })),
                 ]);
 
+                // Isolate each transform call: a malformed payload from one
+                // resource (e.g. UDS DTC faults with non-canonical schema)
+                // must not crash the others or the caller's Promise.all.
+                const safeCount = <T>(fn: () => T, fallback: T): T => {
+                    try {
+                        return fn();
+                    } catch {
+                        return fallback;
+                    }
+                };
                 return {
                     data: 0,
-                    operations: opsRes.data ? unwrapItems(opsRes.data).length : 0,
+                    operations: opsRes.data ? safeCount(() => unwrapItems(opsRes.data).length, 0) : 0,
                     configurations: configRes.data
-                        ? transformConfigurationsResponse(configRes.data, entityId).parameters.length
+                        ? safeCount(
+                              () => transformConfigurationsResponse(configRes.data, entityId).parameters.length,
+                              0
+                          )
                         : 0,
-                    faults: faultsRes.data ? transformFaultsResponse(faultsRes.data).items.length : 0,
+                    faults: faultsRes.data
+                        ? safeCount(() => transformFaultsResponse(faultsRes.data).items.length, 0)
+                        : 0,
                 };
             },
 
