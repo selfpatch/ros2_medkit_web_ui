@@ -426,8 +426,10 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             logs: 0,
         };
         // Guard against late results from a previous entity overwriting the
-        // current entity's state. The cleanup flips `cancelled` so any setState
-        // calls after the entity changed become no-ops.
+        // current entity's state. The cleanup aborts in-flight requests AND
+        // flips `cancelled` so any setState calls after the entity changed
+        // become no-ops (covers transforms that ignore the abort signal).
+        const controller = new AbortController();
         let cancelled = false;
         const doFetchResourceCounts = async () => {
             // Mark topicsData as "not loaded yet for the current entity" so the
@@ -463,8 +465,8 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             try {
                 // Fetch resource counts and data in parallel
                 const [counts, dataRes] = await Promise.all([
-                    prefetchResourceCounts(entityType, entityId),
-                    fetchEntityData(entityType, entityId).catch(() => [] as ComponentTopic[]),
+                    prefetchResourceCounts(entityType, entityId, controller.signal),
+                    fetchEntityData(entityType, entityId, controller.signal).catch(() => [] as ComponentTopic[]),
                 ]);
 
                 if (cancelled) return;
@@ -486,6 +488,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
         doFetchResourceCounts();
         return () => {
             cancelled = true;
+            controller.abort();
         };
     }, [selectedEntity, prefetchResourceCounts, fetchEntityData]);
 

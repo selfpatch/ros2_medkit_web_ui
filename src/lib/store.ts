@@ -213,7 +213,8 @@ export interface AppState {
     getFunctionHosts: (functionId: string) => Promise<unknown[]>;
     prefetchResourceCounts: (
         entityType: SovdResourceEntityType,
-        entityId: string
+        entityId: string,
+        signal?: AbortSignal
     ) => Promise<{ data: number; operations: number; configurations: number; faults: number }>;
 }
 
@@ -2132,7 +2133,11 @@ export const useAppStore = create<AppState>()(
                 return data ? unwrapItems<unknown>(data) : [];
             },
 
-            prefetchResourceCounts: async (entityType: SovdResourceEntityType, entityId: string) => {
+            prefetchResourceCounts: async (
+                entityType: SovdResourceEntityType,
+                entityId: string,
+                signal?: AbortSignal
+            ) => {
                 const { client } = get();
                 if (!client) return { data: 0, operations: 0, configurations: 0, faults: 0 };
 
@@ -2140,15 +2145,18 @@ export const useAppStore = create<AppState>()(
                 // The caller (EntityDetailPanel) already fetches entity data via fetchEntityData
                 // and overrides counts.data with the result length.
                 const [opsRes, configRes, faultsRes] = await Promise.all([
-                    getEntityOperations(client, entityType, entityId).catch(() => ({
+                    getEntityOperations(client, entityType, entityId, signal).catch(() => ({
                         data: undefined,
                         error: undefined,
                     })),
-                    getEntityConfigurations(client, entityType, entityId).catch(() => ({
+                    getEntityConfigurations(client, entityType, entityId, signal).catch(() => ({
                         data: undefined,
                         error: undefined,
                     })),
-                    getEntityFaults(client, entityType, entityId).catch(() => ({ data: undefined, error: undefined })),
+                    getEntityFaults(client, entityType, entityId, signal).catch(() => ({
+                        data: undefined,
+                        error: undefined,
+                    })),
                 ]);
 
                 // Isolate each transform call: a malformed payload from one
