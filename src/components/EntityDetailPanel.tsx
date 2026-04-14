@@ -425,6 +425,10 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             faults: 0,
             logs: 0,
         };
+        // Guard against late results from a previous entity overwriting the
+        // current entity's state. The cleanup flips `cancelled` so any setState
+        // calls after the entity changed become no-ops.
+        let cancelled = false;
         const doFetchResourceCounts = async () => {
             // Mark topicsData as "not loaded yet for the current entity" so the
             // Data tab renders a skeleton instead of an empty-state flash while
@@ -463,6 +467,8 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                     fetchEntityData(entityType, entityId).catch(() => [] as ComponentTopic[]),
                 ]);
 
+                if (cancelled) return;
+
                 // Store the fetched data for the Data tab
                 const fetchedData = Array.isArray(dataRes) ? dataRes : [];
                 setTopicsData(fetchedData);
@@ -470,6 +476,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                 // Use the already-fetched data length instead of a separate request
                 setResourceCounts({ ...counts, data: fetchedData.length, logs: 0 });
             } catch {
+                if (cancelled) return;
                 // On unexpected failure fall back to "loaded empty" so the UI
                 // doesn't get stuck showing the skeleton forever.
                 setTopicsData([]);
@@ -477,6 +484,9 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
         };
 
         doFetchResourceCounts();
+        return () => {
+            cancelled = true;
+        };
     }, [selectedEntity, prefetchResourceCounts, fetchEntityData]);
 
     const handleCopyEntity = async () => {

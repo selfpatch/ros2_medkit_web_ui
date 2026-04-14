@@ -201,7 +201,15 @@ export function DataPanel({
 
     const isConnected = useAppStore((state) => state.isConnected);
     const hasData = topic.status === 'data' && topic.data !== null && topic.data !== undefined;
-    const canPublish = isConnected && !!(topic.type || topic.type_info || topic.data);
+    // `access` is the explicit per-item write capability; when present it
+    // overrides the legacy "any typed topic is publishable" heuristic so a
+    // read-only data item never surfaces a write form.
+    const canWrite = isConnected && topic.access !== 'read' && !!(topic.type || topic.type_info || topic.data);
+    // Use "Write Value" when the gateway told us this is a writable scalar
+    // (access === 'write' / 'readwrite'); fall back to "Publish Message" for
+    // streaming topics where the operation really is a publish.
+    const writeSectionLabel =
+        topic.access === 'write' || topic.access === 'readwrite' ? 'Write Value' : 'Publish Message';
 
     const handleCopyFromLast = () => {
         if (topic.data) {
@@ -270,10 +278,10 @@ export function DataPanel({
                     )}
                 </div>
 
-                {/* Publish Section */}
-                {canPublish && (
+                {/* Write/Publish Section */}
+                {canWrite && (
                     <div className="border-t pt-4 space-y-2">
-                        <span className="text-sm font-medium">Publish Message</span>
+                        <span className="text-sm font-medium">{writeSectionLabel}</span>
                         <TopicPublishForm
                             topic={topic}
                             entityId={entityId}
