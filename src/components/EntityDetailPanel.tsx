@@ -94,7 +94,7 @@ interface ComponentTabContentProps {
     hasTopicsInfo: boolean;
     selectEntity: (path: string) => void;
     entityType: SovdResourceEntityType;
-    topicsData: ComponentTopic[];
+    topicsData: ComponentTopic[] | null;
 }
 
 function ComponentTabContent({
@@ -122,14 +122,22 @@ function ComponentTabContent({
 }
 
 /**
- * Data tab content - shows data items
+ * Data tab content - shows data items.
+ *
+ * `topicsData` uses a three-state convention:
+ *   - `null`   -> parent fetch is still in flight, render a skeleton
+ *   - `[]`     -> fetch completed with no items, fall through to topicsInfo / empty state
+ *   - `[...]`  -> render the list
+ *
+ * This lets the tab distinguish "loading" from "loaded empty" without a
+ * second self-fetch or a duplicate network request.
  */
 interface DataTabContentProps {
     selectedPath: string;
     selectedEntity: NonNullable<AppState['selectedEntity']>;
     hasTopicsInfo: boolean;
     selectEntity: (path: string) => void;
-    topicsData: ComponentTopic[];
+    topicsData: ComponentTopic[] | null;
 }
 
 function DataTabContent({
@@ -139,9 +147,30 @@ function DataTabContent({
     selectEntity,
     topicsData,
 }: DataTabContentProps) {
-    // Use topicsData from props (fetched via API), or fall back to selectedEntity.topics
-    const topics = topicsData.length > 0 ? topicsData : (selectedEntity.topics as ComponentTopic[] | undefined);
-    const hasTopics = topics && topics.length > 0;
+    if (topicsData === null) {
+        return (
+            <Card>
+                <CardHeader className="pb-3">
+                    <div className="flex items-center gap-2">
+                        <Database className="w-5 h-5 text-muted-foreground" />
+                        <CardTitle className="text-base">Data</CardTitle>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <div className="grid gap-3 md:grid-cols-2">
+                        {[0, 1, 2, 3].map((i) => (
+                            <div key={i} className="h-14 rounded-lg border bg-muted/30 animate-pulse" />
+                        ))}
+                    </div>
+                </CardContent>
+            </Card>
+        );
+    }
+
+    // topicsData is loaded at this point. Prefer it over the entity-level fallback
+    // so we never surface stale `selectedEntity.topics` when the fresh fetch is empty.
+    const topics = topicsData.length > 0 ? topicsData : (selectedEntity.topics as ComponentTopic[] | undefined) || [];
+    const hasTopics = topics.length > 0;
 
     if (hasTopics) {
         return (
@@ -344,8 +373,11 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
         faults: 0,
         logs: 0,
     });
-    // Store fetched topics data for the Data tab
-    const [topicsData, setTopicsData] = useState<ComponentTopic[]>([]);
+    // Store fetched topics data for the Data tab. `null` means "not yet loaded
+    // for the current entity" so the Data tab can render a skeleton instead of
+    // an empty-state flash while the fetch is in flight. `[]` means "loaded,
+    // no items". `[...]` means "loaded with items".
+    const [topicsData, setTopicsData] = useState<ComponentTopic[] | null>(null);
 
     const {
         selectedPath,
@@ -394,6 +426,11 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             logs: 0,
         };
         const doFetchResourceCounts = async () => {
+            // Mark topicsData as "not loaded yet for the current entity" so the
+            // Data tab renders a skeleton instead of an empty-state flash while
+            // the fetch is in flight. Any previous entity's data is discarded.
+            setTopicsData(null);
+
             if (!selectedEntity) {
                 setResourceCounts(emptyCounts);
                 setTopicsData([]);
@@ -433,7 +470,9 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                 // Use the already-fetched data length instead of a separate request
                 setResourceCounts({ ...counts, data: fetchedData.length, logs: 0 });
             } catch {
-                // Silently handle errors - counts will stay at 0
+                // On unexpected failure fall back to "loaded empty" so the UI
+                // doesn't get stuck showing the skeleton forever.
+                setTopicsData([]);
             }
         };
 
