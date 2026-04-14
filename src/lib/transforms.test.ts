@@ -21,6 +21,7 @@ import {
     transformDataResponse,
     transformConfigurationsResponse,
     transformBulkDataDescriptor,
+    type RawFaultItem,
 } from './transforms';
 
 // =============================================================================
@@ -301,7 +302,7 @@ describe('transformFault', () => {
                 severity_label: 'warn',
                 status: 'CONFIRMED',
                 first_occurred: 1700000000,
-            } as never);
+            } as unknown as RawFaultItem);
             expect(result.code).toBe('ALT_CODE');
         });
 
@@ -313,7 +314,7 @@ describe('transformFault', () => {
                 severity_label: 'warn',
                 status: 'CONFIRMED',
                 first_occurred: 1700000000,
-            } as never);
+            } as unknown as RawFaultItem);
             expect(result.message).toBe('Alternative description');
         });
 
@@ -324,7 +325,7 @@ describe('transformFault', () => {
                 severity_label: 'warn',
                 status: 'CONFIRMED',
                 first_occurred: 1700000000,
-            } as never);
+            } as unknown as RawFaultItem);
             expect(result.severity).toBe('warning');
         });
     });

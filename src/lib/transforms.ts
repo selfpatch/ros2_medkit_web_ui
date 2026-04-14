@@ -343,7 +343,7 @@ export function transformDataResponse(rawData: unknown): ComponentTopic[] {
         // `direction` above.
         const typeLabel = xm?.ros2?.type ?? xm?.type;
         const hasValue = item.value !== undefined;
-        const rawAccess = xm?.access?.toLowerCase();
+        const rawAccess = typeof xm?.access === 'string' ? xm.access.toLowerCase() : undefined;
         const access: 'read' | 'write' | 'readwrite' | undefined =
             rawAccess === 'read' || rawAccess === 'write' || rawAccess === 'readwrite' ? rawAccess : undefined;
         return {
