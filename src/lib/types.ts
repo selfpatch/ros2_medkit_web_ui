@@ -214,6 +214,10 @@ export interface ComponentTopic {
     isSubscriber?: boolean;
     /** Unique key combining topic and direction for React key */
     uniqueKey?: string;
+    /** Access mode from `x-medkit.access`. `'read'` hides the write section,
+     *  `'write'` / `'readwrite'` enable it. Absent means "no constraint" (the
+     *  legacy ROS 2 behaviour where any topic with a known type may publish). */
+    access?: 'read' | 'write' | 'readwrite';
 }
 
 /**

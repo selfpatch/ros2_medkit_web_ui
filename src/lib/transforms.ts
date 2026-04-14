@@ -59,14 +59,21 @@ export function unwrapItems<T>(response: unknown): T[] {
  * Raw fault item shape returned by the gateway faults endpoints.
  */
 export interface RawFaultItem {
-    fault_code: string;
-    description: string;
-    severity: number;
-    severity_label: string;
-    status: string;
+    /** Canonical SOVD identifier. `code` accepted as a fallback for backends
+     *  that have not yet aligned on the SOVD field name. */
+    fault_code?: string;
+    code?: string;
+    /** Human-readable description. `fault_name` accepted as a fallback. */
+    description?: string;
+    fault_name?: string;
+    severity?: number;
+    severity_label?: string;
+    /** Canonical value is a string. An object form with `aggregatedStatus`
+     *  is also accepted to keep the UI from crashing on payload drift. */
+    status?: string | { aggregatedStatus?: string; [key: string]: unknown } | null;
     /** Accepted as unix seconds (number), ISO 8601 string, or missing/invalid;
      *  `transformFault` normalises all of these to an ISO timestamp. */
-    first_occurred: number | string | null | undefined;
+    first_occurred?: number | string | null;
     last_occurred?: number | string | null;
     occurrence_count?: number;
     reporting_sources?: string[];
@@ -91,21 +98,29 @@ export function transformFault(apiFault: RawFaultItem): Fault {
     // Map severity number/label to FaultSeverity.
     // Label check takes priority over numeric value; critical is checked first.
     let severity: FaultSeverity = 'info';
+    const severityNum = typeof apiFault.severity === 'number' ? apiFault.severity : 0;
     const label = apiFault.severity_label?.toLowerCase() || '';
-    if (label === 'critical' || apiFault.severity >= 3) {
+    if (label === 'critical' || severityNum >= 3) {
         severity = 'critical';
-    } else if (label === 'error' || apiFault.severity === 2) {
+    } else if (label === 'error' || severityNum === 2) {
         severity = 'error';
-    } else if (label === 'warn' || label === 'warning' || apiFault.severity === 1) {
+    } else if (label === 'warn' || label === 'warning' || severityNum === 1) {
         severity = 'warning';
     }
 
-    // Map API status string to FaultStatusValue.
+    // Map API status to FaultStatusValue. Accept either a string (canonical SOVD)
+    // or an object with an `aggregatedStatus` field (UDS DTC-style backends).
+    let apiStatus = '';
+    if (typeof apiFault.status === 'string') {
+        apiStatus = apiFault.status.toLowerCase();
+    } else if (apiFault.status && typeof apiFault.status === 'object') {
+        const agg = (apiFault.status as { aggregatedStatus?: unknown }).aggregatedStatus;
+        if (typeof agg === 'string') apiStatus = agg.toLowerCase();
+    }
     let status: FaultStatusValue = 'active';
-    const apiStatus = apiFault.status?.toLowerCase() || '';
     if (apiStatus === 'confirmed' || apiStatus === 'active') {
         status = 'active';
-    } else if (apiStatus === 'pending' || apiStatus === 'prefailed') {
+    } else if (apiStatus === 'pending' || apiStatus === 'prefailed' || apiStatus === 'passive') {
         status = 'pending';
     } else if (apiStatus === 'cleared' || apiStatus === 'resolved') {
         status = 'cleared';
@@ -125,8 +140,8 @@ export function transformFault(apiFault: RawFaultItem): Fault {
     const entity_type = apiFault.entity_type || 'app';
 
     return {
-        code: apiFault.fault_code,
-        message: apiFault.description,
+        code: apiFault.fault_code ?? apiFault.code ?? 'unknown',
+        message: apiFault.description ?? apiFault.fault_name ?? '',
         severity,
         status,
         timestamp: (() => {
@@ -328,6 +343,9 @@ export function transformDataResponse(rawData: unknown): ComponentTopic[] {
         // `direction` above.
         const typeLabel = xm?.ros2?.type ?? xm?.type;
         const hasValue = item.value !== undefined;
+        const rawAccess = xm?.access?.toLowerCase();
+        const access: 'read' | 'write' | 'readwrite' | undefined =
+            rawAccess === 'read' || rawAccess === 'write' || rawAccess === 'readwrite' ? rawAccess : undefined;
         return {
             topic: topicName,
             timestamp: Date.now(),
@@ -344,6 +362,7 @@ export function transformDataResponse(rawData: unknown): ComponentTopic[] {
             isPublisher: direction === 'publish' || direction === 'both' || direction === 'output',
             isSubscriber: direction === 'subscribe' || direction === 'both' || direction === 'input',
             uniqueKey: direction ? `${topicName}:${direction}` : topicName,
+            access,
         };
     });
 }
