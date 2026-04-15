@@ -61,7 +61,7 @@ export function RegisterUpdateDialog({ open, onClose, onSubmit }: Props) {
             }
         }
         const body: RegisterUpdateBody = { id: id.trim(), ...extras };
-        if (name.trim()) body.update_name = name.trim();
+        body.update_name = name.trim() || id.trim();
         if (automated) body.automated = true;
         setSubmitting(true);
         try {
