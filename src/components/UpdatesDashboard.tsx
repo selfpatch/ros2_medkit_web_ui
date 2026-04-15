@@ -25,6 +25,7 @@ import { UpdateCard, type UpdateAction } from '@/components/UpdateCard';
 import { useUpdatesPolling } from '@/hooks/useUpdatesPolling';
 import { triggerPrepare, triggerExecute, triggerAutomated, deleteUpdate } from '@/lib/updates-api';
 import { useAppStore } from '@/lib/store';
+import { RegisterUpdateDialog } from './RegisterUpdateDialog';
 
 export function UpdatesDashboard() {
     const { serverUrl, isConnected } = useAppStore(
@@ -38,6 +39,20 @@ export function UpdatesDashboard() {
 
     const { updates, isLoading, error, notAvailable, refresh } = useUpdatesPolling(baseUrl);
     const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+    const [registerOpen, setRegisterOpen] = useState(false);
+    const registerUpdate = useAppStore((s) => s.registerUpdate);
+
+    const handleRegister = async (body: { id: string; [key: string]: unknown }) => {
+        try {
+            await registerUpdate(body);
+            toast.success(`Registered ${body.id}`);
+            refresh();
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error(`Register failed: ${msg}`);
+            throw e;
+        }
+    };
 
     // AbortController for mutation actions (prepare/execute/automated/delete).
     // Aborted on unmount so in-flight requests don't resolve into setBusyIds
@@ -104,10 +119,19 @@ export function UpdatesDashboard() {
                 {summary.failed > 0 && <Badge variant="destructive">{summary.failed} failed</Badge>}
                 {summary.completed > 0 && <Badge variant="secondary">{summary.completed} completed</Badge>}
             </div>
-            <Button variant="outline" size="sm" aria-label="Refresh updates" onClick={refresh}>
-                <RefreshCw className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+                <Button size="sm" onClick={() => setRegisterOpen(true)}>
+                    Register Update
+                </Button>
+                <Button variant="outline" size="sm" aria-label="Refresh updates" onClick={refresh}>
+                    <RefreshCw className="h-4 w-4" />
+                </Button>
+            </div>
         </div>
+    );
+
+    const registerDialog = (
+        <RegisterUpdateDialog open={registerOpen} onClose={() => setRegisterOpen(false)} onSubmit={handleRegister} />
     );
 
     if (!isConnected) {
@@ -124,6 +148,7 @@ export function UpdatesDashboard() {
         return (
             <div>
                 {header}
+                {registerDialog}
                 <div className="grid gap-4 md:grid-cols-2">
                     {Array.from({ length: 4 }).map((_, i) => (
                         <Skeleton key={i} className="h-32 w-full rounded-lg" />
@@ -138,6 +163,7 @@ export function UpdatesDashboard() {
         return (
             <div>
                 {header}
+                {registerDialog}
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
@@ -155,6 +181,7 @@ export function UpdatesDashboard() {
         return (
             <div>
                 {header}
+                {registerDialog}
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex flex-col items-center justify-center py-8 text-center text-destructive">
@@ -172,6 +199,7 @@ export function UpdatesDashboard() {
         return (
             <div>
                 {header}
+                {registerDialog}
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
@@ -188,6 +216,7 @@ export function UpdatesDashboard() {
     return (
         <div>
             {header}
+            {registerDialog}
             <div className="grid gap-4 md:grid-cols-2">
                 {updates.map((entry) => (
                     <UpdateCard
