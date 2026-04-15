@@ -160,6 +160,7 @@ export interface AppState {
     // Faults actions
     fetchFaults: () => Promise<void>;
     clearFault: (entityType: SovdResourceEntityType, entityId: string, faultCode: string) => Promise<boolean>;
+    registerUpdate: (body: { id: string; [key: string]: unknown }) => Promise<void>;
     subscribeFaultStream: () => void;
     unsubscribeFaultStream: () => void;
 
@@ -1858,6 +1859,16 @@ export const useAppStore = create<AppState>()(
                     console.error('[store]', error);
                     toast.error(`Failed to clear fault: ${message}`);
                     return false;
+                }
+            },
+
+            registerUpdate: async (body: { id: string; [key: string]: unknown }) => {
+                const { client } = get();
+                if (!client) throw new Error('Not connected');
+                const { error } = await client.POST('/updates', { body: body as never });
+                if (error) {
+                    const msg = (error as { message?: string }).message ?? 'Failed to register update';
+                    throw new Error(msg);
                 }
             },
 
