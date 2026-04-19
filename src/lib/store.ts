@@ -1865,6 +1865,9 @@ export const useAppStore = create<AppState>()(
             registerUpdate: async (body: { id: string; [key: string]: unknown }, signal?: AbortSignal) => {
                 const { client } = get();
                 if (!client) throw new Error('Not connected');
+                // POST /updates is intentionally open-schema in the gateway (vendor-specific
+                // fields pass through to the UpdateProvider plugin), so it is not typed in
+                // the generated openapi client. Cast stays until the schema is formalized.
                 const { error } = await client.POST('/updates', { body: body as never, signal });
                 if (error) {
                     const msg = (error as { message?: string }).message ?? 'Failed to register update';

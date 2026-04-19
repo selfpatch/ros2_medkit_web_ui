@@ -79,8 +79,8 @@ export function RegisterUpdateDialog({ open, onClose, onSubmit }: Props) {
             ...extras,
             id: id.trim(),
             update_name: name.trim() || id.trim(),
+            automated,
         };
-        if (automated) body.automated = true;
         setSubmitting(true);
         try {
             await onSubmit(body);
@@ -111,7 +111,13 @@ export function RegisterUpdateDialog({ open, onClose, onSubmit }: Props) {
                 <div className="space-y-3">
                     <div>
                         <Label htmlFor="reg-id">id</Label>
-                        <Input id="reg-id" value={id} onChange={(e) => setId(e.target.value)} />
+                        <Input
+                            id="reg-id"
+                            value={id}
+                            onChange={(e) => setId(e.target.value)}
+                            aria-invalid={!!error}
+                            aria-describedby={error ? 'reg-error' : undefined}
+                        />
                     </div>
                     <div>
                         <Label htmlFor="reg-name">name</Label>
@@ -128,9 +134,15 @@ export function RegisterUpdateDialog({ open, onClose, onSubmit }: Props) {
                             rows={6}
                             value={metadata}
                             onChange={(e) => setMetadata(e.target.value)}
+                            aria-invalid={!!error}
+                            aria-describedby={error ? 'reg-error' : undefined}
                         />
                     </div>
-                    {error && <p className="text-sm text-destructive">{error}</p>}
+                    {error && (
+                        <p id="reg-error" role="alert" className="text-sm text-destructive">
+                            {error}
+                        </p>
+                    )}
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose} disabled={submitting}>

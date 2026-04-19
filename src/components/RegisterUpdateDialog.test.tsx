@@ -41,9 +41,35 @@ describe('RegisterUpdateDialog', () => {
             expect(onSubmit).toHaveBeenCalledWith({
                 id: 'ui-id',
                 update_name: 'ui-id',
+                automated: false,
                 extra: 1,
             })
         );
+    });
+
+    it.each([
+        ['string', '"just a string"'],
+        ['array', '[1, 2, 3]'],
+        ['null', 'null'],
+        ['number', '42'],
+    ])('rejects non-object JSON metadata (%s)', async (_label, raw) => {
+        const onSubmit = vi.fn();
+        render(<RegisterUpdateDialog open onClose={() => {}} onSubmit={onSubmit} />);
+        fireEvent.change(screen.getByLabelText(/^id$/i), { target: { value: 'x' } });
+        fireEvent.change(screen.getByLabelText(/additional metadata/i), { target: { value: raw } });
+        fireEvent.click(screen.getByRole('button', { name: /^register$/i }));
+        expect(await screen.findByText(/invalid json/i)).toBeInTheDocument();
+        expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it('surfaces onSubmit rejection as inline error and keeps dialog open', async () => {
+        const onSubmit = vi.fn().mockRejectedValue(new Error('backend exploded'));
+        const onClose = vi.fn();
+        render(<RegisterUpdateDialog open onClose={onClose} onSubmit={onSubmit} />);
+        fireEvent.change(screen.getByLabelText(/^id$/i), { target: { value: 'x' } });
+        fireEvent.click(screen.getByRole('button', { name: /^register$/i }));
+        expect(await screen.findByRole('alert')).toHaveTextContent(/backend exploded/i);
+        expect(onClose).not.toHaveBeenCalled();
     });
 
     it('submits merged body on valid input', async () => {
@@ -62,6 +88,20 @@ describe('RegisterUpdateDialog', () => {
                 update_name: 'Pkg One',
                 automated: true,
                 origins: ['a'],
+            })
+        );
+    });
+
+    it('always includes automated=false when unchecked', async () => {
+        const onSubmit = vi.fn().mockResolvedValue(undefined);
+        render(<RegisterUpdateDialog open onClose={() => {}} onSubmit={onSubmit} />);
+        fireEvent.change(screen.getByLabelText(/^id$/i), { target: { value: 'plain' } });
+        fireEvent.click(screen.getByRole('button', { name: /^register$/i }));
+        await waitFor(() =>
+            expect(onSubmit).toHaveBeenCalledWith({
+                id: 'plain',
+                update_name: 'plain',
+                automated: false,
             })
         );
     });
