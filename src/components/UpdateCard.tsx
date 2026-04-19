@@ -75,6 +75,12 @@ function clampProgress(value: number): number {
     return Math.min(100, Math.max(0, value));
 }
 
+function displayProgress(status: UpdateStatusValue, progress: number | undefined): number | undefined {
+    if (status === 'completed') return 100;
+    if (progress === undefined) return undefined;
+    return clampProgress(progress);
+}
+
 function actionLabel(action: UpdateAction): string {
     switch (action) {
         case 'prepare':
@@ -156,42 +162,45 @@ export function UpdateCard({ entry, baseUrl, busy, onAction }: UpdateCardProps) 
 
                 {status !== null && status !== undefined && (
                     <>
-                        {status.progress !== undefined &&
-                            (() => {
-                                const clamped = clampProgress(status.progress);
-                                return (
+                        {(() => {
+                            const value = displayProgress(status.status, status.progress);
+                            if (value === undefined) return null;
+                            return (
+                                <div
+                                    role="progressbar"
+                                    aria-label={`Progress for update ${id}`}
+                                    aria-valuenow={value}
+                                    aria-valuemin={0}
+                                    aria-valuemax={100}
+                                    className="w-full h-2 rounded-full bg-muted overflow-hidden"
+                                >
                                     <div
-                                        role="progressbar"
-                                        aria-label={`Progress for update ${id}`}
-                                        aria-valuenow={clamped}
-                                        aria-valuemin={0}
-                                        aria-valuemax={100}
-                                        className="w-full h-2 rounded-full bg-muted overflow-hidden"
-                                    >
-                                        <div
-                                            className={`h-full ${progressBarColor(status.status)} transition-all`}
-                                            style={{ width: `${clamped}%` }}
-                                        />
-                                    </div>
-                                );
-                            })()}
+                                        className={`h-full ${progressBarColor(status.status)} transition-all`}
+                                        style={{ width: `${value}%` }}
+                                    />
+                                </div>
+                            );
+                        })()}
 
                         {status.sub_progress && status.sub_progress.length > 0 && (
                             <ul className="space-y-1">
-                                {status.sub_progress.map((sub) => (
-                                    <li key={sub.name} className="flex items-center gap-2 text-xs">
-                                        <span className="w-24 shrink-0 text-muted-foreground truncate">{sub.name}</span>
-                                        <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                                            <div
-                                                className={`h-full ${progressBarColor(status.status)}`}
-                                                style={{ width: `${clampProgress(sub.progress)}%` }}
-                                            />
-                                        </div>
-                                        <span className="w-9 text-right tabular-nums">
-                                            {clampProgress(sub.progress)}%
-                                        </span>
-                                    </li>
-                                ))}
+                                {status.sub_progress.map((sub) => {
+                                    const value = displayProgress(status.status, sub.progress) ?? 0;
+                                    return (
+                                        <li key={sub.name} className="flex items-center gap-2 text-xs">
+                                            <span className="w-24 shrink-0 text-muted-foreground truncate">
+                                                {sub.name}
+                                            </span>
+                                            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                                                <div
+                                                    className={`h-full ${progressBarColor(status.status)}`}
+                                                    style={{ width: `${value}%` }}
+                                                />
+                                            </div>
+                                            <span className="w-9 text-right tabular-nums">{value}%</span>
+                                        </li>
+                                    );
+                                })}
                             </ul>
                         )}
 
