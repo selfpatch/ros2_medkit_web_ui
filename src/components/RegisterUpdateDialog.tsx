@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -41,6 +41,17 @@ export function RegisterUpdateDialog({ open, onClose, onSubmit }: Props) {
     const [error, setError] = useState<string | null>(null);
     const [submitting, setSubmitting] = useState(false);
 
+    useEffect(() => {
+        if (!open) {
+            setId('');
+            setName('');
+            setAutomated(false);
+            setMetadata('{}');
+            setError(null);
+            setSubmitting(false);
+        }
+    }, [open]);
+
     const handleSubmit = async () => {
         setError(null);
         if (!id.trim()) {
@@ -54,22 +65,25 @@ export function RegisterUpdateDialog({ open, onClose, onSubmit }: Props) {
                 if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
                     throw new Error('not an object');
                 }
-                extras = parsed as Record<string, unknown>;
+                const { id: _i, update_name: _n, automated: _a, ...safe } = parsed as Record<string, unknown>;
+                void _i;
+                void _n;
+                void _a;
+                extras = safe;
             } catch {
                 setError('invalid JSON in additional metadata');
                 return;
             }
         }
-        const body: RegisterUpdateBody = { id: id.trim(), ...extras };
-        body.update_name = name.trim() || id.trim();
+        const body: RegisterUpdateBody = {
+            ...extras,
+            id: id.trim(),
+            update_name: name.trim() || id.trim(),
+        };
         if (automated) body.automated = true;
         setSubmitting(true);
         try {
             await onSubmit(body);
-            setId('');
-            setName('');
-            setAutomated(false);
-            setMetadata('{}');
             onClose();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
