@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useShallow } from 'zustand/shallow';
 import { Package, RefreshCw, AlertTriangle, Server } from 'lucide-react';
 import { toast } from 'react-toastify';
@@ -61,8 +61,6 @@ export function UpdatesDashboard() {
             refresh();
         } catch (e) {
             if (signal?.aborted || (e as { name?: string })?.name === 'AbortError') return;
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error(`Register failed: ${msg}`);
             throw e;
         }
     };
@@ -123,9 +121,11 @@ export function UpdatesDashboard() {
                 {summary.completed > 0 && <Badge variant="secondary">{summary.completed} completed</Badge>}
             </div>
             <div className="flex items-center gap-2">
-                <Button size="sm" onClick={() => setRegisterOpen(true)}>
-                    Register Update
-                </Button>
+                {!notAvailable && (
+                    <Button size="sm" onClick={() => setRegisterOpen(true)}>
+                        Register Update
+                    </Button>
+                )}
                 <Button variant="outline" size="sm" aria-label="Refresh updates" onClick={refresh}>
                     <RefreshCw className="h-4 w-4" />
                 </Button>
@@ -147,79 +147,56 @@ export function UpdatesDashboard() {
         );
     }
 
+    let body: ReactNode;
     if (isLoading && updates.length === 0) {
-        return (
-            <div>
-                {header}
-                {registerDialog}
+        body = (
+            <>
                 <div className="grid gap-4 md:grid-cols-2">
                     {Array.from({ length: 4 }).map((_, i) => (
                         <Skeleton key={i} className="h-32 w-full rounded-lg" />
                     ))}
                 </div>
                 <p className="mt-4 text-sm text-center text-muted-foreground">loading updates...</p>
-            </div>
+            </>
         );
-    }
-
-    if (notAvailable) {
-        return (
-            <div>
-                {header}
-                {registerDialog}
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
-                            <AlertTriangle className="h-10 w-10 mb-3 opacity-50" />
-                            <p className="font-medium">Software updates not available on this gateway</p>
-                            <p className="text-sm mt-1">The gateway does not support the updates API (501).</p>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
+    } else if (notAvailable) {
+        body = (
+            <Card>
+                <CardContent className="pt-6">
+                    <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
+                        <AlertTriangle className="h-10 w-10 mb-3 opacity-50" />
+                        <p className="font-medium">Software updates not available on this gateway</p>
+                        <p className="text-sm mt-1">The gateway does not support the updates API (501).</p>
+                    </div>
+                </CardContent>
+            </Card>
         );
-    }
-
-    if (error) {
-        return (
-            <div>
-                {header}
-                {registerDialog}
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex flex-col items-center justify-center py-8 text-center text-destructive">
-                            <AlertTriangle className="h-10 w-10 mb-3" />
-                            <p className="font-medium">Failed to load updates</p>
-                            <p className="text-sm mt-1">{error}</p>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
+    } else if (error) {
+        body = (
+            <Card>
+                <CardContent className="pt-6">
+                    <div className="flex flex-col items-center justify-center py-8 text-center text-destructive">
+                        <AlertTriangle className="h-10 w-10 mb-3" />
+                        <p className="font-medium">Failed to load updates</p>
+                        <p className="text-sm mt-1">{error}</p>
+                    </div>
+                </CardContent>
+            </Card>
         );
-    }
-
-    if (updates.length === 0) {
-        return (
-            <div>
-                {header}
-                {registerDialog}
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
-                            <Package className="h-10 w-10 mb-3 opacity-30" />
-                            <p className="font-medium">No software updates registered</p>
-                            <p className="text-sm mt-1">Updates appear here once the gateway reports them.</p>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
+    } else if (updates.length === 0) {
+        body = (
+            <Card>
+                <CardContent className="pt-6">
+                    <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
+                        <Package className="h-10 w-10 mb-3 opacity-30" />
+                        <p className="font-medium">No software updates registered</p>
+                        <p className="text-sm mt-1">Updates appear here once the gateway reports them.</p>
+                    </div>
+                </CardContent>
+            </Card>
         );
-    }
-
-    return (
-        <div>
-            {header}
-            {registerDialog}
+    } else {
+        body = (
             <div className="grid gap-4 md:grid-cols-2">
                 {updates.map((entry) => (
                     <UpdateCard
@@ -231,6 +208,14 @@ export function UpdatesDashboard() {
                     />
                 ))}
             </div>
+        );
+    }
+
+    return (
+        <div>
+            {header}
+            {registerDialog}
+            {body}
         </div>
     );
 }
