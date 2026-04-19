@@ -204,7 +204,11 @@ interface RawFaultsResponse {
 export function transformFaultsResponse(rawData: unknown): ListFaultsResponse {
     if (!rawData || typeof rawData !== 'object') return { items: [], count: 0 };
     const data = rawData as RawFaultsResponse;
-    const items = (data.items || []).map((f, idx) => transformFault(f as RawFaultItem, String(idx)));
+    // Guard against non-array `items` (e.g. `{}` or a string) - the `|| []`
+    // fallback only catches nullish values, so any other truthy non-array
+    // would crash `.map`.
+    const rawItems = Array.isArray(data.items) ? data.items : [];
+    const items = rawItems.map((f, idx) => transformFault(f as RawFaultItem, String(idx)));
     return { items, count: data['x-medkit']?.count ?? items.length };
 }
 
