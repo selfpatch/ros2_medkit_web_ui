@@ -18,7 +18,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Loader2 } from 'lucide-react';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 
 export interface RegisterUpdateBody {
     id: string;
@@ -107,6 +115,10 @@ export function RegisterUpdateDialog({ open, onClose, onSubmit }: Props) {
             >
                 <DialogHeader>
                     <DialogTitle>Register Update</DialogTitle>
+                    <DialogDescription>
+                        Register a new update package with the gateway. Vendor-specific fields (origins, signatures,
+                        etc.) go into the metadata JSON.
+                    </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-3">
                     <div>
@@ -149,7 +161,14 @@ export function RegisterUpdateDialog({ open, onClose, onSubmit }: Props) {
                         Cancel
                     </Button>
                     <Button onClick={handleSubmit} disabled={submitting}>
-                        Register
+                        {submitting ? (
+                            <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Registering...
+                            </>
+                        ) : (
+                            'Register'
+                        )}
                     </Button>
                 </DialogFooter>
             </DialogContent>

@@ -123,6 +123,37 @@ describe('UpdateCard', () => {
         expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
     });
 
+    it('shows full 100% bar when status is completed, even without progress field', () => {
+        const entry: UpdateEntry = {
+            id: 'update-done-no-progress',
+            status: { status: 'completed' },
+        };
+
+        render(<UpdateCard entry={entry} />);
+
+        const progressBar = screen.getByRole('progressbar');
+        expect(progressBar).toHaveAttribute('aria-valuenow', '100');
+    });
+
+    it('snaps main + sub progress to 100% when status flips to completed below 100', () => {
+        const entry: UpdateEntry = {
+            id: 'update-stuck-at-87',
+            status: {
+                status: 'completed',
+                progress: 87,
+                sub_progress: [
+                    { name: 'Download', progress: 87 },
+                    { name: 'Verify', progress: 50 },
+                ],
+            },
+        };
+
+        render(<UpdateCard entry={entry} />);
+
+        expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100');
+        expect(screen.getAllByText('100%')).toHaveLength(2);
+    });
+
     it('calls onAction with correct id and action when action button clicked', async () => {
         const user = userEvent.setup();
         const onAction = vi.fn();
