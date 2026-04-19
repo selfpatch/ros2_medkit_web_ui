@@ -29,6 +29,23 @@ describe('RegisterUpdateDialog', () => {
         expect(onSubmit).not.toHaveBeenCalled();
     });
 
+    it('strips reserved keys from metadata so UI-validated fields win', async () => {
+        const onSubmit = vi.fn().mockResolvedValue(undefined);
+        render(<RegisterUpdateDialog open onClose={() => {}} onSubmit={onSubmit} />);
+        fireEvent.change(screen.getByLabelText(/^id$/i), { target: { value: 'ui-id' } });
+        fireEvent.change(screen.getByLabelText(/additional metadata/i), {
+            target: { value: '{"id":"evil","update_name":"evil","automated":true,"extra":1}' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: /^register$/i }));
+        await waitFor(() =>
+            expect(onSubmit).toHaveBeenCalledWith({
+                id: 'ui-id',
+                update_name: 'ui-id',
+                extra: 1,
+            })
+        );
+    });
+
     it('submits merged body on valid input', async () => {
         const onSubmit = vi.fn().mockResolvedValue(undefined);
         render(<RegisterUpdateDialog open onClose={() => {}} onSubmit={onSubmit} />);
