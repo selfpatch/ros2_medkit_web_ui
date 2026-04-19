@@ -392,11 +392,17 @@ describe('transformFaultsResponse', () => {
             items: [faultWithoutCode, faultWithoutCode, faultWithoutCode],
         });
         expect(result.items).toHaveLength(3);
-        const codes = result.items.map((f) => f.code);
-        expect(new Set(codes).size).toBe(3);
-        for (const code of codes) {
-            expect(code).toMatch(/^unknown-/);
-        }
+        expect(result.items.map((f) => f.code)).toEqual(['unknown-0', 'unknown-1', 'unknown-2']);
+    });
+
+    it('returns stable synthetic codes across repeated calls so store dedup can match', () => {
+        // A non-deterministic synthetic code would make the same code-less
+        // fault look "changed" on every poll, forcing re-render and resetting
+        // React keys and expand state each refresh.
+        const faultWithoutCode = { description: 'drift', severity: 2, reporting_sources: [] };
+        const first = transformFaultsResponse({ items: [faultWithoutCode, faultWithoutCode] });
+        const second = transformFaultsResponse({ items: [faultWithoutCode, faultWithoutCode] });
+        expect(first.items.map((f) => f.code)).toEqual(second.items.map((f) => f.code));
     });
 });
 
