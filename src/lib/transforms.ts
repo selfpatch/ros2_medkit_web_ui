@@ -99,7 +99,7 @@ export function transformFault(apiFault: RawFaultItem): Fault {
     // Label check takes priority over numeric value; critical is checked first.
     let severity: FaultSeverity = 'info';
     const severityNum = typeof apiFault.severity === 'number' ? apiFault.severity : 0;
-    const label = apiFault.severity_label?.toLowerCase() || '';
+    const label = typeof apiFault.severity_label === 'string' ? apiFault.severity_label.toLowerCase() : '';
     if (label === 'critical' || severityNum >= 3) {
         severity = 'critical';
     } else if (label === 'error' || severityNum === 2) {
@@ -139,8 +139,19 @@ export function transformFault(apiFault: RawFaultItem): Fault {
     // faults are always reported by ROS 2 nodes which map to apps.
     const entity_type = apiFault.entity_type || 'app';
 
+    // When both canonical `fault_code` and the `code` alias are missing, a literal
+    // 'unknown' collides with every other code-less fault. That collapses the
+    // store's dedup (store.ts: dedup by `code + entity_id`), duplicates React
+    // keys in the faults lists, and ties the expand-state Sets together so
+    // clicking one row toggles them all. A synthetic per-call ID keeps each
+    // code-less fault distinct through the downstream identity pipeline.
+    const code =
+        apiFault.fault_code ??
+        apiFault.code ??
+        `unknown-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
     return {
-        code: apiFault.fault_code ?? apiFault.code ?? 'unknown',
+        code,
         message: apiFault.description ?? apiFault.fault_name ?? '',
         severity,
         status,

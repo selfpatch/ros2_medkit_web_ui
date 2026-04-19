@@ -382,6 +382,22 @@ describe('transformFaultsResponse', () => {
         expect(result.items).toEqual([]);
         expect(result.count).toBe(0);
     });
+
+    it('assigns distinct synthetic codes when fault_code and code are missing', () => {
+        // Collisions on a literal 'unknown' code would collapse store dedup
+        // (keyed by code+entity_id) and produce duplicate React keys in the
+        // faults lists. The synthetic fallback must keep each fault distinct.
+        const faultWithoutCode = { description: 'drift', severity: 2, reporting_sources: [] };
+        const result = transformFaultsResponse({
+            items: [faultWithoutCode, faultWithoutCode, faultWithoutCode],
+        });
+        expect(result.items).toHaveLength(3);
+        const codes = result.items.map((f) => f.code);
+        expect(new Set(codes).size).toBe(3);
+        for (const code of codes) {
+            expect(code).toMatch(/^unknown-/);
+        }
+    });
 });
 
 // =============================================================================

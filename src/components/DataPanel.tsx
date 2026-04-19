@@ -203,8 +203,16 @@ export function DataPanel({
     const hasData = topic.status === 'data' && topic.data !== null && topic.data !== undefined;
     // `access` is the explicit per-item write capability; when present it
     // overrides the legacy "any typed topic is publishable" heuristic so a
-    // read-only data item never surfaces a write form.
-    const canWrite = isConnected && topic.access !== 'read' && !!(topic.type || topic.type_info || topic.data);
+    // read-only data item never surfaces a write form. Falsy scalar values
+    // (0, false, '') count as present - checking truthiness of `topic.data`
+    // would incorrectly hide the write form for e.g. a counter reading 0.
+    const hasTypeHint = !!(topic.type || topic.type_info);
+    const hasValuePresent = topic.data !== null && topic.data !== undefined;
+    const canWrite =
+        isConnected &&
+        (topic.access === 'write' ||
+            topic.access === 'readwrite' ||
+            (topic.access !== 'read' && (hasTypeHint || hasValuePresent)));
     // Use "Write Value" when the gateway told us this is a writable scalar
     // (access === 'write' / 'readwrite'); fall back to "Publish Message" for
     // streaming topics where the operation really is a publish.
