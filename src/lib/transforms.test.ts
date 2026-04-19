@@ -383,6 +383,16 @@ describe('transformFaultsResponse', () => {
         expect(result.count).toBe(0);
     });
 
+    it('returns empty items when items field is a non-array truthy value', () => {
+        // `{ items: {} }` and similar would throw on `.map` if we trusted
+        // truthiness alone; transformFaultsResponse must accept unknown input.
+        for (const bad of [{}, 'string', 42, true]) {
+            const result = transformFaultsResponse({ items: bad });
+            expect(result.items).toEqual([]);
+            expect(result.count).toBe(0);
+        }
+    });
+
     it('assigns distinct synthetic codes when fault_code and code are missing', () => {
         // Collisions on a literal 'unknown' code would collapse store dedup
         // (keyed by code+entity_id) and produce duplicate React keys in the
