@@ -93,8 +93,18 @@ export function RegisterUpdateDialog({ open, onClose, onSubmit }: Props) {
     };
 
     return (
-        <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-            <DialogContent>
+        <Dialog
+            open={open}
+            onOpenChange={(o) => {
+                if (o || submitting) return;
+                onClose();
+            }}
+        >
+            <DialogContent
+                onEscapeKeyDown={(e) => submitting && e.preventDefault()}
+                onPointerDownOutside={(e) => submitting && e.preventDefault()}
+                onInteractOutside={(e) => submitting && e.preventDefault()}
+            >
                 <DialogHeader>
                     <DialogTitle>Register Update</DialogTitle>
                 </DialogHeader>
@@ -123,7 +133,7 @@ export function RegisterUpdateDialog({ open, onClose, onSubmit }: Props) {
                     {error && <p className="text-sm text-destructive">{error}</p>}
                 </div>
                 <DialogFooter>
-                    <Button variant="outline" onClick={onClose}>
+                    <Button variant="outline" onClick={onClose} disabled={submitting}>
                         Cancel
                     </Button>
                     <Button onClick={handleSubmit} disabled={submitting}>

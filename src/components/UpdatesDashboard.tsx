@@ -42,19 +42,7 @@ export function UpdatesDashboard() {
     const [registerOpen, setRegisterOpen] = useState(false);
     const registerUpdate = useAppStore((s) => s.registerUpdate);
 
-    const handleRegister = async (body: { id: string; [key: string]: unknown }) => {
-        try {
-            await registerUpdate(body);
-            toast.success(`Registered ${body.id}`);
-            refresh();
-        } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error(`Register failed: ${msg}`);
-            throw e;
-        }
-    };
-
-    // AbortController for mutation actions (prepare/execute/automated/delete).
+    // AbortController for mutation actions (prepare/execute/automated/delete/register).
     // Aborted on unmount so in-flight requests don't resolve into setBusyIds
     // on an unmounted component or issue stale toast notifications.
     const actionAbortRef = useRef<AbortController | null>(null);
@@ -63,6 +51,21 @@ export function UpdatesDashboard() {
         actionAbortRef.current = controller;
         return () => controller.abort();
     }, []);
+
+    const handleRegister = async (body: { id: string; [key: string]: unknown }) => {
+        const signal = actionAbortRef.current?.signal;
+        try {
+            await registerUpdate(body, signal);
+            if (signal?.aborted) return;
+            toast.success(`Registered ${body.id}`);
+            refresh();
+        } catch (e) {
+            if (signal?.aborted || (e as { name?: string })?.name === 'AbortError') return;
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error(`Register failed: ${msg}`);
+            throw e;
+        }
+    };
 
     const summary = useMemo(() => {
         let active = 0;
