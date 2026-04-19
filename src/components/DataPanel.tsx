@@ -197,7 +197,9 @@ export function DataPanel({
     isRefreshing = false,
     onRefresh,
 }: DataPanelProps) {
-    const [publishValue, setPublishValue] = useState<unknown>(topic.type_info?.default_value || topic.data || {});
+    // Use nullish coalescing so legitimate falsy scalars (0, false, '') are
+    // preserved as the initial publish value instead of collapsing to `{}`.
+    const [publishValue, setPublishValue] = useState<unknown>(topic.type_info?.default_value ?? topic.data ?? {});
 
     const isConnected = useAppStore((state) => state.isConnected);
     const hasData = topic.status === 'data' && topic.data !== null && topic.data !== undefined;
@@ -220,7 +222,9 @@ export function DataPanel({
         topic.access === 'write' || topic.access === 'readwrite' ? 'Write Value' : 'Publish Message';
 
     const handleCopyFromLast = () => {
-        if (topic.data) {
+        // Presence check, not truthiness, so a reported value of exactly 0
+        // (or false / empty string) still copies into the publish form.
+        if (topic.data !== null && topic.data !== undefined) {
             setPublishValue(JSON.parse(JSON.stringify(topic.data)));
         }
     };

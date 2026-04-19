@@ -94,7 +94,7 @@ export interface RawFaultItem {
  *   - `first_occurred` (unix seconds) → `timestamp` (ISO 8601)
  *   - `reporting_sources[0]` last path segment → `entity_id`
  */
-export function transformFault(apiFault: RawFaultItem): Fault {
+export function transformFault(apiFault: RawFaultItem, syntheticIdSuffix?: string): Fault {
     // Map severity number/label to FaultSeverity.
     // Label check takes priority over numeric value; critical is checked first.
     let severity: FaultSeverity = 'info';
@@ -139,16 +139,17 @@ export function transformFault(apiFault: RawFaultItem): Fault {
     // faults are always reported by ROS 2 nodes which map to apps.
     const entity_type = apiFault.entity_type || 'app';
 
-    // When both canonical `fault_code` and the `code` alias are missing, a literal
-    // 'unknown' collides with every other code-less fault. That collapses the
-    // store's dedup (store.ts: dedup by `code + entity_id`), duplicates React
-    // keys in the faults lists, and ties the expand-state Sets together so
-    // clicking one row toggles them all. A synthetic per-call ID keeps each
-    // code-less fault distinct through the downstream identity pipeline.
-    const code =
-        apiFault.fault_code ??
-        apiFault.code ??
-        `unknown-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    // When both canonical `fault_code` and the `code` alias are missing, a bare
+    // literal 'unknown' collides with every other code-less fault in the same
+    // response: that collapses the store's dedup (keyed by code + entity_id),
+    // duplicates React keys in the faults lists, and ties the expand-state
+    // Sets together so clicking one row toggles them all. The optional
+    // `syntheticIdSuffix` (typically the array index supplied by
+    // `transformFaultsResponse`) makes each code-less fault distinct within a
+    // response while staying stable across polls, so the store can still dedup
+    // on the next refresh instead of churning on every fetch.
+    const syntheticCode = syntheticIdSuffix !== undefined ? `unknown-${syntheticIdSuffix}` : 'unknown';
+    const code = apiFault.fault_code ?? apiFault.code ?? syntheticCode;
 
     return {
         code,
@@ -203,7 +204,7 @@ interface RawFaultsResponse {
 export function transformFaultsResponse(rawData: unknown): ListFaultsResponse {
     if (!rawData || typeof rawData !== 'object') return { items: [], count: 0 };
     const data = rawData as RawFaultsResponse;
-    const items = (data.items || []).map((f) => transformFault(f as RawFaultItem));
+    const items = (data.items || []).map((f, idx) => transformFault(f as RawFaultItem, String(idx)));
     return { items, count: data['x-medkit']?.count ?? items.length };
 }
 
