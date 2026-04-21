@@ -79,6 +79,45 @@ describe('UpdateCard', () => {
         expect(screen.getByText('completed')).toBeInTheDocument();
     });
 
+    it('only offers Delete when an update completed with no x-medkit-phase', () => {
+        const entry: UpdateEntry = {
+            id: 'update-done',
+            status: { status: 'completed' },
+        };
+
+        render(<UpdateCard entry={entry} onAction={vi.fn()} />);
+
+        expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^execute$/i })).not.toBeInTheDocument();
+    });
+
+    it('surfaces Execute alongside Delete when completed maps to phase=prepared', () => {
+        // uptane_ota and similar plugins split prepare/execute but expose both
+        // terminal states as SOVD status=completed. The phase disambiguates:
+        // completed + prepared means the install still needs to run.
+        const entry: UpdateEntry = {
+            id: 'update-prepared',
+            status: { status: 'completed', 'x-medkit-phase': 'prepared' },
+        };
+
+        render(<UpdateCard entry={entry} onAction={vi.fn()} />);
+
+        expect(screen.getByRole('button', { name: /^execute$/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+    });
+
+    it('drops Execute once phase advances past prepared', () => {
+        const entry: UpdateEntry = {
+            id: 'update-executed',
+            status: { status: 'completed', 'x-medkit-phase': 'executed' },
+        };
+
+        render(<UpdateCard entry={entry} onAction={vi.fn()} />);
+
+        expect(screen.queryByRole('button', { name: /^execute$/i })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+    });
+
     it('shows failed badge with error message text', () => {
         const entry: UpdateEntry = {
             id: 'update-failed',

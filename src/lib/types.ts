@@ -957,12 +957,21 @@ export interface UpdateSubProgress {
 
 /**
  * Status response from GET /updates/{id}/status
+ *
+ * `x-medkit-phase` is a gateway-specific vendor extension used by OTA
+ * plugins (e.g. uptane_ota) that split the lifecycle into two SOVD-visible
+ * terminal states: `prepared` (ready for Execute) and `executed` (install
+ * actually applied). Plain SOVD collapses both into `status: "completed"`,
+ * so without the phase the UI cannot tell a prepared update apart from a
+ * fully installed one. Optional because plugins that run the pipeline in
+ * one shot do not emit it.
  */
 export interface UpdateStatus {
     status: UpdateStatusValue;
     progress?: number; // 0-100
     sub_progress?: UpdateSubProgress[];
     error?: string;
+    'x-medkit-phase'?: string;
 }
 
 /**
