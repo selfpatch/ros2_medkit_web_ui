@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Package, Loader2, AlertCircle, FileText } from 'lucide-react';
 import { fetchUpdateDetail } from '@/lib/updates-api';
-import type { UpdateEntry, UpdateStatusValue } from '@/lib/types';
+import type { UpdateEntry, UpdateStatus, UpdateStatusValue } from '@/lib/types';
 
 export type UpdateAction = 'prepare' | 'execute' | 'automated' | 'delete';
 
@@ -58,14 +58,21 @@ function progressBarColor(status: UpdateStatusValue): string {
     }
 }
 
-function actionButtonsForStatus(status: UpdateStatusValue): UpdateAction[] {
-    switch (status) {
+function actionButtonsForStatus(status: UpdateStatus): UpdateAction[] {
+    // SOVD collapses the prepare + execute pipeline into a single
+    // `completed` terminal status. Plugins that split the pipeline (e.g.
+    // uptane_ota) keep the real phase on the `x-medkit-phase` vendor field,
+    // so when status=completed + phase=prepared we are only half done and
+    // must surface Execute / Delete. Any other completed update (phase
+    // missing or `executed`) is truly terminal and only Delete applies.
+    const phase = status['x-medkit-phase'];
+    switch (status.status) {
         case 'pending':
             return ['prepare', 'execute', 'automated', 'delete'];
         case 'inProgress':
             return [];
         case 'completed':
-            return ['delete'];
+            return phase === 'prepared' ? ['execute', 'delete'] : ['delete'];
         case 'failed':
             return ['prepare', 'execute', 'delete'];
     }
@@ -213,7 +220,7 @@ export function UpdateCard({ entry, baseUrl, busy, onAction }: UpdateCardProps) 
 
                         <div className="flex flex-wrap gap-2 pt-1">
                             {onAction &&
-                                actionButtonsForStatus(status.status).map((action) => (
+                                actionButtonsForStatus(status).map((action) => (
                                     <Button
                                         key={action}
                                         size="sm"
