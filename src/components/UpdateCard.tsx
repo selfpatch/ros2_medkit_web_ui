@@ -60,11 +60,13 @@ function progressBarColor(status: UpdateStatusValue): string {
 
 function actionButtonsForStatus(status: UpdateStatus): UpdateAction[] {
     // SOVD collapses the prepare + execute pipeline into a single
-    // `completed` terminal status. Plugins that split the pipeline (e.g.
-    // uptane_ota) keep the real phase on the `x-medkit-phase` vendor field,
-    // so when status=completed + phase=prepared we are only half done and
-    // must surface Execute / Delete. Any other completed update (phase
-    // missing or `executed`) is truly terminal and only Delete applies.
+    // `completed` terminal status. Plugins that split the pipeline keep the
+    // real phase on the `x-medkit-phase` vendor field, so when
+    // status=completed + phase=prepared we are only half done and must
+    // surface Execute / Delete. Any other completed update (phase missing
+    // or `executed`) is truly terminal and only Delete applies. The
+    // `default` keeps the UI safe if a plugin emits a status outside the
+    // documented enum.
     const phase = status['x-medkit-phase'];
     switch (status.status) {
         case 'pending':
@@ -75,6 +77,8 @@ function actionButtonsForStatus(status: UpdateStatus): UpdateAction[] {
             return phase === 'prepared' ? ['execute', 'delete'] : ['delete'];
         case 'failed':
             return ['prepare', 'execute', 'delete'];
+        default:
+            return ['delete'];
     }
 }
 

@@ -16,7 +16,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { UpdateCard } from './UpdateCard';
-import type { UpdateEntry } from '@/lib/types';
+import type { UpdateEntry, UpdatePhase } from '@/lib/types';
 
 describe('UpdateCard', () => {
     it('renders update ID', () => {
@@ -92,9 +92,9 @@ describe('UpdateCard', () => {
     });
 
     it('surfaces Execute alongside Delete when completed maps to phase=prepared', () => {
-        // uptane_ota and similar plugins split prepare/execute but expose both
-        // terminal states as SOVD status=completed. The phase disambiguates:
-        // completed + prepared means the install still needs to run.
+        // Plugins that split prepare/execute expose both terminal states as
+        // SOVD status=completed. The phase disambiguates: completed +
+        // prepared means the install still needs to run.
         const entry: UpdateEntry = {
             id: 'update-prepared',
             status: { status: 'completed', 'x-medkit-phase': 'prepared' },
@@ -115,6 +115,36 @@ describe('UpdateCard', () => {
         render(<UpdateCard entry={entry} onAction={vi.fn()} />);
 
         expect(screen.queryByRole('button', { name: /^execute$/i })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+    });
+
+    it('falls back to Delete-only when completed carries an unknown phase', () => {
+        // Contract: only `prepared` surfaces Execute. Any other (or
+        // out-of-enum) phase on `completed` is treated as terminal.
+        const entry: UpdateEntry = {
+            id: 'update-unknown-phase',
+            status: {
+                status: 'completed',
+                'x-medkit-phase': 'installing' as UpdatePhase,
+            },
+        };
+
+        render(<UpdateCard entry={entry} onAction={vi.fn()} />);
+
+        expect(screen.queryByRole('button', { name: /^execute$/i })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+    });
+
+    it('ignores phase on failed updates and offers the retry actions', () => {
+        const entry: UpdateEntry = {
+            id: 'update-failed-after-prepare',
+            status: { status: 'failed', 'x-medkit-phase': 'prepared' },
+        };
+
+        render(<UpdateCard entry={entry} onAction={vi.fn()} />);
+
+        expect(screen.getByRole('button', { name: /prepare/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^execute$/i })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
     });
 

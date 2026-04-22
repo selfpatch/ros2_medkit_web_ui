@@ -948,6 +948,13 @@ export interface TokenRevokeRequest {
 export type UpdateStatusValue = 'pending' | 'inProgress' | 'completed' | 'failed';
 
 /**
+ * Lifecycle phase for an update, carried on the gateway-specific vendor
+ * extension `x-medkit-phase`. See `docs/api/rest.rst` in the gateway repo
+ * for the authoritative contract.
+ */
+export type UpdatePhase = 'none' | 'preparing' | 'prepared' | 'executing' | 'executed' | 'failed' | 'deleting';
+
+/**
  * Sub-step progress for an update operation
  */
 export interface UpdateSubProgress {
@@ -959,19 +966,19 @@ export interface UpdateSubProgress {
  * Status response from GET /updates/{id}/status
  *
  * `x-medkit-phase` is a gateway-specific vendor extension used by OTA
- * plugins (e.g. uptane_ota) that split the lifecycle into two SOVD-visible
- * terminal states: `prepared` (ready for Execute) and `executed` (install
- * actually applied). Plain SOVD collapses both into `status: "completed"`,
- * so without the phase the UI cannot tell a prepared update apart from a
- * fully installed one. Optional because plugins that run the pipeline in
- * one shot do not emit it.
+ * plugins that split the lifecycle into two SOVD-visible terminal states:
+ * `prepared` (ready for Execute) and `executed` (install actually applied).
+ * Plain SOVD collapses both into `status: "completed"`, so without the
+ * phase the UI cannot tell a prepared update apart from a fully installed
+ * one. Optional because plugins that run the pipeline in one shot do not
+ * emit it.
  */
 export interface UpdateStatus {
     status: UpdateStatusValue;
     progress?: number; // 0-100
     sub_progress?: UpdateSubProgress[];
     error?: string;
-    'x-medkit-phase'?: string;
+    'x-medkit-phase'?: UpdatePhase;
 }
 
 /**
