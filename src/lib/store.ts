@@ -687,24 +687,54 @@ export async function fetchAllAppsDeduped(client: MedkitClient): Promise<Record<
 }
 
 /** Fallback: fetch entity details from API when not in tree */
+/**
+ * Map a tree node's singular 'type' (e.g. "app", "function") to the plural
+ * SOVD resources keyboard used in API routes (/apps, /functions, ...).
+ */
+
+const NODE_TYPE_TO_RESOURCE: Record<string, SovdResourceEntityType> = {
+    area: 'areas',
+    subarea: 'areas',
+    component: 'components',
+    subcomponent: 'components',
+    app: 'apps',
+    function: 'functions',
+};
+
+/**
+ * Find the parent Entity node for a resource path (/.../data/<id>, etc.) and
+ * return its SOVD resource type.
+ * Returns undefined if the parent isn't in the loaded tree or its type is unknown.
+ */
+
+function resolveParentEntityType(path: string, rootEntities: EntityTreeNode[]): SovdResourceEntityType | undefined {
+    const match = path.match(/^(.*?)\/(data|operations|configurations|faults)(?:\/.*?)?$/);
+    if (!match) return undefined;
+    const parentPath = match[1]!;
+    const parentNode = findNode(rootEntities, parentPath);
+    if (!parentNode) return undefined;
+    return NODE_TYPE_TO_RESOURCE[parentNode.type?.toLowerCase()];
+}
+
 async function fetchEntityFromApi(
     path: string,
     client: MedkitClient,
-    set: (state: Partial<AppState>) => void
+    set: (state: Partial<AppState>) => void,
+    entityTypeOverride?: SovdResourceEntityType
 ): Promise<void> {
     set({ selectedPath: path, isLoadingDetails: true, selectedEntity: null });
 
     try {
         const parsed = parseTreePath(path);
+        // Prefer the parent tree node's real type over depth-based inference.
+        // which assumes a full area/component/app hierarchy and mis-labels
+        // apps as components in runtime_only (function/app) mode.
+
+        const entityType = entityTypeOverride ?? parsed.entityType;
 
         if (parsed.resource === 'data' && parsed.resourceId) {
             // Topic detail: fetch specific data item and transform it
-            const { data: rawItem } = await getEntityDataItem(
-                client,
-                parsed.entityType,
-                parsed.entityId,
-                parsed.resourceId
-            );
+            const { data: rawItem } = await getEntityDataItem(client, entityType, parsed.entityId, parsed.resourceId);
             // Transform raw API response to ComponentTopic (same as list transform but for single item)
             const transformed = rawItem ? transformDataResponse({ items: [rawItem] }) : [];
             const topicData = transformed[0] || null;
@@ -731,7 +761,7 @@ async function fetchEntityFromApi(
                     type: 'service',
                     href: path,
                     componentId: parsed.entityId,
-                    entityType: parsed.entityType,
+                    entityType,
                 },
                 isLoadingDetails: false,
             });
@@ -739,11 +769,11 @@ async function fetchEntityFromApi(
         }
 
         // Entity detail
-        const { data } = await getEntityDetail(client, parsed.entityType, parsed.entityId);
+        const { data } = await getEntityDetail(client, entityType, parsed.entityId);
         const details = (data || {
             id: parsed.entityId,
             name: parsed.entityId,
-            type: parsed.entityType.slice(0, -1),
+            type: entityType.slice(0, -1),
             href: path,
         }) as SovdEntityDetails;
         set({ selectedEntity: details, isLoadingDetails: false });
@@ -752,11 +782,12 @@ async function fetchEntityFromApi(
         console.error('[fetchEntityFromApi] Error:', message, { path });
 
         const parsed = parseTreePath(path);
+        const fallbackType = entityTypeOverride ?? parsed.entityType;
         set({
             selectedEntity: {
                 id: parsed.entityId,
                 name: parsed.entityId,
-                type: parsed.entityType.slice(0, -1),
+                type: fallbackType.slice(0, -1),
                 href: path,
                 error: 'Failed to load details',
             },
@@ -1244,8 +1275,12 @@ export const useAppStore = create<AppState>()(
 
                 const node = findNode(rootEntities, path);
                 if (!node) {
-                    // Node not in tree - fall back to API fetch
-                    await fetchEntityFromApi(path, client, set);
+                    // Node not in tree - fall back to API fetch, using the
+                    // parent tree node's real type when available so resource
+                    // URLs (/app/.../data/...) line up with the gateway's
+                    // runtime_only (function/app) hierarchy.
+                    const parentType = resolveParentEntityType(path, rootEntities);
+                    await fetchEntityFromApi(path, client, set, parentType);
                     return;
                 }
 
@@ -1310,7 +1345,8 @@ export const useAppStore = create<AppState>()(
                 }
 
                 // No handler matched - fall back to API fetch
-                await fetchEntityFromApi(path, client, set);
+                const parentType = resolveParentEntityType(path, rootEntities);
+                await fetchEntityFromApi(path, client, set, parentType);
             },
 
             // Refresh the currently selected entity (re-fetch from server)
