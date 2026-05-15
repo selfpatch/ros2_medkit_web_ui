@@ -1362,6 +1362,7 @@ export const useAppStore = create<AppState>()(
                     const typeMap: Record<string, SovdResourceEntityType> = {
                         area: 'areas',
                         component: 'components',
+                        subcomponent: 'components',
                         app: 'apps',
                         function: 'functions',
                     };

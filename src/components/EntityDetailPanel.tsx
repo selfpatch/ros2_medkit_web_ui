@@ -53,6 +53,7 @@ function getEntityTypeForApi(entityType: string | undefined): SovdResourceEntity
         case 'app':
             return 'apps';
         case 'component':
+        case 'subcomponent':
             return 'components';
         case 'function':
             return 'functions';
@@ -444,7 +445,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             }
 
             const entityId = selectedEntity.id;
-            const isComponent = selectedEntity.type === 'component';
+            const isComponent = selectedEntity.type === 'component' || selectedEntity.type === 'subcomponent';
             const isApp = selectedEntity.type === 'app';
             const isArea = selectedEntity.type === 'area';
             const isFunction = selectedEntity.type === 'function';
@@ -554,7 +555,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
     // Entity detail view
     if (selectedEntity) {
         const isTopic = selectedEntity.type === 'topic';
-        const isComponent = selectedEntity.type === 'component';
+        const isComponent = selectedEntity.type === 'component' || selectedEntity.type === 'subcomponent';
         const isArea = selectedEntity.type === 'area';
         const isApp = selectedEntity.type === 'app';
         const isFunction = selectedEntity.type === 'function';
@@ -628,6 +629,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                 case 'area':
                     return <Layers className="w-6 h-6 text-cyan-500" />;
                 case 'component':
+                case 'subcomponent':
                     return <Box className="w-6 h-6 text-indigo-500" />;
                 case 'app':
                     return <Cpu className="w-6 h-6 text-emerald-500" />;
@@ -646,6 +648,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                 case 'area':
                     return 'bg-cyan-100 dark:bg-cyan-900';
                 case 'component':
+                case 'subcomponent':
                     return 'bg-indigo-100 dark:bg-indigo-900';
                 case 'app':
                     return 'bg-emerald-100 dark:bg-emerald-900';
