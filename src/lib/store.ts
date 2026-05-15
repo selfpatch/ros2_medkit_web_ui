@@ -302,6 +302,36 @@ export function findNode(nodes: EntityTreeNode[], path: string): EntityTreeNode 
     return null;
 }
 
+/**
+ * Maps a tree node's singular `type` (e.g. "app", "function") to the plural
+ * SOVD resource keyword used in API routes (/apps, /functions, ...).
+ */
+const NODE_TYPE_TO_RESOURCE: Record<string, SovdResourceEntityType> = {
+    area: 'areas',
+    subarea: 'areas',
+    component: 'components',
+    subcomponent: 'components',
+    app: 'apps',
+    function: 'functions',
+};
+
+/**
+ * Finds the parent entity node for a resource path (/.../data/<id>, etc.) and
+ * returns its SOVD resource type. Returns undefined if the parent isn't in the
+ * loaded tree or its type is unknown.
+ */
+export function resolveParentEntityType(
+    path: string,
+    rootEntities: EntityTreeNode[]
+): SovdResourceEntityType | undefined {
+    const match = path.match(/^(.*?)\/(data|operations|configurations|faults)(?:\/.*?)?$/);
+    if (!match) return undefined;
+    const parentPath = match[1]!;
+    const parentNode = findNode(rootEntities, parentPath);
+    if (!parentNode) return undefined;
+    return NODE_TYPE_TO_RESOURCE[parentNode.type.toLowerCase()];
+}
+
 // =============================================================================
 // Entity Selection Handlers
 // =============================================================================
@@ -342,8 +372,7 @@ async function handleTopicSelection(ctx: SelectionContext, client: MedkitClient)
         // Find parent entity by walking up the tree path
         const parentPath = path.split('/').slice(0, -1).join('/');
         const parentNode = findNode(rootEntities, parentPath);
-        const parentType = parentNode?.type || 'component';
-        const entityType = `${parentType}s` as SovdResourceEntityType;
+        const entityType = NODE_TYPE_TO_RESOURCE[parentNode?.type?.toLowerCase() ?? ''] ?? 'components';
         const entityId = parentNode?.id || '';
 
         // Fetch the specific data item and transform to ComponentTopic
@@ -687,35 +716,6 @@ export async function fetchAllAppsDeduped(client: MedkitClient): Promise<Record<
 }
 
 /** Fallback: fetch entity details from API when not in tree */
-/**
- * Map a tree node's singular 'type' (e.g. "app", "function") to the plural
- * SOVD resources keyboard used in API routes (/apps, /functions, ...).
- */
-
-const NODE_TYPE_TO_RESOURCE: Record<string, SovdResourceEntityType> = {
-    area: 'areas',
-    subarea: 'areas',
-    component: 'components',
-    subcomponent: 'components',
-    app: 'apps',
-    function: 'functions',
-};
-
-/**
- * Find the parent Entity node for a resource path (/.../data/<id>, etc.) and
- * return its SOVD resource type.
- * Returns undefined if the parent isn't in the loaded tree or its type is unknown.
- */
-
-function resolveParentEntityType(path: string, rootEntities: EntityTreeNode[]): SovdResourceEntityType | undefined {
-    const match = path.match(/^(.*?)\/(data|operations|configurations|faults)(?:\/.*?)?$/);
-    if (!match) return undefined;
-    const parentPath = match[1]!;
-    const parentNode = findNode(rootEntities, parentPath);
-    if (!parentNode) return undefined;
-    return NODE_TYPE_TO_RESOURCE[parentNode.type?.toLowerCase()];
-}
-
 async function fetchEntityFromApi(
     path: string,
     client: MedkitClient,
@@ -726,10 +726,9 @@ async function fetchEntityFromApi(
 
     try {
         const parsed = parseTreePath(path);
-        // Prefer the parent tree node's real type over depth-based inference.
-        // which assumes a full area/component/app hierarchy and mis-labels
-        // apps as components in runtime_only (function/app) mode.
-
+        // Prefer the parent tree node's real type (entityTypeOverride) over
+        // depth-based inference, which assumes a full area/component/app
+        // hierarchy and mislabels apps as components in runtime_only mode.
         const entityType = entityTypeOverride ?? parsed.entityType;
 
         if (parsed.resource === 'data' && parsed.resourceId) {
@@ -1359,13 +1358,7 @@ export const useAppStore = create<AppState>()(
                 set({ isRefreshing: true });
 
                 try {
-                    const typeMap: Record<string, SovdResourceEntityType> = {
-                        area: 'areas',
-                        component: 'components',
-                        app: 'apps',
-                        function: 'functions',
-                    };
-                    const entityType = typeMap[selectedEntity.type];
+                    const entityType = NODE_TYPE_TO_RESOURCE[selectedEntity.type?.toLowerCase() ?? ''];
                     const entityId = selectedEntity.id;
 
                     if (!entityType) {

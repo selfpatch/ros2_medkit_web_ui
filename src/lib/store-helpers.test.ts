@@ -19,6 +19,7 @@ import {
     findNode,
     inferEntityTypeFromDepth,
     parseTreePath,
+    resolveParentEntityType,
     filterAppsByComponent,
     isPeerSourcedComponent,
     fetchAllAppsDeduped,
@@ -417,6 +418,66 @@ describe('parseTreePath', () => {
         const result = parseTreePath('/server/chassis');
         expect(result.entityType).toBe('areas');
         expect(result.entityId).toBe('chassis');
+    });
+});
+
+// =============================================================================
+// resolveParentEntityType
+// =============================================================================
+
+describe('resolveParentEntityType', () => {
+    // runtime_only (function/app) hierarchy: the app sits at depth 2, where
+    // depth-based inference would wrongly label it a component.
+    const runtimeOnlyTree: EntityTreeNode[] = [
+        makeTreeNode({
+            id: 'navigation',
+            type: 'function',
+            path: '/server/navigation',
+            children: [makeTreeNode({ id: 'planner', type: 'app', path: '/server/navigation/planner' })],
+        }),
+    ];
+
+    it('resolves an app parent to "apps" regardless of tree depth', () => {
+        // Regression for the runtime_only 400: depth inference returned 'components'.
+        expect(resolveParentEntityType('/server/navigation/planner/data/cmd_vel', runtimeOnlyTree)).toBe('apps');
+    });
+
+    it('resolves a function parent to "functions"', () => {
+        expect(resolveParentEntityType('/server/navigation/faults/E_STOP', runtimeOnlyTree)).toBe('functions');
+    });
+
+    it('resolves a component parent to "components"', () => {
+        const tree = [makeTreeNode({ id: 'engine', type: 'component', path: '/server/powertrain/engine' })];
+        expect(resolveParentEntityType('/server/powertrain/engine/data/rpm', tree)).toBe('components');
+    });
+
+    it('resolves an area parent to "areas"', () => {
+        const tree = [makeTreeNode({ id: 'powertrain', type: 'area', path: '/server/powertrain' })];
+        expect(resolveParentEntityType('/server/powertrain/operations/reset', tree)).toBe('areas');
+    });
+
+    it('matches the node type case-insensitively', () => {
+        const tree = [makeTreeNode({ id: 'planner', type: 'App', path: '/server/navigation/planner' })];
+        expect(resolveParentEntityType('/server/navigation/planner/data/cmd_vel', tree)).toBe('apps');
+    });
+
+    it('resolves operations, configurations and faults resource segments', () => {
+        for (const resource of ['operations', 'configurations', 'faults']) {
+            expect(resolveParentEntityType(`/server/navigation/planner/${resource}/x`, runtimeOnlyTree)).toBe('apps');
+        }
+    });
+
+    it('returns undefined when the path has no resource segment', () => {
+        expect(resolveParentEntityType('/server/navigation/planner', runtimeOnlyTree)).toBeUndefined();
+    });
+
+    it('returns undefined when the parent node is not in the loaded tree', () => {
+        expect(resolveParentEntityType('/server/unknown/missing/data/topic', runtimeOnlyTree)).toBeUndefined();
+    });
+
+    it('returns undefined when the parent node type is unknown', () => {
+        const tree = [makeTreeNode({ id: 'mystery', type: 'gadget', path: '/server/mystery' })];
+        expect(resolveParentEntityType('/server/mystery/data/topic', tree)).toBeUndefined();
     });
 });
 
