@@ -524,6 +524,15 @@ function handleAppSelection(ctx: SelectionContext): SelectionResult | null {
     if (node.type !== 'app') return null;
 
     const appData = node.data as App | undefined;
+    // Derive namespace from FQN if not explicitly set
+    // FQN like "/namespace/app_name" -> namespace: "namespace"
+
+    const fqn = appData?.fqn || node.name;
+    let namespace = appData?.namespace;
+    if (!namespace && fqn && fqn.includes('/')) {
+        const lastSlash = fqn.lastIndexOf('/');
+        namespace = lastSlash > 0 ? fqn.substring(0, lastSlash) : '/';
+    }
     return {
         selectedPath: path,
         expandedPaths: expandedPaths.includes(path) ? expandedPaths : [...expandedPaths, path],
@@ -532,9 +541,9 @@ function handleAppSelection(ctx: SelectionContext): SelectionResult | null {
             name: node.name,
             type: 'app',
             href: node.href,
-            fqn: appData?.fqn || node.name,
-            node_name: appData?.node_name,
-            namespace: appData?.namespace,
+            fqn,
+            node_name: appData?.node_name || (fqn.includes('/') ? fqn.substring(fqn.lastIndexOf('/') + 1) : node.name),
+            namespace,
             component_id: appData?.component_id,
         },
         isLoadingDetails: false,
@@ -1130,11 +1139,21 @@ export const useAppStore = create<AppState>()(
                                 .catch(() => null);
                             const hosts = hostsRes?.data ? unwrapItems<Record<string, unknown>>(hostsRes.data) : [];
 
-                            // Hosts response contains objects with {id, name, href}
+                            // Hosts response contains objects with {id, name, href, x-medkit: {ros2: {node: "/ns/name"}}}
                             loadedEntities = hosts.map((host: unknown) => {
-                                const hostObj = host as { id?: string; name?: string; href?: string };
+                                const hostObj = host as {
+                                    id?: string;
+                                    name?: string;
+                                    href?: string;
+                                    'x-medkit'?: { ros2?: { node?: string }; is_online?: boolean };
+                                };
                                 const hostId = hostObj.id || '';
                                 const hostName = hostObj.name || hostObj.id || '';
+                                const fqn = hostObj['x-medkit']?.ros2?.node || '';
+                                // Derive namespace from FQN: "/namespace/app_name" -> namespace: "namespace"
+                                const lastSlash = fqn.lastIndexOf('/');
+                                const namespace = lastSlash > 0 ? fqn.substring(0, lastSlash) : '/';
+                                const nodeName = lastSlash >= 0 ? fqn.substring(lastSlash + 1) : hostName;
                                 return {
                                     id: hostId,
                                     name: hostName,
@@ -1144,6 +1163,7 @@ export const useAppStore = create<AppState>()(
                                     hasChildren: false,
                                     isLoading: false,
                                     isExpanded: false,
+                                    data: { fqn, namespace, node_name: nodeName },
                                 };
                             });
                         }
