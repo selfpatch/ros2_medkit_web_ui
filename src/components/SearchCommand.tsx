@@ -39,8 +39,10 @@ function flattenTree(nodes: EntityTreeNode[]): EntityTreeNode[] {
 function getEntityIcon(type: string) {
     switch (type) {
         case 'area':
+        case 'subarea':
             return Layers;
         case 'component':
+        case 'subcomponent':
             return Box;
         case 'app':
             return Cpu;
@@ -57,8 +59,10 @@ function getEntityIcon(type: string) {
 function getEntityColorClass(type: string): string {
     switch (type) {
         case 'area':
+        case 'subarea':
             return 'text-cyan-500';
         case 'component':
+        case 'subcomponent':
             return 'text-indigo-500';
         case 'app':
             return 'text-emerald-500';
@@ -154,7 +158,7 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
                 <CommandEmpty>No entities found.</CommandEmpty>
 
                 {/* Group by entity type */}
-                {['area', 'component', 'app', 'function'].map((type) => {
+                {['area', 'subarea', 'component', 'subcomponent', 'app', 'function'].map((type) => {
                     const typeEntities = filteredEntities.filter((e) => e.type === type);
                     if (typeEntities.length === 0) return null;
 

@@ -31,7 +31,7 @@ import { FunctionsPanel } from '@/components/FunctionsPanel';
 import { ServerInfoPanel } from '@/components/ServerInfoPanel';
 import { FaultsDashboard } from '@/components/FaultsDashboard';
 import { UpdatesDashboard } from '@/components/UpdatesDashboard';
-import { useAppStore, type AppState } from '@/lib/store';
+import { useAppStore, findNode, type AppState } from '@/lib/store';
 import type { ComponentTopic, Parameter, SovdResourceEntityType } from '@/lib/types';
 
 type ComponentTab = ResourceTabId;
@@ -53,10 +53,12 @@ function getEntityTypeForApi(entityType: string | undefined): SovdResourceEntity
         case 'app':
             return 'apps';
         case 'component':
+        case 'subcomponent':
             return 'components';
         case 'function':
             return 'functions';
         case 'area':
+        case 'subarea':
             return 'areas';
         default:
             return 'components'; // default fallback
@@ -71,8 +73,10 @@ function getBreadcrumbIcon(type: string) {
         case 'server':
             return <Server className="w-3 h-3" />;
         case 'area':
+        case 'subarea':
             return <Layers className="w-3 h-3" />;
         case 'component':
+        case 'subcomponent':
             return <Box className="w-3 h-3" />;
         case 'app':
             return <Cpu className="w-3 h-3" />;
@@ -382,6 +386,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
     const {
         selectedPath,
         selectedEntity,
+        rootEntities,
         isLoadingDetails,
         isRefreshing,
         isConnected,
@@ -393,6 +398,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
         useShallow((state: AppState) => ({
             selectedPath: state.selectedPath,
             selectedEntity: state.selectedEntity,
+            rootEntities: state.rootEntities,
             isLoadingDetails: state.isLoadingDetails,
             isRefreshing: state.isRefreshing,
             isConnected: state.isConnected,
@@ -444,9 +450,9 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             }
 
             const entityId = selectedEntity.id;
-            const isComponent = selectedEntity.type === 'component';
+            const isComponent = selectedEntity.type === 'component' || selectedEntity.type === 'subcomponent';
             const isApp = selectedEntity.type === 'app';
-            const isArea = selectedEntity.type === 'area';
+            const isArea = selectedEntity.type === 'area' || selectedEntity.type === 'subarea';
             const isFunction = selectedEntity.type === 'function';
 
             // Only fetch counts for entity types that have resources
@@ -554,8 +560,8 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
     // Entity detail view
     if (selectedEntity) {
         const isTopic = selectedEntity.type === 'topic';
-        const isComponent = selectedEntity.type === 'component';
-        const isArea = selectedEntity.type === 'area';
+        const isComponent = selectedEntity.type === 'component' || selectedEntity.type === 'subcomponent';
+        const isArea = selectedEntity.type === 'area' || selectedEntity.type === 'subarea';
         const isApp = selectedEntity.type === 'app';
         const isFunction = selectedEntity.type === 'function';
         const isServer = selectedEntity.type === 'server';
@@ -626,8 +632,10 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                 case 'server':
                     return <Server className="w-6 h-6 text-primary" />;
                 case 'area':
+                case 'subarea':
                     return <Layers className="w-6 h-6 text-cyan-500" />;
                 case 'component':
+                case 'subcomponent':
                     return <Box className="w-6 h-6 text-indigo-500" />;
                 case 'app':
                     return <Cpu className="w-6 h-6 text-emerald-500" />;
@@ -644,8 +652,10 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                 case 'server':
                     return 'bg-primary/10';
                 case 'area':
+                case 'subarea':
                     return 'bg-cyan-100 dark:bg-cyan-900';
                 case 'component':
+                case 'subcomponent':
                     return 'bg-indigo-100 dark:bg-indigo-900';
                 case 'app':
                     return 'bg-emerald-100 dark:bg-emerald-900';
@@ -656,23 +666,30 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             }
         };
 
-        // Build breadcrumb from path with type inference
+        // Build breadcrumb from path. Prefer the real entity type from the
+        // loaded tree so nested types (subarea / subcomponent) and deeper
+        // hierarchies get the correct icon; fall back to position-based
+        // inference for segments not present in the tree.
         const breadcrumbs = pathParts.map((part, index) => {
             const breadcrumbPath = '/' + pathParts.slice(0, index + 1).join('/');
             // Decode URL-encoded parts for display
             const decodedPart = decodeURIComponent(part);
-            // Infer type from path position: server -> area -> component -> app/folder
             let type: string;
             if (part === 'server') {
                 type = 'server';
-            } else if (index === 1) {
-                type = 'area';
-            } else if (index === 2) {
-                type = 'component';
             } else if (['data', 'operations', 'configurations', 'faults', 'resources'].includes(part)) {
                 type = 'folder';
             } else {
-                type = 'app';
+                const node = findNode(rootEntities, breadcrumbPath);
+                if (node) {
+                    type = node.type;
+                } else if (index === 1) {
+                    type = 'area';
+                } else if (index === 2) {
+                    type = 'component';
+                } else {
+                    type = 'app';
+                }
             }
             return {
                 label: decodedPart,
