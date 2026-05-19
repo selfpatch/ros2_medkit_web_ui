@@ -254,6 +254,27 @@ export function toTreeNode(entity: SovdEntity, parentPath: string = ''): EntityT
         hasChildren = entityType !== 'app';
     }
 
+    // Extract namespace/fqn from x-medkit.ros2.node for app entities
+    // This ensures the overview panel shows the correct namespace regardless
+    // of which tree branch (Component hosts, function hosts, or direct) loaded the app.
+
+    let data: Record<string, unknown> | undefined = undefined;
+    if (entityType === 'app') {
+        const xMedkit = entityAny['x-medkit'] as Record<string, unknown> | undefined;
+        const ros2 = xMedkit?.ros2 as Record<string, unknown> | undefined;
+        const fqn = (ros2?.node as string) || '';
+        if (fqn && fqn.includes('/')) {
+            const lastSlash = fqn.lastIndexOf('/');
+            const namespace = lastSlash > 0 ? fqn.substring(0, lastSlash) : '/';
+            const node_name = fqn.substring(lastSlash + 1);
+            data = {
+                fqn,
+                namespace,
+                node_name,
+            };
+        }
+    }
+
     return {
         ...entity,
         path,
@@ -261,6 +282,7 @@ export function toTreeNode(entity: SovdEntity, parentPath: string = ''): EntityT
         isLoading: false,
         isExpanded: false,
         hasChildren, // Controls whether expand button is shown
+        ...(data && { data }),
     };
 }
 
