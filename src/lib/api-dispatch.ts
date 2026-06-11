@@ -232,7 +232,7 @@ export function putEntityDataItem(
     entityType: SovdResourceEntityType,
     entityId: string,
     dataId: string,
-    body: { value: unknown }
+    body: { type: string; data: unknown }
 ) {
     switch (entityType) {
         case 'apps':
@@ -549,24 +549,33 @@ export function getEntityLogs(
     if (params.severity) query.severity = params.severity;
     if (params.context) query.context = params.context;
 
+    // The 0.5.0 spec omits the /logs `severity`/`context` query params even though
+    // the gateway reads them at runtime; see selfpatch/ros2_medkit#416. Each call below
+    // passes the query with a suppressed type error until the client is regenerated from
+    // the fixed spec; the suppression is self-removing, as it errors once the params are
+    // typed.
     switch (entityType) {
         case 'apps':
             return client.GET('/apps/{app_id}/logs', {
+                // @ts-expect-error query params missing from the 0.5.0 spec (#416)
                 params: { path: { app_id: entityId }, query },
                 signal,
             });
         case 'components':
             return client.GET('/components/{component_id}/logs', {
+                // @ts-expect-error query params missing from the 0.5.0 spec (#416)
                 params: { path: { component_id: entityId }, query },
                 signal,
             });
         case 'areas':
             return client.GET('/areas/{area_id}/logs', {
+                // @ts-expect-error query params missing from the 0.5.0 spec (#416)
                 params: { path: { area_id: entityId }, query },
                 signal,
             });
         case 'functions':
             return client.GET('/functions/{function_id}/logs', {
+                // @ts-expect-error query params missing from the 0.5.0 spec (#416)
                 params: { path: { function_id: entityId }, query },
                 signal,
             });

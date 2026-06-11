@@ -189,7 +189,7 @@ describe('putEntityDataItem', () => {
     });
 
     it.each(ENTITY_TYPES)('calls PUT /%s/{id}/data/{data_id} for "%s"', async (entityType) => {
-        const body = { value: 42 };
+        const body = { type: 'std_msgs/msg/Int32', data: 42 };
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await putEntityDataItem(client as any, entityType, 'my-entity', 'temp-sensor', body);
         expectPut(client, `/${entityType}/`, { [ID_PARAM_MAP[entityType]]: 'my-entity', data_id: 'temp-sensor' }, body);

@@ -201,7 +201,7 @@ export interface AppState {
         entityType: SovdResourceEntityType,
         entityId: string,
         dataId: string,
-        request: { value: unknown }
+        request: { type: string; data: unknown }
     ) => Promise<void>;
     getServerCapabilities: () => Promise<unknown>;
     getVersionInfoAction: () => Promise<VersionInfo | null>;
@@ -1508,7 +1508,7 @@ export const useAppStore = create<AppState>()(
                         return true;
                     } else if ((result as { status?: string }).status === 'success') {
                         // Legacy format fallback
-                        const legacyResult = result as { parameter: { value: unknown } };
+                        const legacyResult = result as unknown as { parameter: { value: unknown } };
                         const newConfigs = new Map(configurations);
                         const params = newConfigs.get(entityId) || [];
                         const updatedParams = params.map((p) =>
@@ -1893,7 +1893,15 @@ export const useAppStore = create<AppState>()(
 
                 try {
                     const { data: faultsData, error: faultsError } = await client.GET('/faults', {
-                        params: { query: { status: 'all' } },
+                        params: {
+                            // The 0.5.0 spec omits the /faults `status` query param even though
+                            // the gateway reads it; see selfpatch/ros2_medkit#416. `status=all`
+                            // is required to include cleared/healed faults (no param returns only
+                            // active). Remove this cast once the client is regenerated from the
+                            // fixed spec.
+                            // @ts-expect-error query param missing from the 0.5.0 spec
+                            query: { status: 'all' },
+                        },
                     });
                     if (faultsError) throw new Error(faultsError.message || 'Failed to load faults');
                     const result = transformFaultsResponse(faultsData);
@@ -2147,7 +2155,7 @@ export const useAppStore = create<AppState>()(
                 entityType: SovdResourceEntityType,
                 entityId: string,
                 dataId: string,
-                request: { value: unknown }
+                request: { type: string; data: unknown }
             ) => {
                 const { client } = get();
                 if (!client) return;
