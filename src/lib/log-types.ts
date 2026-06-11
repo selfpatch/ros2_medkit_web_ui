@@ -13,49 +13,36 @@
 // limitations under the License.
 
 /**
- * Local TypeScript interfaces mirroring the gateway /logs JSON shape.
+ * Log types for the gateway /logs API, refined from the generated 0.5.0 schema.
  *
- * These are defined explicitly rather than derived from the generated
- * `components['schemas']` re-export because the published
- * @selfpatch/ros2-medkit-client-ts@0.1.1 package is missing
- * `generated/schema.js`, which silently degrades those generated types
- * to `any` (masked by `skipLibCheck: true`).
+ * The OpenAPI schema types logs more loosely than the gateway actually emits:
+ * `severity` is a bare `string`, and `context`/configuration fields are
+ * nullable and optional. The types below are anchored to
+ * `components['schemas']` (so schema drift surfaces at compile time) and
+ * tightened to the runtime guarantees the UI relies on: a known severity set,
+ * an always-present logger context, and required configuration fields.
  *
- * Reference: gateway `log_manager.cpp::entry_to_json` for the source of truth.
+ * Source of truth: gateway `log_manager.cpp::entry_to_json`.
  */
 
+import type { components } from '@selfpatch/ros2-medkit-client-ts';
+
+type Schemas = components['schemas'];
+
+/** Severity levels the gateway emits (the schema types this as a bare `string`). */
 export type LogSeverity = 'debug' | 'info' | 'warning' | 'error' | 'fatal';
 
-export interface LogContext {
-    /** Logger FQN without leading slash, e.g. "powertrain/engine/temp_sensor" */
-    node: string;
-    function?: string;
-    file?: string;
-    line?: number;
-}
+/** Logger context; the gateway always populates `node`. */
+export type LogContext = Schemas['LogContext'];
 
-export interface LogEntry {
-    /** Server-assigned monotonic ID, e.g. "log_123" */
-    id: string;
-    /** ISO 8601 UTC with nanosecond precision */
-    timestamp: string;
+/** A single log entry, with `severity` narrowed and `context` always present. */
+export type LogEntry = Omit<Schemas['LogEntry'], 'severity' | 'context'> & {
     severity: LogSeverity;
-    message: string;
     context: LogContext;
-}
+};
 
-export interface XMedkitAggregation {
-    entity_id?: string;
-    aggregation_level?: 'function' | 'area';
-    aggregated?: boolean;
-    aggregation_sources?: string[];
-    /** Function-level aggregation: number of hosted apps contributing logs */
-    host_count?: number;
-    /** Area-level aggregation: number of components in the area */
-    component_count?: number;
-    /** Area-level aggregation: number of apps aggregated across all components */
-    app_count?: number;
-}
+/** Aggregation provenance attached to multi-source log collections. */
+export type XMedkitAggregation = NonNullable<Schemas['LogEntryList']['x-medkit']>;
 
 export interface LogCollection {
     items: LogEntry[];
@@ -75,6 +62,10 @@ export interface LogsFetchResult {
     errorStatus?: number;
 }
 
+/**
+ * Log configuration. The schema marks both fields optional and nullable; the
+ * UI treats a configured severity filter and entry cap as required.
+ */
 export interface LogsConfiguration {
     severity_filter: LogSeverity;
     max_entries: number;
