@@ -169,7 +169,8 @@ export function TopicPublishForm({
         setIsPublishing(true);
         try {
             await publishToEntityData(entityType, entityId, topicName, {
-                value: { type: messageType, data: dataToPublish },
+                type: messageType,
+                data: dataToPublish,
             });
             toast.success(`Published to ${topic.topic}`);
         } catch (error) {
