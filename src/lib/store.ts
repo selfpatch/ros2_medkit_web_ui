@@ -115,6 +115,11 @@ export interface AppState {
     // Key is `${entityType}:${entityId}` (plural type); see entityStatusKey.
     statusByEntity: Record<string, EntityStatusValue>;
 
+    // Gateway-wide lifecycle actuation support, derived from observed transition
+    // responses: null = unknown, true = a transition succeeded (2xx), false = the
+    // gateway answered 501 (no actuation provider). Reset on every (re)connect.
+    actuationSupported: boolean | null;
+
     // Actions
     connect: (url: string) => Promise<boolean>;
     disconnect: () => void;
@@ -166,6 +171,9 @@ export interface AppState {
 
     // Lifecycle status action (apps/components only) - fills statusByEntity.
     fetchEntityStatus: (entityType: LifecycleEntityType, entityId: string) => Promise<void>;
+
+    // Records whether the gateway supports lifecycle actuation (see actuationSupported).
+    setActuationSupported: (value: boolean) => void;
 
     // Faults actions
     fetchFaults: () => Promise<void>;
@@ -898,9 +906,13 @@ export const useAppStore = create<AppState>()(
             // Lifecycle status cache
             statusByEntity: {},
 
+            // Gateway-wide lifecycle actuation support (unknown until observed).
+            actuationSupported: null,
+
             // Connect to ros2_medkit gateway
             connect: async (url: string) => {
-                set({ isConnecting: true, connectionError: null });
+                // Clear any stale actuation flag so a reconnect re-probes support.
+                set({ isConnecting: true, connectionError: null, actuationSupported: null });
 
                 try {
                     const client = createMedkitClient({ baseUrl: url, fetch: fetch.bind(globalThis) });
@@ -973,6 +985,7 @@ export const useAppStore = create<AppState>()(
                     selectedPath: null,
                     selectedEntity: null,
                     activeExecutions: new Map(),
+                    actuationSupported: null,
                 });
             },
 
@@ -1942,6 +1955,8 @@ export const useAppStore = create<AppState>()(
                 inFlightStatusRequests.set(key, request);
                 return request;
             },
+
+            setActuationSupported: (value: boolean) => set({ actuationSupported: value }),
 
             // ===========================================================================
             // FAULTS ACTIONS (Diagnostic Trouble Codes)

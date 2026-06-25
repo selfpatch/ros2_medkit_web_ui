@@ -47,3 +47,16 @@ describe('fetchEntityStatus', () => {
         expect(getStatusMock).toHaveBeenCalledTimes(1);
     });
 });
+
+describe('actuationSupported', () => {
+    it('defaults to null and setActuationSupported updates it', () => {
+        useAppStore.setState({ actuationSupported: null });
+        useAppStore.getState().setActuationSupported(false);
+        expect(useAppStore.getState().actuationSupported).toBe(false);
+    });
+    it('disconnect resets the flag to null', () => {
+        useAppStore.setState({ actuationSupported: false });
+        useAppStore.getState().disconnect();
+        expect(useAppStore.getState().actuationSupported).toBeNull();
+    });
+});
