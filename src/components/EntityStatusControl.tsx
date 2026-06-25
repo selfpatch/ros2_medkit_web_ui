@@ -17,6 +17,14 @@ import { Activity, AlertCircle, Loader2, Play, Power, RotateCw, Zap } from 'luci
 import { toast } from 'react-toastify';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAppStore, entityStatusKey } from '@/lib/store';
 import { setStatus, type LifecycleEntityType } from '@/lib/api-dispatch';
@@ -51,6 +59,9 @@ const DISABLED_BY_STATUS: Record<string, Set<LifecycleAction>> = {
     notReady: new Set<LifecycleAction>(['restart', 'shutdown', 'force-shutdown']),
 };
 
+/** Destructive transitions get the destructive confirm-button variant. */
+const DESTRUCTIVE_ACTIONS = new Set<LifecycleAction>(['shutdown', 'force-shutdown']);
+
 /**
  * Entity lifecycle status control for apps and components (gateway 0.6.0
  * lifecycle API). Shows the current readiness as a badge and exposes the five
@@ -58,7 +69,8 @@ const DISABLED_BY_STATUS: Record<string, Set<LifecycleAction>> = {
  *
  * Status is read from the shared `statusByEntity` store slice (the single
  * source of truth, also feeding the tree readiness lamp). Actions are gated by
- * that status (disabled + tooltip).
+ * that status (disabled + tooltip), and every transition except Start asks for
+ * confirmation before dispatch.
  *
  * The gateway returns 501 until a lifecycle provider is configured. That case
  * surfaces as the cached value `'unavailable'` -> a disabled "not available"
@@ -71,6 +83,7 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
     const fetchEntityStatus = useAppStore((s) => s.fetchEntityStatus);
 
     const [pendingAction, setPendingAction] = useState<LifecycleAction | null>(null);
+    const [confirmAction, setConfirmAction] = useState<LifecycleAction | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     // Fetch the live status on mount; the slice de-dupes against the tree lamp.
@@ -120,6 +133,28 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
         [client, entityType, entityId, fetchEntityStatus]
     );
 
+    const handleClick = useCallback(
+        (action: LifecycleAction) => {
+            // Start is non-destructive: dispatch immediately. Everything else
+            // interrupts a running entity, so confirm first.
+            if (action === 'start') {
+                void dispatchAction(action);
+            } else {
+                setConfirmAction(action);
+            }
+        },
+        [dispatchAction]
+    );
+
+    const handleConfirm = useCallback(() => {
+        if (confirmAction) {
+            void dispatchAction(confirmAction);
+        }
+        setConfirmAction(null);
+    }, [confirmAction, dispatchAction]);
+
+    const confirmLabel = confirmAction ? (ACTIONS.find((a) => a.action === confirmAction)?.label ?? confirmAction) : '';
+
     const statusBadge = (() => {
         if (status === 'ready') {
             return (
@@ -165,7 +200,7 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                             variant={variant}
                             size="sm"
                             disabled={disabled}
-                            onClick={() => dispatchAction(action)}
+                            onClick={() => handleClick(action)}
                         >
                             {isPending ? (
                                 <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
@@ -197,6 +232,32 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                     {error}
                 </p>
             )}
+
+            <Dialog open={confirmAction !== null} onOpenChange={(open) => !open && setConfirmAction(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Confirm {confirmLabel}?</DialogTitle>
+                        <DialogDescription>
+                            This will {confirmLabel.toLowerCase()} {entityId}. The transition interrupts the entity and
+                            may trigger faults.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setConfirmAction(null)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            variant={
+                                confirmAction && DESTRUCTIVE_ACTIONS.has(confirmAction) ? 'destructive' : 'default'
+                            }
+                            size="sm"
+                            onClick={handleConfirm}
+                        >
+                            Confirm
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

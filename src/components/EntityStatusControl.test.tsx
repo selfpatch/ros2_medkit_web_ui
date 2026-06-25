@@ -100,13 +100,14 @@ describe('EntityStatusControl', () => {
         expect(screen.getByRole('button', { name: /force shutdown/i })).toBeInTheDocument();
     });
 
-    it('calls setStatus with client, entityType, entityId and action on restart', async () => {
+    it('calls setStatus with client, entityType, entityId and action on confirmed restart', async () => {
         const user = userEvent.setup();
         // ready leaves Restart enabled.
         seedStatus('components:host-1', 'ready');
         renderControl(<EntityStatusControl entityType="components" entityId="host-1" />);
 
         await user.click(screen.getByRole('button', { name: /^restart$/i }));
+        await user.click(await screen.findByRole('button', { name: /confirm/i }));
 
         await waitFor(() => expect(mockSetStatus).toHaveBeenCalledTimes(1));
         const call = mockSetStatus.mock.calls[0]!;
@@ -116,7 +117,7 @@ describe('EntityStatusControl', () => {
         expect(call[3]).toBe('restart');
     });
 
-    it('refreshes the status after a successful action', async () => {
+    it('refreshes the status after a successful confirmed action', async () => {
         const user = userEvent.setup();
         const refresh = vi.fn();
         useAppStore.setState({
@@ -130,6 +131,7 @@ describe('EntityStatusControl', () => {
         await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
 
         await user.click(screen.getByRole('button', { name: /^shutdown$/i }));
+        await user.click(await screen.findByRole('button', { name: /confirm/i }));
 
         // The post-dispatch refresh calls fetchEntityStatus again.
         await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
@@ -182,5 +184,32 @@ describe('EntityStatusControl', () => {
         expect(await screen.findByRole('button', { name: /^start/i })).toBeEnabled();
         expect(screen.getByRole('button', { name: /^restart/i })).toBeDisabled();
         expect(screen.getByRole('button', { name: /^shutdown/i })).toBeDisabled();
+    });
+
+    // -----------------------------------------------------------------------
+    // Task 3: confirmation dialog for non-Start actions
+    // -----------------------------------------------------------------------
+
+    it('Restart opens a confirm dialog and does not call setStatus until confirmed', async () => {
+        const user = userEvent.setup();
+        seedStatus('apps:planner', 'ready');
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        await user.click(screen.getByRole('button', { name: /^restart$/i }));
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+        expect(mockSetStatus).not.toHaveBeenCalled();
+
+        await user.click(screen.getByRole('button', { name: /confirm/i }));
+        await waitFor(() => expect(mockSetStatus).toHaveBeenCalledWith(fakeClient, 'apps', 'planner', 'restart'));
+    });
+
+    it('Start dispatches immediately with no dialog', async () => {
+        const user = userEvent.setup();
+        seedStatus('apps:planner', 'notReady');
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        await user.click(screen.getByRole('button', { name: /^start$/i }));
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        await waitFor(() => expect(mockSetStatus).toHaveBeenCalledWith(fakeClient, 'apps', 'planner', 'start'));
     });
 });
