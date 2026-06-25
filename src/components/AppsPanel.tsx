@@ -11,6 +11,7 @@ import {
     isResourceTabId,
     type ResourceTabId,
 } from '@/components/ResourceTabs';
+import { EntityStatusControl } from '@/components/EntityStatusControl';
 import type { ComponentTopic, Operation, Fault } from '@/lib/types';
 
 type AppTab = 'overview' | ResourceTabId;
@@ -135,6 +136,11 @@ export function AppsPanel({ appId, appName, fqn, nodeName, namespace, componentI
                                 )}
                             </CardDescription>
                         </div>
+                    </div>
+
+                    {/* Lifecycle status control (gateway 0.6.0 lifecycle API) */}
+                    <div className="mt-4">
+                        <EntityStatusControl entityType="apps" entityId={appId} />
                     </div>
                 </CardHeader>
 

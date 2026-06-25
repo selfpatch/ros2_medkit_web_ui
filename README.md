@@ -15,6 +15,7 @@ ros2_medkit_web_ui is a lightweight single-page application that connects to a S
 - **Server Connection Dialog** - Enter the URL of your SOVD server (supports both `http://ip:port` and `ip:port` formats)
 - **Entity Tree Sidebar** - Browse the hierarchical structure of SOVD entities with lazy-loading
 - **Entity Detail Panel** - View raw JSON details of any selected entity
+- **Entity Lifecycle Status Control** - View readiness and request lifecycle transitions (start, restart, force-restart, shutdown, force-shutdown) for apps and components, degrading gracefully when no lifecycle provider is configured
 
 This tool is designed for developers and integrators working with SOVD-compatible systems who need a quick way to explore and debug the entity structure.
 

@@ -22,7 +22,7 @@
  */
 
 import type { MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
-import type { SovdResourceEntityType } from './types';
+import type { SovdResourceEntityType, LifecycleAction } from './types';
 import type { LogsQueryParams, LogsConfiguration } from './log-types';
 
 // =============================================================================
@@ -621,5 +621,72 @@ export function putEntityLogsConfiguration(
                 params: { path: { function_id: entityId } },
                 body: config,
             });
+    }
+}
+
+// =============================================================================
+// Lifecycle Status
+//
+// The gateway 0.6.0 lifecycle API exists ONLY for apps and components. There is
+// no areas/functions equivalent, so these helpers narrow the entity type to
+// 'apps' | 'components'. Each transition is a distinct PUT path (the action is
+// part of the URL, not a path parameter), so setStatus maps the action string
+// to the matching typed path.
+// =============================================================================
+
+/** Entity types that expose the lifecycle status collection. */
+export type LifecycleEntityType = Extract<SovdResourceEntityType, 'apps' | 'components'>;
+
+export function getStatus(
+    client: MedkitClient,
+    entityType: LifecycleEntityType,
+    entityId: string,
+    signal?: AbortSignal
+) {
+    switch (entityType) {
+        case 'apps':
+            return client.GET('/apps/{app_id}/status', { params: { path: { app_id: entityId } }, signal });
+        case 'components':
+            return client.GET('/components/{component_id}/status', {
+                params: { path: { component_id: entityId } },
+                signal,
+            });
+    }
+}
+
+export function setStatus(
+    client: MedkitClient,
+    entityType: LifecycleEntityType,
+    entityId: string,
+    action: LifecycleAction,
+    signal?: AbortSignal
+) {
+    if (entityType === 'apps') {
+        const params = { path: { app_id: entityId } };
+        switch (action) {
+            case 'start':
+                return client.PUT('/apps/{app_id}/status/start', { params, signal });
+            case 'restart':
+                return client.PUT('/apps/{app_id}/status/restart', { params, signal });
+            case 'force-restart':
+                return client.PUT('/apps/{app_id}/status/force-restart', { params, signal });
+            case 'shutdown':
+                return client.PUT('/apps/{app_id}/status/shutdown', { params, signal });
+            case 'force-shutdown':
+                return client.PUT('/apps/{app_id}/status/force-shutdown', { params, signal });
+        }
+    }
+    const params = { path: { component_id: entityId } };
+    switch (action) {
+        case 'start':
+            return client.PUT('/components/{component_id}/status/start', { params, signal });
+        case 'restart':
+            return client.PUT('/components/{component_id}/status/restart', { params, signal });
+        case 'force-restart':
+            return client.PUT('/components/{component_id}/status/force-restart', { params, signal });
+        case 'shutdown':
+            return client.PUT('/components/{component_id}/status/shutdown', { params, signal });
+        case 'force-shutdown':
+            return client.PUT('/components/{component_id}/status/force-shutdown', { params, signal });
     }
 }

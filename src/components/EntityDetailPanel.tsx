@@ -31,6 +31,7 @@ import { FunctionsPanel } from '@/components/FunctionsPanel';
 import { ServerInfoPanel } from '@/components/ServerInfoPanel';
 import { FaultsDashboard } from '@/components/FaultsDashboard';
 import { UpdatesDashboard } from '@/components/UpdatesDashboard';
+import { EntityStatusControl } from '@/components/EntityStatusControl';
 import { useAppStore, findNode, type AppState } from '@/lib/store';
 import type { ComponentTopic, Parameter, SovdResourceEntityType } from '@/lib/types';
 
@@ -803,6 +804,12 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                                         </Button>
                                     </div>
                                 </div>
+                                {/* Lifecycle status control (gateway 0.6.0 lifecycle API) */}
+                                {isComponent && (
+                                    <div className="mt-4">
+                                        <EntityStatusControl entityType="components" entityId={entityId} />
+                                    </div>
+                                )}
                             </CardHeader>
 
                             {/* Tab Navigation for Components */}
