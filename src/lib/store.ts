@@ -1894,12 +1894,8 @@ export const useAppStore = create<AppState>()(
                 try {
                     const { data: faultsData, error: faultsError } = await client.GET('/faults', {
                         params: {
-                            // The 0.5.0 spec omits the /faults `status` query param even though
-                            // the gateway reads it; see selfpatch/ros2_medkit#416. `status=all`
-                            // is required to include cleared/healed faults (no param returns only
-                            // active). Remove this cast once the client is regenerated from the
-                            // fixed spec.
-                            // @ts-expect-error query param missing from the 0.5.0 spec
+                            // `status=all` is required to include cleared/healed faults
+                            // (no param returns only active).
                             query: { status: 'all' },
                         },
                     });
