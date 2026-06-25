@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { useAppStore } from '@/lib/store';
+import { useAppStore, entityStatusKey } from '@/lib/store';
 import type { EntityTreeNode as EntityTreeNodeType, TopicNodeData, Parameter } from '@/lib/types';
 
 interface EntityTreeNodeProps {
@@ -115,6 +115,21 @@ function getEntityColor(type: string, isSelected?: boolean): string {
 }
 
 /**
+ * Tailwind colour for the readiness lamp. Green = ready, amber = notReady,
+ * grey for unavailable / unknown / not-yet-fetched.
+ */
+function getLampColor(status: string | undefined): string {
+    switch (status) {
+        case 'ready':
+            return 'bg-emerald-500';
+        case 'notReady':
+            return 'bg-amber-500';
+        default:
+            return 'bg-muted-foreground/40';
+    }
+}
+
+/**
  * Check if node data is TopicNodeData (from topicsInfo)
  */
 function isTopicNodeData(data: unknown): data is TopicNodeData {
@@ -139,6 +154,24 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
             selectEntity: state.selectEntity,
         }))
     );
+
+    // Lifecycle readiness lamp is only meaningful for apps and components.
+    // The tree uses singular node types; the lifecycle API uses plural.
+    const isLifecycleEntity = node.type === 'app' || node.type === 'component';
+    const lifecycleType = node.type === 'app' ? 'apps' : 'components';
+    const status = useAppStore((s) =>
+        isLifecycleEntity ? s.statusByEntity[entityStatusKey(lifecycleType, node.id)] : undefined
+    );
+    const fetchEntityStatus = useAppStore((s) => s.fetchEntityStatus);
+
+    // Lazily fetch readiness on mount. This node only mounts when its parent is
+    // expanded, so this is the on-expand fetch. The slice de-dupes with the
+    // control's own fetch.
+    useEffect(() => {
+        if (isLifecycleEntity) {
+            fetchEntityStatus(lifecycleType, node.id);
+        }
+    }, [isLifecycleEntity, lifecycleType, node.id, fetchEntityStatus]);
 
     const isExpanded = expandedPaths.includes(node.path);
     const isLoading = loadingPaths.includes(node.path);
@@ -220,6 +253,13 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
                 </CollapsibleTrigger>
 
                 <Icon className={cn('w-4 h-4 shrink-0', iconColorClass)} />
+
+                {isLifecycleEntity && (
+                    <span
+                        aria-label={`status: ${status ?? 'unknown'}`}
+                        className={cn('w-2 h-2 rounded-full shrink-0', getLampColor(status))}
+                    />
+                )}
 
                 <span className="text-sm truncate flex-1">
                     {typeof node.name === 'string' ? node.name : String(node.name || node.id || '')}
