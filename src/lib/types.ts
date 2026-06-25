@@ -80,7 +80,7 @@ export type LifecycleAction = 'start' | 'restart' | 'force-restart' | 'shutdown'
 
 /**
  * Lifecycle readiness value reported by GET /{entity}/{id}/status and carried
- * on AppDetail/ComponentDetail.
+ * in the `status` field of the GET /apps/{id} and GET /components/{id} responses.
  */
 export type LifecycleStatus = 'ready' | 'notReady';
 

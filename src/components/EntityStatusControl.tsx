@@ -33,8 +33,6 @@ import type { LifecycleAction } from '@/lib/types';
 interface EntityStatusControlProps {
     entityType: LifecycleEntityType;
     entityId: string;
-    /** Initial readiness value from the entity detail (AppDetail/ComponentDetail.status). */
-    status?: string;
 }
 
 interface ActionConfig {
@@ -89,7 +87,10 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
     const [error, setError] = useState<string | null>(null);
 
     // Fetch the live status on mount; the slice de-dupes against the tree lamp.
+    // Clear any prior error so a failed transition on one entity can't linger in
+    // the badge area after the selection switches to another entity.
     useEffect(() => {
+        setError(null);
         fetchEntityStatus(entityType, entityId);
     }, [entityType, entityId, fetchEntityStatus]);
 
