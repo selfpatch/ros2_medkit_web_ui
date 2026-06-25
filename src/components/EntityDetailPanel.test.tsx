@@ -49,6 +49,9 @@ vi.mock('@/lib/store', () => ({
     // The breadcrumb builder resolves segment types via findNode; these tests
     // don't load a tree, so it always falls back to position-based inference.
     findNode: () => null,
+    // EntityStatusControl (rendered for component/subcomponent entities) reads
+    // the status cache keyed by entityStatusKey.
+    entityStatusKey: (entityType: string, entityId: string) => `${entityType}:${entityId}`,
 }));
 
 function setStore(overrides: Record<string, unknown>) {
@@ -63,6 +66,11 @@ function setStore(overrides: Record<string, unknown>) {
         refreshSelectedEntity: mockRefreshSelectedEntity,
         prefetchResourceCounts: mockPrefetchResourceCounts,
         fetchEntityData: mockFetchEntityData,
+        // EntityStatusControl reads these from the store; provide inert values
+        // so the rendered control mounts without touching the network.
+        client: null,
+        statusByEntity: {},
+        fetchEntityStatus: vi.fn(),
         ...overrides,
     };
 }
