@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { useState, useEffect, useCallback } from 'react';
-import { useShallow } from 'zustand/shallow';
+import { useEffect, useState, useCallback } from 'react';
 import { Activity, AlertCircle, Loader2, Play, Power, RotateCw, Zap } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useAppStore } from '@/lib/store';
-import { getStatus, setStatus, type LifecycleEntityType } from '@/lib/api-dispatch';
-import type { LifecycleAction, LifecycleStatus } from '@/lib/types';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useAppStore, entityStatusKey } from '@/lib/store';
+import { setStatus, type LifecycleEntityType } from '@/lib/api-dispatch';
+import type { LifecycleAction } from '@/lib/types';
 
 interface EntityStatusControlProps {
     entityType: LifecycleEntityType;
@@ -45,55 +45,51 @@ const ACTIONS: ActionConfig[] = [
     { action: 'force-shutdown', label: 'Force shutdown', icon: Power, variant: 'destructive' },
 ];
 
-/** Narrow an arbitrary status string to the known readiness union, else null. */
-function toLifecycleStatus(value: string | undefined): LifecycleStatus | null {
-    return value === 'ready' || value === 'notReady' ? value : null;
-}
+/** Transitions disabled for a given cached readiness value. */
+const DISABLED_BY_STATUS: Record<string, Set<LifecycleAction>> = {
+    ready: new Set<LifecycleAction>(['start']),
+    notReady: new Set<LifecycleAction>(['restart', 'shutdown', 'force-shutdown']),
+};
 
 /**
  * Entity lifecycle status control for apps and components (gateway 0.6.0
  * lifecycle API). Shows the current readiness as a badge and exposes the five
  * lifecycle transitions as buttons.
  *
+ * Status is read from the shared `statusByEntity` store slice (the single
+ * source of truth, also feeding the tree readiness lamp). Actions are gated by
+ * that status (disabled + tooltip).
+ *
  * The gateway returns 501 until a lifecycle provider is configured. That case
- * is surfaced as a disabled "not available" state rather than an error toast,
- * so the control degrades gracefully on stock gateways.
+ * surfaces as the cached value `'unavailable'` -> a disabled "not available"
+ * state rather than an error toast, so the control degrades gracefully on stock
+ * gateways.
  */
-export function EntityStatusControl({ entityType, entityId, status }: EntityStatusControlProps) {
-    const { client } = useAppStore(useShallow((state) => ({ client: state.client })));
+export function EntityStatusControl({ entityType, entityId }: EntityStatusControlProps) {
+    const client = useAppStore((s) => s.client);
+    const status = useAppStore((s) => s.statusByEntity[entityStatusKey(entityType, entityId)]);
+    const fetchEntityStatus = useAppStore((s) => s.fetchEntityStatus);
 
-    const [currentStatus, setCurrentStatus] = useState<LifecycleStatus | null>(toLifecycleStatus(status));
     const [pendingAction, setPendingAction] = useState<LifecycleAction | null>(null);
-    const [notAvailable, setNotAvailable] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Refresh the live status from the gateway, replacing the prop-seeded value.
-    const refreshStatus = useCallback(
-        async (signal?: AbortSignal) => {
-            if (!client) return;
-            const result = await getStatus(client, entityType, entityId, signal);
-            if (signal?.aborted) return;
-            if (result.response.status === 501) {
-                setNotAvailable(true);
-                return;
-            }
-            if (result.data && typeof result.data.status === 'string') {
-                const next = toLifecycleStatus(result.data.status);
-                if (next) setCurrentStatus(next);
-            }
-        },
-        [client, entityType, entityId]
-    );
-
+    // Fetch the live status on mount; the slice de-dupes against the tree lamp.
     useEffect(() => {
-        const controller = new AbortController();
-        refreshStatus(controller.signal).catch(() => {
-            // On-mount status fetch is best-effort; the prop value remains shown.
-        });
-        return () => controller.abort();
-    }, [refreshStatus]);
+        fetchEntityStatus(entityType, entityId);
+    }, [entityType, entityId, fetchEntityStatus]);
 
-    const handleAction = useCallback(
+    const notAvailable = status === 'unavailable';
+
+    const isDisabled = (action: LifecycleAction): boolean =>
+        !client || notAvailable || pendingAction !== null || (DISABLED_BY_STATUS[status ?? '']?.has(action) ?? false);
+
+    const tooltipFor = (action: LifecycleAction): string => {
+        if (status === 'ready' && action === 'start') return 'Already running';
+        if (status === 'notReady' && DISABLED_BY_STATUS.notReady!.has(action)) return 'Entity is not running';
+        return '';
+    };
+
+    const dispatchAction = useCallback(
         async (action: LifecycleAction) => {
             if (!client) return;
             setPendingAction(action);
@@ -101,7 +97,8 @@ export function EntityStatusControl({ entityType, entityId, status }: EntityStat
             try {
                 const result = await setStatus(client, entityType, entityId, action);
                 if (result.response.status === 501) {
-                    setNotAvailable(true);
+                    // Mark the cache as unavailable so the control disables uniformly.
+                    await fetchEntityStatus(entityType, entityId);
                     return;
                 }
                 if (result.error) {
@@ -111,7 +108,7 @@ export function EntityStatusControl({ entityType, entityId, status }: EntityStat
                     return;
                 }
                 toast.success(`${action} requested for ${entityId}`);
-                await refreshStatus();
+                await fetchEntityStatus(entityType, entityId);
             } catch (err) {
                 const message = err instanceof Error ? err.message : 'Unknown error';
                 setError(message);
@@ -120,18 +117,18 @@ export function EntityStatusControl({ entityType, entityId, status }: EntityStat
                 setPendingAction(null);
             }
         },
-        [client, entityType, entityId, refreshStatus]
+        [client, entityType, entityId, fetchEntityStatus]
     );
 
     const statusBadge = (() => {
-        if (currentStatus === 'ready') {
+        if (status === 'ready') {
             return (
                 <Badge variant="outline" className="text-emerald-600 border-emerald-300">
                     ready
                 </Badge>
             );
         }
-        if (currentStatus === 'notReady') {
+        if (status === 'notReady') {
             return (
                 <Badge variant="outline" className="text-amber-600 border-amber-300">
                     notReady
@@ -160,13 +157,15 @@ export function EntityStatusControl({ entityType, entityId, status }: EntityStat
             <div className="flex items-center gap-2 flex-wrap">
                 {ACTIONS.map(({ action, label, icon: Icon, variant }) => {
                     const isPending = pendingAction === action;
-                    return (
+                    const disabled = isDisabled(action);
+                    const tip = disabled ? tooltipFor(action) : '';
+                    const button = (
                         <Button
                             key={action}
                             variant={variant}
                             size="sm"
-                            disabled={!client || notAvailable || pendingAction !== null}
-                            onClick={() => handleAction(action)}
+                            disabled={disabled}
+                            onClick={() => dispatchAction(action)}
                         >
                             {isPending ? (
                                 <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
@@ -176,6 +175,20 @@ export function EntityStatusControl({ entityType, entityId, status }: EntityStat
                             {label}
                         </Button>
                     );
+
+                    // A disabled button does not fire pointer events, so wrap it
+                    // in a focusable span to let the tooltip explain why.
+                    if (tip) {
+                        return (
+                            <Tooltip key={action}>
+                                <TooltipTrigger asChild>
+                                    <span tabIndex={0}>{button}</span>
+                                </TooltipTrigger>
+                                <TooltipContent>{tip}</TooltipContent>
+                            </Tooltip>
+                        );
+                    }
+                    return button;
                 })}
             </div>
 

@@ -12,36 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 // ---------------------------------------------------------------------------
 // Mocks
+//
+// Status is read from the real store slice (statusByEntity), seeded per-test.
+// Only setStatus (the transition dispatch) is mocked; the rest of api-dispatch
+// stays real so the store module loads. fetchEntityStatus is seeded as a no-op
+// vi.fn() in every test so the on-mount fetch does not overwrite the seeded
+// status with 'unknown' against the fake client.
 // ---------------------------------------------------------------------------
 
-const mockGetStatus = vi.fn();
 const mockSetStatus = vi.fn();
 
-vi.mock('@/lib/api-dispatch', () => ({
-    getStatus: (...args: unknown[]) => mockGetStatus(...args),
-    setStatus: (...args: unknown[]) => mockSetStatus(...args),
-}));
-
-// The component reads the typed client from the store; provide a sentinel.
-const fakeClient = { __fake: true };
-
-vi.mock('@/lib/store', () => ({
-    useAppStore: vi.fn((selector: (s: { client: unknown }) => unknown) => selector({ client: fakeClient })),
-}));
+vi.mock('@/lib/api-dispatch', async (importActual) => {
+    const actual = await importActual<typeof import('@/lib/api-dispatch')>();
+    return {
+        ...actual,
+        setStatus: (...args: unknown[]) => mockSetStatus(...args),
+    };
+});
 
 vi.mock('react-toastify', () => ({
     toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+import { useAppStore } from '@/lib/store';
+import { EntityStatusControl } from './EntityStatusControl';
+
+const fakeClient = { __fake: true } as never;
 
 /** Build an openapi-fetch style result. */
 function ok(status: number, data: unknown = undefined) {
@@ -52,25 +55,44 @@ function errResult(status: number, message: string) {
     return { data: undefined, error: { message }, response: { status } as Response };
 }
 
-// Lazy import so mocks are wired before the module loads.
-const { EntityStatusControl } = await import('./EntityStatusControl');
+/**
+ * Seed the store with a cached status and a no-op fetchEntityStatus, plus the
+ * fake client used by setStatus dispatch.
+ */
+function seedStatus(key: string, value: string) {
+    useAppStore.setState({
+        statusByEntity: { [key]: value as never },
+        fetchEntityStatus: vi.fn(),
+        client: fakeClient,
+    });
+}
+
+const renderControl = (ui: React.ReactElement) => render(<TooltipProvider>{ui}</TooltipProvider>);
 
 describe('EntityStatusControl', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        // getStatus is called on mount to refresh the live status.
-        mockGetStatus.mockResolvedValue(ok(200, { status: 'ready' }));
         mockSetStatus.mockResolvedValue(ok(204));
+        useAppStore.setState({ statusByEntity: {}, fetchEntityStatus: vi.fn(), client: fakeClient });
     });
 
-    it('renders the current status badge from the status prop', async () => {
-        render(<EntityStatusControl entityType="apps" entityId="motor" status="ready" />);
-        // Both the prop-seeded badge and the on-mount refresh should land on "ready".
-        expect(await screen.findByText(/ready/i)).toBeInTheDocument();
+    afterEach(() => {
+        cleanup();
+    });
+
+    // -----------------------------------------------------------------------
+    // Migrated baseline coverage (now driven by the store slice)
+    // -----------------------------------------------------------------------
+
+    it('renders the current status badge from the cached status', async () => {
+        seedStatus('apps:motor', 'ready');
+        renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
+        expect(await screen.findByText(/^ready$/i)).toBeInTheDocument();
     });
 
     it('renders an action button for each lifecycle action', () => {
-        render(<EntityStatusControl entityType="apps" entityId="motor" status="ready" />);
+        seedStatus('apps:motor', 'ready');
+        renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
         expect(screen.getByRole('button', { name: /^start$/i })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /^restart$/i })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /force restart/i })).toBeInTheDocument();
@@ -78,9 +100,11 @@ describe('EntityStatusControl', () => {
         expect(screen.getByRole('button', { name: /force shutdown/i })).toBeInTheDocument();
     });
 
-    it('calls setStatus with client, entityType, entityId and action on click', async () => {
+    it('calls setStatus with client, entityType, entityId and action on restart', async () => {
         const user = userEvent.setup();
-        render(<EntityStatusControl entityType="components" entityId="host-1" status="ready" />);
+        // ready leaves Restart enabled.
+        seedStatus('components:host-1', 'ready');
+        renderControl(<EntityStatusControl entityType="components" entityId="host-1" />);
 
         await user.click(screen.getByRole('button', { name: /^restart$/i }));
 
@@ -94,43 +118,69 @@ describe('EntityStatusControl', () => {
 
     it('refreshes the status after a successful action', async () => {
         const user = userEvent.setup();
-        mockGetStatus.mockResolvedValue(ok(200, { status: 'notReady' }));
-        render(<EntityStatusControl entityType="apps" entityId="motor" status="ready" />);
+        const refresh = vi.fn();
+        useAppStore.setState({
+            statusByEntity: { 'apps:motor': 'ready' },
+            fetchEntityStatus: refresh,
+            client: fakeClient,
+        });
+        renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
+
+        // Mount effect calls fetchEntityStatus once.
+        await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
 
         await user.click(screen.getByRole('button', { name: /^shutdown$/i }));
 
-        // getStatus runs once on mount and once after the action.
-        await waitFor(() => expect(mockGetStatus).toHaveBeenCalledTimes(2));
-        expect(await screen.findByText(/notReady/i)).toBeInTheDocument();
+        // The post-dispatch refresh calls fetchEntityStatus again.
+        await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
     });
 
-    it('surfaces a 501 from setStatus as a "not available" state and disables actions', async () => {
-        const user = userEvent.setup();
-        mockSetStatus.mockResolvedValue(errResult(501, 'Not Implemented'));
-        render(<EntityStatusControl entityType="apps" entityId="motor" status="ready" />);
-
-        await user.click(screen.getByRole('button', { name: /^start$/i }));
+    it('shows a disabled "not available" state when status is unavailable (501)', async () => {
+        // The gateway 501 maps to the cached value 'unavailable' in the store.
+        seedStatus('apps:motor', 'unavailable');
+        renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
 
         expect(await screen.findByText(/not available/i)).toBeInTheDocument();
-        // After "not available", action buttons are disabled.
         expect(screen.getByRole('button', { name: /^start$/i })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^restart$/i })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^shutdown$/i })).toBeDisabled();
     });
 
-    it('shows a 501 not-available state when the on-mount status fetch returns 501', async () => {
-        mockGetStatus.mockResolvedValue(errResult(501, 'Not Implemented'));
-        render(<EntityStatusControl entityType="components" entityId="host-1" />);
-
+    it('shows the "not available" state when the cached status is unavailable for components', async () => {
+        seedStatus('components:host-1', 'unavailable');
+        renderControl(<EntityStatusControl entityType="components" entityId="host-1" />);
         expect(await screen.findByText(/not available/i)).toBeInTheDocument();
     });
 
-    it('surfaces a non-501 error from setStatus inline and keeps actions enabled', async () => {
+    it('surfaces a non-501 error from setStatus inline and keeps the action enabled', async () => {
         const user = userEvent.setup();
         mockSetStatus.mockResolvedValue(errResult(400, 'invalid transition'));
-        render(<EntityStatusControl entityType="apps" entityId="motor" status="ready" />);
+        // start is enabled when notReady and dispatches immediately.
+        seedStatus('apps:motor', 'notReady');
+        renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
 
         await user.click(screen.getByRole('button', { name: /^start$/i }));
 
         expect(await screen.findByText(/invalid transition/i)).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /^start$/i })).not.toBeDisabled();
+    });
+
+    // -----------------------------------------------------------------------
+    // Task 2: gating by status (disable + tooltip)
+    // -----------------------------------------------------------------------
+
+    it('disables Start with a tooltip when status is ready', async () => {
+        seedStatus('components:host1', 'ready');
+        renderControl(<EntityStatusControl entityType="components" entityId="host1" />);
+        expect(await screen.findByRole('button', { name: /^start$/i })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^restart$/i })).toBeEnabled();
+    });
+
+    it('disables Restart/Shutdown when status is notReady, keeps Start enabled', async () => {
+        seedStatus('apps:planner', 'notReady');
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+        expect(await screen.findByRole('button', { name: /^start/i })).toBeEnabled();
+        expect(screen.getByRole('button', { name: /^restart/i })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^shutdown/i })).toBeDisabled();
     });
 });
