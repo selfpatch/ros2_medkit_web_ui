@@ -82,6 +82,7 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
     const status = useAppStore((s) => s.statusByEntity[entityStatusKey(entityType, entityId)]);
     const fetchEntityStatus = useAppStore((s) => s.fetchEntityStatus);
     const setActuationSupported = useAppStore((s) => s.setActuationSupported);
+    const actuationSupported = useAppStore((s) => s.actuationSupported);
 
     const [pendingAction, setPendingAction] = useState<LifecycleAction | null>(null);
     const [confirmAction, setConfirmAction] = useState<LifecycleAction | null>(null);
@@ -93,11 +94,19 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
     }, [entityType, entityId, fetchEntityStatus]);
 
     const notAvailable = status === 'unavailable';
+    // A 501 from any transition means the gateway has no actuation provider:
+    // disable every action (Start included), gateway-wide.
+    const actuationUnsupported = actuationSupported === false;
 
     const isDisabled = (action: LifecycleAction): boolean =>
-        !client || notAvailable || pendingAction !== null || (DISABLED_BY_STATUS[status ?? '']?.has(action) ?? false);
+        !client ||
+        notAvailable ||
+        actuationUnsupported ||
+        pendingAction !== null ||
+        (DISABLED_BY_STATUS[status ?? '']?.has(action) ?? false);
 
     const tooltipFor = (action: LifecycleAction): string => {
+        if (actuationUnsupported) return 'Not implemented by this gateway';
         if (status === 'ready' && action === 'start') return 'Already running';
         if (status === 'notReady' && DISABLED_BY_STATUS.notReady!.has(action)) return 'Entity is not running';
         return '';
@@ -234,6 +243,13 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                     return button;
                 })}
             </div>
+
+            {actuationUnsupported && (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    Transitions not implemented by this gateway (yet)
+                </span>
+            )}
 
             {error && !notAvailable && (
                 <p role="alert" className="text-xs text-destructive">

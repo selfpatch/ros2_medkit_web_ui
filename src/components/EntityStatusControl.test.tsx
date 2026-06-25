@@ -74,7 +74,12 @@ describe('EntityStatusControl', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         mockSetStatus.mockResolvedValue(ok(204));
-        useAppStore.setState({ statusByEntity: {}, fetchEntityStatus: vi.fn(), client: fakeClient });
+        useAppStore.setState({
+            statusByEntity: {},
+            fetchEntityStatus: vi.fn(),
+            client: fakeClient,
+            actuationSupported: null,
+        });
     });
 
     afterEach(() => {
@@ -241,5 +246,19 @@ describe('EntityStatusControl', () => {
 
         await waitFor(() => expect(toast.success).toHaveBeenCalled());
         expect(useAppStore.getState().actuationSupported).toBe(true);
+    });
+
+    // -----------------------------------------------------------------------
+    // Task C: disable + "not implemented" note when actuationSupported === false
+    // -----------------------------------------------------------------------
+
+    it('disables all transition buttons and shows a note when actuation is unsupported', async () => {
+        seedStatus('apps:planner', 'notReady');
+        useAppStore.setState({ actuationSupported: false });
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        expect(await screen.findByRole('button', { name: /^start/i })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^restart/i })).toBeDisabled();
+        expect(screen.getByText(/not implemented by this gateway/i)).toBeInTheDocument();
     });
 });
