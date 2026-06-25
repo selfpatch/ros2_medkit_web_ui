@@ -70,3 +70,40 @@ describe('EntityTreeNode lifecycle lamp', () => {
         expect(screen.queryByLabelText(/status:/i)).not.toBeInTheDocument();
     });
 });
+
+describe('EntityTreeNode label', () => {
+    beforeEach(() => {
+        useAppStore.setState({ statusByEntity: {}, expandedPaths: [], loadingPaths: [], selectedPath: null });
+    });
+    afterEach(() => cleanup());
+
+    it('shows the entity description as the label when present', () => {
+        useAppStore.setState({ fetchEntityStatus: vi.fn() } as never);
+        render(
+            <EntityTreeNode
+                node={
+                    {
+                        id: 'a3d9',
+                        name: 'a3d9',
+                        type: 'component',
+                        path: '/server/a3d9',
+                        description: 'Ubuntu 24.04.4 LTS on x86_64',
+                    } as never
+                }
+                depth={0}
+            />
+        );
+        expect(screen.getByText('Ubuntu 24.04.4 LTS on x86_64')).toBeInTheDocument();
+    });
+
+    it('falls back to the name when there is no description', () => {
+        useAppStore.setState({ fetchEntityStatus: vi.fn() } as never);
+        render(
+            <EntityTreeNode
+                node={{ id: 'talker', name: 'talker', type: 'app', path: '/x/talker' } as never}
+                depth={0}
+            />
+        );
+        expect(screen.getByText('talker')).toBeInTheDocument();
+    });
+});

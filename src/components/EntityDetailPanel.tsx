@@ -778,7 +778,9 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                                             {getEntityTypeIcon()}
                                         </div>
                                         <div>
-                                            <CardTitle className="text-xl">{selectedEntity.name}</CardTitle>
+                                            <CardTitle className="text-xl">
+                                                {selectedEntity.description || selectedEntity.name}
+                                            </CardTitle>
                                             <CardDescription className="flex items-center gap-2">
                                                 <Badge variant="outline">{selectedEntity.type}</Badge>
                                                 <span className="text-muted-foreground">•</span>

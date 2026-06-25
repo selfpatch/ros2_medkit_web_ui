@@ -261,8 +261,9 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
                     />
                 )}
 
-                <span className="text-sm truncate flex-1">
-                    {typeof node.name === 'string' ? node.name : String(node.name || node.id || '')}
+                <span className="text-sm truncate flex-1" title={typeof node.name === 'string' ? node.name : node.id}>
+                    {(typeof node.description === 'string' && node.description) ||
+                        (typeof node.name === 'string' ? node.name : String(node.name || node.id || ''))}
                 </span>
 
                 {/* Topic direction indicators */}

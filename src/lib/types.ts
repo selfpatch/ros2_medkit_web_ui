@@ -126,6 +126,8 @@ export interface SovdEntity {
     id: string;
     /** Display name */
     name: string;
+    /** Optional human-friendly description (e.g. the host OS for a component). */
+    description?: string;
     /** Entity type (e.g., "component", "application", "signal") */
     type: string;
     /** API path for this entity */
