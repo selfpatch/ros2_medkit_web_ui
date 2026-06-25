@@ -16,6 +16,7 @@ import type {
     App,
     VersionInfo,
     SovdFunction,
+    EntityStatusValue,
 } from './types';
 import { createMedkitClient, normalizeBaseUrl, type MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
 import type { SovdResourceEntityType } from './types';
@@ -47,6 +48,8 @@ import {
     getEntityLogs,
     getEntityLogsConfiguration,
     putEntityLogsConfiguration,
+    getStatus,
+    type LifecycleEntityType,
 } from './api-dispatch';
 import type { LogCollection, LogsConfiguration, LogsFetchResult, LogsQueryParams } from './log-types';
 
@@ -108,6 +111,10 @@ export interface AppState {
     isLoadingFaults: boolean;
     faultStreamCleanup: (() => void) | null;
 
+    // Lifecycle status cache (apps/components only).
+    // Key is `${entityType}:${entityId}` (plural type); see entityStatusKey.
+    statusByEntity: Record<string, EntityStatusValue>;
+
     // Actions
     connect: (url: string) => Promise<boolean>;
     disconnect: () => void;
@@ -156,6 +163,9 @@ export interface AppState {
     setAutoRefreshExecutions: (enabled: boolean) => void;
     startExecutionPolling: () => void;
     stopExecutionPolling: () => void;
+
+    // Lifecycle status action (apps/components only) - fills statusByEntity.
+    fetchEntityStatus: (entityType: LifecycleEntityType, entityId: string) => Promise<void>;
 
     // Faults actions
     fetchFaults: () => Promise<void>;
@@ -734,6 +744,26 @@ export function __resetAppsRequestCache(): void {
     inFlightAppsRequest = null;
 }
 
+/**
+ * Build the `statusByEntity` cache key from an entity's plural resource type
+ * and id (e.g. `entityStatusKey('apps', 'planner') === 'apps:planner'`).
+ */
+export function entityStatusKey(entityType: string, entityId: string): string {
+    return `${entityType}:${entityId}`;
+}
+
+/**
+ * Module-level dedupe for `fetchEntityStatus`. Concurrent calls for the same
+ * entity (e.g. the control and the tree lamp both mounting) share one request.
+ * The promise is cleared on settlement so later mounts refetch fresh status.
+ */
+const inFlightStatusRequests = new Map<string, Promise<void>>();
+
+/** Reset the status-request dedupe cache. Exposed for tests. */
+export function __resetStatusRequestCache(): void {
+    inFlightStatusRequests.clear();
+}
+
 export async function fetchAllAppsDeduped(client: MedkitClient): Promise<Record<string, unknown>[]> {
     if (inFlightAppsRequest) return inFlightAppsRequest;
     inFlightAppsRequest = client
@@ -864,6 +894,9 @@ export const useAppStore = create<AppState>()(
             faults: [],
             isLoadingFaults: false,
             faultStreamCleanup: null,
+
+            // Lifecycle status cache
+            statusByEntity: {},
 
             // Connect to ros2_medkit gateway
             connect: async (url: string) => {
@@ -1875,6 +1908,39 @@ export const useAppStore = create<AppState>()(
                     clearInterval(executionPollingIntervalId);
                     set({ executionPollingIntervalId: null });
                 }
+            },
+
+            // ===========================================================================
+            // LIFECYCLE STATUS ACTION (apps/components only)
+            // ===========================================================================
+
+            fetchEntityStatus: async (entityType: LifecycleEntityType, entityId: string) => {
+                const key = entityStatusKey(entityType, entityId);
+                const existing = inFlightStatusRequests.get(key);
+                if (existing) return existing;
+
+                const client = get().client;
+                if (!client) return;
+
+                const request = (async () => {
+                    try {
+                        const result = await getStatus(client, entityType, entityId);
+                        let value: EntityStatusValue = 'unknown';
+                        if (result.response?.status === 501) {
+                            value = 'unavailable';
+                        } else if (result.data?.status === 'ready' || result.data?.status === 'notReady') {
+                            value = result.data.status;
+                        }
+                        set((s) => ({ statusByEntity: { ...s.statusByEntity, [key]: value } }));
+                    } catch {
+                        set((s) => ({ statusByEntity: { ...s.statusByEntity, [key]: 'unknown' } }));
+                    } finally {
+                        inFlightStatusRequests.delete(key);
+                    }
+                })();
+
+                inFlightStatusRequests.set(key, request);
+                return request;
             },
 
             // ===========================================================================

@@ -84,6 +84,9 @@ export type LifecycleAction = 'start' | 'restart' | 'force-restart' | 'shutdown'
  */
 export type LifecycleStatus = 'ready' | 'notReady';
 
+/** Cached lifecycle status value for an entity (apps/components only). */
+export type EntityStatusValue = 'ready' | 'notReady' | 'unavailable' | 'unknown';
+
 /**
  * QoS profile for a topic endpoint
  */
