@@ -38,9 +38,10 @@ vi.mock('@/lib/api-dispatch', async (importActual) => {
 });
 
 vi.mock('react-toastify', () => ({
-    toast: { success: vi.fn(), error: vi.fn() },
+    toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));
 
+import { toast } from 'react-toastify';
 import { useAppStore } from '@/lib/store';
 import { EntityStatusControl } from './EntityStatusControl';
 
@@ -211,5 +212,34 @@ describe('EntityStatusControl', () => {
         await user.click(screen.getByRole('button', { name: /^start$/i }));
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
         await waitFor(() => expect(mockSetStatus).toHaveBeenCalledWith(fakeClient, 'apps', 'planner', 'start'));
+    });
+
+    // -----------------------------------------------------------------------
+    // Task B: response-driven transition feedback (replaces the 501 no-op)
+    // -----------------------------------------------------------------------
+
+    it('501 transition warns "not implemented" and sets actuationSupported false', async () => {
+        seedStatus('apps:planner', 'notReady');
+        useAppStore.setState({ actuationSupported: null });
+        mockSetStatus.mockResolvedValue(errResult(501, 'no actuation provider'));
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        await userEvent.click(screen.getByRole('button', { name: /^start/i }));
+
+        await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+        expect(toast.error).not.toHaveBeenCalled();
+        expect(useAppStore.getState().actuationSupported).toBe(false);
+    });
+
+    it('2xx transition reports success and sets actuationSupported true', async () => {
+        seedStatus('apps:planner', 'notReady');
+        useAppStore.setState({ actuationSupported: null });
+        mockSetStatus.mockResolvedValue(ok(202));
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        await userEvent.click(screen.getByRole('button', { name: /^start/i }));
+
+        await waitFor(() => expect(toast.success).toHaveBeenCalled());
+        expect(useAppStore.getState().actuationSupported).toBe(true);
     });
 });

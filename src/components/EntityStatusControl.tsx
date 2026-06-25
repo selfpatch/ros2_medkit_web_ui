@@ -81,6 +81,7 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
     const client = useAppStore((s) => s.client);
     const status = useAppStore((s) => s.statusByEntity[entityStatusKey(entityType, entityId)]);
     const fetchEntityStatus = useAppStore((s) => s.fetchEntityStatus);
+    const setActuationSupported = useAppStore((s) => s.setActuationSupported);
 
     const [pendingAction, setPendingAction] = useState<LifecycleAction | null>(null);
     const [confirmAction, setConfirmAction] = useState<LifecycleAction | null>(null);
@@ -109,9 +110,14 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
             setError(null);
             try {
                 const result = await setStatus(client, entityType, entityId, action);
-                if (result.response.status === 501) {
-                    // Mark the cache as unavailable so the control disables uniformly.
-                    await fetchEntityStatus(entityType, entityId);
+                const httpStatus = result.response?.status;
+                if (httpStatus === 501) {
+                    // The gateway has no actuation provider: record it gateway-wide
+                    // so every transition button disables, and warn (not error) -
+                    // this is a missing capability, not a failed request.
+                    setActuationSupported(false);
+                    const msg = result.error?.message;
+                    toast.warning(`${action} is not implemented by this gateway${msg ? `: ${msg}` : ''}`);
                     return;
                 }
                 if (result.error) {
@@ -120,6 +126,8 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                     toast.error(`Failed to ${action} ${entityId}: ${message}`);
                     return;
                 }
+                // Any 2xx proves the gateway can actuate; clear a stale "unsupported".
+                setActuationSupported(true);
                 toast.success(`${action} requested for ${entityId}`);
                 await fetchEntityStatus(entityType, entityId);
             } catch (err) {
@@ -130,7 +138,7 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                 setPendingAction(null);
             }
         },
-        [client, entityType, entityId, fetchEntityStatus]
+        [client, entityType, entityId, fetchEntityStatus, setActuationSupported]
     );
 
     const handleClick = useCallback(
