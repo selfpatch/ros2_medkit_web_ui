@@ -13,7 +13,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useSearchShortcut } from '@/hooks/useSearchShortcut';
 import { useAppStore } from '@/lib/store';
 
-type ViewMode = 'entity' | 'faults-dashboard' | 'updates-dashboard';
+type ViewMode = 'entity' | 'faults-dashboard' | 'updates-dashboard' | 'compliance-dashboard';
 
 function App() {
     const { isConnected, serverUrl, connect, clearSelection, selectedPath } = useAppStore(
@@ -50,6 +50,15 @@ function App() {
     const handleUpdatesDashboardClick = useCallback(() => {
         clearSelection();
         setViewMode('updates-dashboard');
+        if (window.innerWidth < 768) {
+            setSidebarOpen(false);
+        }
+    }, [clearSelection]);
+
+    // Handle compliance dashboard navigation
+    const handleComplianceDashboardClick = useCallback(() => {
+        clearSelection();
+        setViewMode('compliance-dashboard');
         if (window.innerWidth < 768) {
             setSidebarOpen(false);
         }
@@ -119,6 +128,7 @@ function App() {
                             onSettingsClick={() => setShowConnectionDialog(true)}
                             onFaultsDashboardClick={handleFaultsDashboardClick}
                             onUpdatesDashboardClick={handleUpdatesDashboardClick}
+                            onComplianceDashboardClick={handleComplianceDashboardClick}
                         />
                     </div>
 

@@ -31,6 +31,7 @@ import { FunctionsPanel } from '@/components/FunctionsPanel';
 import { ServerInfoPanel } from '@/components/ServerInfoPanel';
 import { FaultsDashboard } from '@/components/FaultsDashboard';
 import { UpdatesDashboard } from '@/components/UpdatesDashboard';
+import { ComplianceDashboard } from '@/components/ComplianceDashboard';
 import { useAppStore, findNode, type AppState } from '@/lib/store';
 import type { ComponentTopic, Parameter, SovdResourceEntityType } from '@/lib/types';
 
@@ -364,7 +365,7 @@ function ParameterDetailCard({ entity, entityId, entityType }: ParameterDetailCa
 
 interface EntityDetailPanelProps {
     onConnectClick: () => void;
-    viewMode?: 'entity' | 'faults-dashboard' | 'updates-dashboard';
+    viewMode?: 'entity' | 'faults-dashboard' | 'updates-dashboard' | 'compliance-dashboard';
     onEntitySelect?: () => void;
 }
 
@@ -530,6 +531,17 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             <main className="flex-1 overflow-y-auto p-6 bg-background">
                 <div className="max-w-4xl mx-auto">
                     <UpdatesDashboard />
+                </div>
+            </main>
+        );
+    }
+
+    // Compliance / NIS2 Dashboard view
+    if (viewMode === 'compliance-dashboard' && !selectedPath) {
+        return (
+            <main className="flex-1 overflow-y-auto p-6 bg-background">
+                <div className="max-w-4xl mx-auto">
+                    <ComplianceDashboard />
                 </div>
             </main>
         );

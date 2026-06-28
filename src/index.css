@@ -118,3 +118,23 @@
 .animate-progress-indeterminate {
     animation: progress-indeterminate 1.5s ease-in-out infinite;
 }
+
+/* Compliance / NIS2 report: print only the report area, drop app chrome. */
+@media print {
+    body * {
+        visibility: hidden;
+    }
+    .compliance-report,
+    .compliance-report * {
+        visibility: visible;
+    }
+    .compliance-report {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+    }
+    .compliance-no-print {
+        display: none !important;
+    }
+}
