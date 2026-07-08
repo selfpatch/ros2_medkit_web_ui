@@ -35,6 +35,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useAppStore } from '@/lib/store';
 import {
     fetchComplianceTimeline,
+    ComplianceApiError,
     type ComplianceRecord,
     type ComplianceTimeline,
     type ComplianceTimelineResult,
@@ -205,6 +206,10 @@ export function ComplianceDashboard() {
     const [result, setResult] = useState<ComplianceTimelineResult | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // The compliance timeline is a Pro feature served by the commercial gateway.
+    // Open-core gateways don't expose it, so a 404/501 is expected - degrade to
+    // a calm "not available" notice instead of a scary error.
+    const [notAvailable, setNotAvailable] = useState(false);
 
     // Role is read once on mount: it only changes via an explicit localStorage
     // override, which is not reactive.
@@ -220,12 +225,19 @@ export function ComplianceDashboard() {
         abortRef.current = controller;
         setIsLoading(true);
         setError(null);
+        setNotAvailable(false);
         try {
             const res = await fetchComplianceTimeline(baseUrl, controller.signal);
             if (controller.signal.aborted) return;
             setResult(res);
         } catch (err) {
             if (controller.signal.aborted || (err as { name?: string })?.name === 'AbortError') return;
+            // Endpoint missing (open-core gateway) -> degrade cleanly, not an error.
+            if (err instanceof ComplianceApiError && (err.status === 404 || err.status === 501)) {
+                setResult(null);
+                setNotAvailable(true);
+                return;
+            }
             setError(err instanceof Error ? err.message : String(err));
         } finally {
             if (!controller.signal.aborted) setIsLoading(false);
@@ -344,6 +356,19 @@ export function ComplianceDashboard() {
                 <Card>
                     <CardContent className="pt-6">
                         <ComplianceSkeleton />
+                    </CardContent>
+                </Card>
+            ) : notAvailable ? (
+                <Card>
+                    <CardContent className="pt-6">
+                        <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
+                            <ShieldCheck className="h-10 w-10 mb-3 opacity-30" />
+                            <p className="font-medium">Compliance timeline not available</p>
+                            <p className="text-sm mt-1">
+                                This gateway does not serve the compliance timeline. It is a Pro-tier
+                                feature.
+                            </p>
+                        </div>
                     </CardContent>
                 </Card>
             ) : error ? (
