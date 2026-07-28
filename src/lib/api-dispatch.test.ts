@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { SovdResourceEntityType } from './types';
+import type { SovdResourceEntityType, ScriptEntityType } from './types';
 import {
     getEntityDetail,
     getEntityData,
@@ -37,6 +37,14 @@ import {
     getEntityLogs,
     getEntityLogsConfiguration,
     putEntityLogsConfiguration,
+    getEntityScripts,
+    getEntityScript,
+    uploadEntityScript,
+    deleteEntityScript,
+    startScriptExecution,
+    getScriptExecution,
+    controlScriptExecution,
+    deleteScriptExecution,
 } from './api-dispatch';
 
 // ---------------------------------------------------------------------------
@@ -726,5 +734,248 @@ describe('putEntityLogsConfiguration', () => {
             params: { path: { app_id: 'motor' } },
             body: { severity_filter: 'warning', max_entries: 500 },
         });
+    });
+});
+
+// =============================================================================
+// Scripts
+// =============================================================================
+
+const SCRIPT_ENTITY_TYPES: ScriptEntityType[] = ['apps', 'components'];
+
+const SCRIPT_PATHS: Record<ScriptEntityType, { list: string; item: string; execs: string; exec: string }> = {
+    apps: {
+        list: '/apps/{app_id}/scripts',
+        item: '/apps/{app_id}/scripts/{script_id}',
+        execs: '/apps/{app_id}/scripts/{script_id}/executions',
+        exec: '/apps/{app_id}/scripts/{script_id}/executions/{execution_id}',
+    },
+    components: {
+        list: '/components/{component_id}/scripts',
+        item: '/components/{component_id}/scripts/{script_id}',
+        execs: '/components/{component_id}/scripts/{script_id}/executions',
+        exec: '/components/{component_id}/scripts/{script_id}/executions/{execution_id}',
+    },
+};
+
+const SCRIPT_ID_PARAM_MAP: Record<ScriptEntityType, string> = {
+    apps: 'app_id',
+    components: 'component_id',
+};
+
+describe('getEntityScripts', () => {
+    let client: MockClient;
+    beforeEach(() => {
+        client = createMockClient();
+    });
+
+    it.each(SCRIPT_ENTITY_TYPES)('getEntityScripts calls the list path for %s', async (entityType) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityScripts(client as any, entityType, 'my-entity');
+        expect(client.GET).toHaveBeenCalledTimes(1);
+        const [path, opts] = client.GET.mock.calls[0]!;
+        expect(path).toBe(SCRIPT_PATHS[entityType].list);
+        expect(opts.params.path).toEqual({ [SCRIPT_ID_PARAM_MAP[entityType]]: 'my-entity' });
+    });
+
+    it.each(SCRIPT_ENTITY_TYPES)('getEntityScripts forwards the abort signal for %s', async (entityType) => {
+        const controller = new AbortController();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityScripts(client as any, entityType, 'my-entity', controller.signal);
+        const opts = client.GET.mock.calls[0]![1];
+        expect(opts.signal).toBe(controller.signal);
+    });
+});
+
+// =============================================================================
+// getEntityScript
+// =============================================================================
+
+describe('getEntityScript', () => {
+    let client: MockClient;
+    beforeEach(() => {
+        client = createMockClient();
+    });
+
+    it.each(SCRIPT_ENTITY_TYPES)('getEntityScript calls the item path for %s', async (entityType) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getEntityScript(client as any, entityType, 'my-entity', 'script-1');
+        expect(client.GET).toHaveBeenCalledTimes(1);
+        const [path, opts] = client.GET.mock.calls[0]!;
+        expect(path).toBe(SCRIPT_PATHS[entityType].item);
+        expect(opts.params.path).toEqual({
+            [SCRIPT_ID_PARAM_MAP[entityType]]: 'my-entity',
+            script_id: 'script-1',
+        });
+    });
+});
+
+// =============================================================================
+// deleteEntityScript
+// =============================================================================
+
+describe('deleteEntityScript', () => {
+    let client: MockClient;
+    beforeEach(() => {
+        client = createMockClient();
+    });
+
+    it.each(SCRIPT_ENTITY_TYPES)('deleteEntityScript deletes the item path for %s', async (entityType) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await deleteEntityScript(client as any, entityType, 'my-entity', 'script-1');
+        expect(client.DELETE).toHaveBeenCalledTimes(1);
+        const [path, opts] = client.DELETE.mock.calls[0]!;
+        expect(path).toBe(SCRIPT_PATHS[entityType].item);
+        expect(opts.params.path).toEqual({
+            [SCRIPT_ID_PARAM_MAP[entityType]]: 'my-entity',
+            script_id: 'script-1',
+        });
+    });
+});
+
+// =============================================================================
+// startScriptExecution
+// =============================================================================
+
+describe('startScriptExecution', () => {
+    let client: MockClient;
+    beforeEach(() => {
+        client = createMockClient();
+    });
+
+    it.each(SCRIPT_ENTITY_TYPES)('startScriptExecution posts the execution body for %s', async (entityType) => {
+        const request = { execution_type: 'diagnostic', parameters: { foo: 'bar' } };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await startScriptExecution(client as any, entityType, 'my-entity', 'script-1', request);
+        expect(client.POST).toHaveBeenCalledTimes(1);
+        const [path, opts] = client.POST.mock.calls[0]!;
+        expect(path).toBe(SCRIPT_PATHS[entityType].execs);
+        expect(opts.params.path).toEqual({
+            [SCRIPT_ID_PARAM_MAP[entityType]]: 'my-entity',
+            script_id: 'script-1',
+        });
+        expect(opts.body).toEqual(request);
+    });
+});
+
+// =============================================================================
+// getScriptExecution
+// =============================================================================
+
+describe('getScriptExecution', () => {
+    let client: MockClient;
+    beforeEach(() => {
+        client = createMockClient();
+    });
+
+    it.each(SCRIPT_ENTITY_TYPES)('getScriptExecution reads the execution path for %s', async (entityType) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getScriptExecution(client as any, entityType, 'my-entity', 'script-1', 'exec-1');
+        expect(client.GET).toHaveBeenCalledTimes(1);
+        const [path, opts] = client.GET.mock.calls[0]!;
+        expect(path).toBe(SCRIPT_PATHS[entityType].exec);
+        expect(opts.params.path).toEqual({
+            [SCRIPT_ID_PARAM_MAP[entityType]]: 'my-entity',
+            script_id: 'script-1',
+            execution_id: 'exec-1',
+        });
+    });
+
+    it.each(SCRIPT_ENTITY_TYPES)('getScriptExecution forwards the abort signal for %s', async (entityType) => {
+        const controller = new AbortController();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await getScriptExecution(client as any, entityType, 'my-entity', 'script-1', 'exec-1', controller.signal);
+        const opts = client.GET.mock.calls[0]![1];
+        expect(opts.signal).toBe(controller.signal);
+    });
+});
+
+// =============================================================================
+// controlScriptExecution
+// =============================================================================
+
+describe('controlScriptExecution', () => {
+    let client: MockClient;
+    beforeEach(() => {
+        client = createMockClient();
+    });
+
+    it.each(SCRIPT_ENTITY_TYPES)(
+        'controlScriptExecution puts {action} on the execution path for %s',
+        async (entityType) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await controlScriptExecution(client as any, entityType, 'my-entity', 'script-1', 'exec-1', 'stop');
+            expect(client.PUT).toHaveBeenCalledTimes(1);
+            const [path, opts] = client.PUT.mock.calls[0]!;
+            expect(path).toBe(SCRIPT_PATHS[entityType].exec);
+            expect(opts.params.path).toEqual({
+                [SCRIPT_ID_PARAM_MAP[entityType]]: 'my-entity',
+                script_id: 'script-1',
+                execution_id: 'exec-1',
+            });
+            expect(opts.body).toEqual({ action: 'stop' });
+        }
+    );
+});
+
+// =============================================================================
+// deleteScriptExecution
+// =============================================================================
+
+describe('deleteScriptExecution', () => {
+    let client: MockClient;
+    beforeEach(() => {
+        client = createMockClient();
+    });
+
+    it.each(SCRIPT_ENTITY_TYPES)('deleteScriptExecution deletes the execution path for %s', async (entityType) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await deleteScriptExecution(client as any, entityType, 'my-entity', 'script-1', 'exec-1');
+        expect(client.DELETE).toHaveBeenCalledTimes(1);
+        const [path, opts] = client.DELETE.mock.calls[0]!;
+        expect(path).toBe(SCRIPT_PATHS[entityType].exec);
+        expect(opts.params.path).toEqual({
+            [SCRIPT_ID_PARAM_MAP[entityType]]: 'my-entity',
+            script_id: 'script-1',
+            execution_id: 'exec-1',
+        });
+    });
+});
+
+// =============================================================================
+// uploadEntityScript
+// =============================================================================
+
+describe('uploadEntityScript', () => {
+    let client: MockClient;
+    beforeEach(() => {
+        client = createMockClient();
+    });
+
+    it.each(SCRIPT_ENTITY_TYPES)('uploadEntityScript posts FormData to the list path for %s', async (entityType) => {
+        const form = new FormData();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await uploadEntityScript(client as any, entityType, 'my-entity', form);
+        expect(client.POST).toHaveBeenCalledTimes(1);
+        const [path, opts] = client.POST.mock.calls[0]!;
+        expect(path).toBe(SCRIPT_PATHS[entityType].list);
+        expect(opts.params.path).toEqual({ [SCRIPT_ID_PARAM_MAP[entityType]]: 'my-entity' });
+    });
+
+    it('uploadEntityScript passes FormData through the body serializer untouched', async () => {
+        const form = new FormData();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await uploadEntityScript(client as any, 'apps', 'my-entity', form);
+        const opts = client.POST.mock.calls[0]![1];
+        expect(opts.body).toBeInstanceOf(FormData);
+        expect(opts.bodySerializer(form)).toBe(form);
+    });
+
+    it('uploadEntityScript sets no content type header in any casing', async () => {
+        const form = new FormData();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await uploadEntityScript(client as any, 'apps', 'my-entity', form);
+        const opts = client.POST.mock.calls[0]![1];
+        expect(Object.keys(opts.headers ?? {}).map((k) => k.toLowerCase())).not.toContain('content-type');
     });
 });
