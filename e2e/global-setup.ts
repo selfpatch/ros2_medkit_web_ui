@@ -19,12 +19,20 @@ const GATEWAY_URL = process.env.E2E_GATEWAY_URL ?? 'http://localhost:8080/api/v1
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:5173';
 const STORAGE_KEY = 'ros2_medkit_web_ui_server_url';
 
+// Node's fetch has no default timeout, so a stalled TCP connect (as opposed
+// to an outright refused one) would otherwise hang the await forever - the
+// deadline below would never get re-checked and global setup would just sit
+// there until Playwright's own timeout kills it, looking like a mysterious
+// hang instead of "the gateway did not start". Each attempt gets its own
+// short timeout so the loop always keeps making progress toward the deadline.
+const ATTEMPT_TIMEOUT_MS = 5_000;
+
 async function waitForGateway(): Promise<void> {
     const deadline = Date.now() + 120_000;
     let lastError = 'no attempt made';
     while (Date.now() < deadline) {
         try {
-            const res = await fetch(`${GATEWAY_URL}/health`);
+            const res = await fetch(`${GATEWAY_URL}/health`, { signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS) });
             if (res.ok) return;
             lastError = `HTTP ${res.status}`;
         } catch (err) {
