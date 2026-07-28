@@ -196,6 +196,6 @@ test('marks an execution as no longer tracked when polling returns 404', async (
     // satisfied by the store's own poll loop picking up the 404 on its next
     // tick, not by the manual rescue action.
     const card = page.locator('[data-slot="card"]', { has: status }).last();
-    await expect(page.getByText('The gateway no longer tracks this execution')).toBeVisible({ timeout: 30_000 });
+    await expect(card.getByText('The gateway no longer tracks this execution')).toBeVisible({ timeout: 30_000 });
     await expect(card.getByRole('button', { name: 'Remove' })).toBeVisible({ timeout: 30_000 });
 });

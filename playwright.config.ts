@@ -14,7 +14,11 @@
 
 import { defineConfig } from '@playwright/test';
 
-const BASE_URL = 'http://localhost:5173';
+// Read from the same E2E_APP_URL that e2e/global-setup.ts honours, and derive
+// the dev server's port from it, so config and setup cannot end up visiting
+// two different addresses if only one of them is overridden.
+const BASE_URL = process.env.E2E_APP_URL ?? 'http://localhost:5173';
+const APP_PORT = new URL(BASE_URL).port || '5173';
 
 export default defineConfig({
     testDir: './e2e',
@@ -33,7 +37,7 @@ export default defineConfig({
     workers: 1,
     use: { baseURL: BASE_URL, storageState: 'e2e/.auth/state.json', trace: 'retain-on-failure' },
     webServer: {
-        command: 'npm run dev -- --port 5173 --strictPort',
+        command: `npm run dev -- --port ${APP_PORT} --strictPort`,
         url: BASE_URL,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,

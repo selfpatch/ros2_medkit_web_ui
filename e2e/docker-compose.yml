@@ -5,7 +5,8 @@ services:
     # chowns the volume before the gateway starts; it reuses the pinned
     # gateway image (which already has chown) instead of pulling another one.
     init-uploads:
-        image: ghcr.io/selfpatch/ros2_medkit-jazzy:sha-7939c94
+        # ghcr.io/selfpatch/ros2_medkit-jazzy:sha-7939c94
+        image: ghcr.io/selfpatch/ros2_medkit-jazzy@sha256:565db07e1e972b31684bf864fbaad7e8a70aacabf2ef0cd4510fdbd8e3281831
         user: root
         volumes:
             - e2e-uploads:/e2e-uploads
@@ -13,7 +14,10 @@ services:
     gateway:
         # Pinned on purpose: :latest is overwritten on every push to the gateway
         # main branch, which would let unrelated changes turn this repo CI red.
-        image: ghcr.io/selfpatch/ros2_medkit-jazzy:sha-7939c94
+        # Pinned by digest, not by the sha-7939c94 tag alone: tags on this
+        # registry are mutable and a re-run of the publishing workflow on the
+        # same commit would move one. ghcr.io/selfpatch/ros2_medkit-jazzy:sha-7939c94
+        image: ghcr.io/selfpatch/ros2_medkit-jazzy@sha256:565db07e1e972b31684bf864fbaad7e8a70aacabf2ef0cd4510fdbd8e3281831
         ports:
             - '${E2E_GATEWAY_PORT:-8080}:8080'
         volumes:

@@ -46,14 +46,29 @@ test.afterEach(async ({ page }, testInfo) => {
     // over from this test (including a previous, unfinished run of it) must be
     // removed - otherwise the next run would find a duplicate row and a
     // getByRole('button', { name: uploadedName }) lookup would no longer be unique.
-    await openScripts(page, 'Test ECU');
+    //
+    // This is best-effort cleanup, not part of the test: if the page is
+    // already in a broken state because the test itself failed, a throw here
+    // must not replace that failure in the report, and one leftover failing
+    // to delete must not stop the others from being attempted.
+    try {
+        await openScripts(page, 'Test ECU');
+    } catch (err) {
+        console.warn('afterEach cleanup: could not open the Scripts panel', err);
+        return;
+    }
+
     const names = [uploadedNameFor(testInfo), writtenNameFor(testInfo, 'bash'), writtenNameFor(testInfo, 'python')];
     for (const name of names) {
-        const row = page.getByRole('button', { name });
-        if (await row.isVisible().catch(() => false)) {
-            await row.click();
-            await page.getByRole('button', { name: 'Delete' }).click();
-            await expect(row).toBeHidden({ timeout: 30_000 });
+        try {
+            const row = page.getByRole('button', { name });
+            if (await row.isVisible().catch(() => false)) {
+                await row.click();
+                await page.getByRole('button', { name: 'Delete' }).click();
+                await expect(row).toBeHidden({ timeout: 30_000 });
+            }
+        } catch (err) {
+            console.warn(`afterEach cleanup: failed to remove leftover script "${name}"`, err);
         }
     }
 });
