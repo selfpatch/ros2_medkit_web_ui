@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { EntityDetailPanel } from './EntityDetailPanel';
 
 // Mock heavy child components - we only care about the top-level routing
@@ -36,6 +36,11 @@ vi.mock('@/components/ResourceTabs', async () => {
         renderResourceTabContent: (tab: string) => <div data-testid={`tab-content-${tab}`} />,
     };
 });
+vi.mock('@/components/ScriptsPanel', () => ({
+    ScriptsPanel: ({ entityId, entityType }: { entityId: string; entityType: string }) => (
+        <div data-testid="scripts-panel">{`${entityType}:${entityId}`}</div>
+    ),
+}));
 
 const mockPrefetchResourceCounts = vi.fn();
 const mockFetchEntityData = vi.fn();
@@ -63,6 +68,7 @@ function setStore(overrides: Record<string, unknown>) {
         refreshSelectedEntity: mockRefreshSelectedEntity,
         prefetchResourceCounts: mockPrefetchResourceCounts,
         fetchEntityData: mockFetchEntityData,
+        scriptsSupported: false,
         ...overrides,
     };
 }
@@ -127,5 +133,51 @@ describe('EntityDetailPanel - nested entity types', () => {
         // not the "No detailed information available" fallback.
         expect(screen.getByTestId('areas-panel')).toBeInTheDocument();
         expect(screen.queryByText(/No detailed information available/i)).not.toBeInTheDocument();
+    });
+});
+
+describe('EntityDetailPanel - scripts tab gating (component view)', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockPrefetchResourceCounts.mockResolvedValue({ data: 0, operations: 0, configurations: 0, faults: 0, logs: 0 });
+        mockFetchEntityData.mockResolvedValue([]);
+    });
+
+    it('hides the Scripts tab when the gateway does not report the capability', async () => {
+        setStore({
+            selectedPath: '/server/area1/component1',
+            selectedEntity: {
+                id: 'component1',
+                name: 'component1',
+                type: 'component',
+            },
+            scriptsSupported: false,
+        });
+
+        render(<EntityDetailPanel onConnectClick={() => {}} />);
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: /Data/ })).toBeInTheDocument();
+        });
+        expect(screen.queryByRole('button', { name: /scripts/i })).not.toBeInTheDocument();
+    });
+
+    it('shows the Scripts tab and renders its content when the capability is reported', async () => {
+        setStore({
+            selectedPath: '/server/area1/component1',
+            selectedEntity: {
+                id: 'component1',
+                name: 'component1',
+                type: 'component',
+            },
+            scriptsSupported: true,
+        });
+
+        render(<EntityDetailPanel onConnectClick={() => {}} />);
+
+        const scriptsButton = await screen.findByRole('button', { name: /scripts/i });
+        fireEvent.click(scriptsButton);
+
+        expect(await screen.findByTestId('tab-content-scripts')).toBeInTheDocument();
     });
 });

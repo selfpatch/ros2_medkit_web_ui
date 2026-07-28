@@ -23,6 +23,7 @@ interface LoadedResources {
     configurations: boolean;
     faults: boolean;
     logs: boolean;
+    scripts: boolean;
 }
 
 /**
@@ -40,6 +41,7 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
         configurations: false,
         faults: false,
         logs: false,
+        scripts: false,
     });
     const loadedTabsRef = useRef(loadedTabs);
     loadedTabsRef.current = loadedTabs;
@@ -141,6 +143,7 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
             configurations: false,
             faults: false,
             logs: false,
+            scripts: false,
         };
         setActiveTab('data');
         setLoadedTabs(reset);

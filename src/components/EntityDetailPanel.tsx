@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/shallow';
 import {
     Copy,
@@ -24,7 +24,7 @@ import { EntityDetailSkeleton } from '@/components/EntityDetailSkeleton';
 import { DataPanel } from '@/components/DataPanel';
 import { ConfigurationPanel } from '@/components/ConfigurationPanel';
 import { OperationsPanel } from '@/components/OperationsPanel';
-import { RESOURCE_TABS, renderResourceTabContent, type ResourceTabId } from '@/components/ResourceTabs';
+import { RESOURCE_TABS, renderResourceTabContent, SCRIPTS_TAB, type ResourceTabId } from '@/components/ResourceTabs';
 import { AreasPanel } from '@/components/AreasPanel';
 import { AppsPanel } from '@/components/AppsPanel';
 import { FunctionsPanel } from '@/components/FunctionsPanel';
@@ -43,7 +43,7 @@ interface TabConfig {
     description?: string;
 }
 
-const COMPONENT_TABS: TabConfig[] = RESOURCE_TABS;
+const BASE_COMPONENT_TABS: TabConfig[] = RESOURCE_TABS;
 
 /**
  * Determine entity type for API calls based on entity type
@@ -376,6 +376,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
         configurations: 0,
         faults: 0,
         logs: 0,
+        scripts: 0,
     });
     // Store fetched topics data for the Data tab. `null` means "not yet loaded
     // for the current entity" so the Data tab can render a skeleton instead of
@@ -394,6 +395,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
         refreshSelectedEntity,
         prefetchResourceCounts,
         fetchEntityData,
+        scriptsSupported,
     } = useAppStore(
         useShallow((state: AppState) => ({
             selectedPath: state.selectedPath,
@@ -406,7 +408,13 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             refreshSelectedEntity: state.refreshSelectedEntity,
             prefetchResourceCounts: state.prefetchResourceCounts,
             fetchEntityData: state.fetchEntityData,
+            scriptsSupported: state.scriptsSupported,
         }))
+    );
+
+    const componentTabs = useMemo(
+        () => (scriptsSupported ? [...BASE_COMPONENT_TABS, SCRIPTS_TAB] : BASE_COMPONENT_TABS),
+        [scriptsSupported]
     );
 
     // Notify parent when entity is selected
@@ -415,6 +423,12 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             onEntitySelect();
         }
     }, [selectedPath, onEntitySelect]);
+
+    // Fall back to the default tab when the Scripts tab disappears (e.g. the
+    // gateway capability flips off) while it is the active tab.
+    useEffect(() => {
+        if (!scriptsSupported && activeTab === 'scripts') setActiveTab('data');
+    }, [scriptsSupported, activeTab]);
 
     // Reset the component-view resource tab to Data when the entity changes,
     // so switching between components doesn't show stale tab state.
@@ -430,6 +444,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             configurations: 0,
             faults: 0,
             logs: 0,
+            scripts: 0,
         };
         // Guard against late results from a previous entity overwriting the
         // current entity's state. The cleanup aborts in-flight requests AND
@@ -482,7 +497,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                 setTopicsData(fetchedData);
 
                 // Use the already-fetched data length instead of a separate request
-                setResourceCounts({ ...counts, data: fetchedData.length, logs: 0 });
+                setResourceCounts({ ...counts, data: fetchedData.length, logs: 0, scripts: 0 });
             } catch {
                 if (cancelled) return;
                 // On unexpected failure fall back to "loaded empty" so the UI
@@ -809,7 +824,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                             {isComponent && (
                                 <div className="px-6 pb-4">
                                     <div className="flex gap-1 p-1 bg-muted rounded-lg">
-                                        {COMPONENT_TABS.map((tab) => {
+                                        {componentTabs.map((tab) => {
                                             const TabIcon = tab.icon;
                                             const isActive = activeTab === tab.id;
                                             const count = resourceCounts[tab.id];
