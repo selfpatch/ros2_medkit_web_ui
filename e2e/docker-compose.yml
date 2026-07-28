@@ -1,0 +1,29 @@
+services:
+    # Docker creates a fresh named volume owned by root:root, but the gateway
+    # image runs as the unprivileged `medkit` user (uid 999) and cannot create
+    # script subdirectories under a root-owned mount. This one-shot service
+    # chowns the volume before the gateway starts; it reuses the pinned
+    # gateway image (which already has chown) instead of pulling another one.
+    init-uploads:
+        image: ghcr.io/selfpatch/ros2_medkit-jazzy:sha-7939c94
+        user: root
+        volumes:
+            - e2e-uploads:/e2e-uploads
+        entrypoint: ['chown', '-R', '999:999', '/e2e-uploads']
+    gateway:
+        # Pinned on purpose: :latest is overwritten on every push to the gateway
+        # main branch, which would let unrelated changes turn this repo CI red.
+        image: ghcr.io/selfpatch/ros2_medkit-jazzy:sha-7939c94
+        ports:
+            - '${E2E_GATEWAY_PORT:-8080}:8080'
+        volumes:
+            - ./gateway/params.yaml:/e2e/params.yaml:ro
+            - ./gateway/manifest.yaml:/e2e/manifest.yaml:ro
+            - ./gateway/scripts:/e2e-scripts:ro
+            - e2e-uploads:/e2e-uploads
+        command: ['--ros-args', '--params-file', '/e2e/params.yaml']
+        depends_on:
+            init-uploads:
+                condition: service_completed_successfully
+volumes:
+    e2e-uploads:

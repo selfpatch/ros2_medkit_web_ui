@@ -1,0 +1,34 @@
+manifest_version: '1.0'
+components:
+    - id: 'ecu'
+      name: 'Test ECU'
+apps:
+    - id: 'talker'
+      name: 'Talker'
+      is_located_on: 'ecu'
+scripts:
+    - id: 'hello'
+      name: 'Hello'
+      description: 'Echoes the parameters it receives on stdin'
+      path: '/e2e-scripts/hello.sh'
+      format: 'bash'
+      timeout_sec: 30
+      entity_filter:
+          - 'ecu'
+          - 'talker'
+    - id: 'failing'
+      name: 'Failing'
+      description: 'Exits with a non-zero code'
+      path: '/e2e-scripts/fail.sh'
+      format: 'bash'
+      timeout_sec: 30
+      entity_filter:
+          - 'ecu'
+    - id: 'sleeper'
+      name: 'Sleeper'
+      description: 'Runs long enough to be stopped'
+      path: '/e2e-scripts/sleep.sh'
+      format: 'bash'
+      timeout_sec: 300
+      entity_filter:
+          - 'ecu'
