@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/shallow';
 import { AlertTriangle, Box, ChevronRight, Cpu, Database, FileCode, Network, Settings, Zap } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -9,6 +9,7 @@ import {
     RESOURCE_TABS,
     renderResourceTabContent,
     isResourceTabId,
+    SCRIPTS_TAB,
     type ResourceTabId,
 } from '@/components/ResourceTabs';
 import { EntityStatusControl } from '@/components/EntityStatusControl';
@@ -22,7 +23,7 @@ interface TabConfig {
     icon: typeof Database;
 }
 
-const APP_TABS: TabConfig[] = [{ id: 'overview', label: 'Overview', icon: Cpu }, ...RESOURCE_TABS];
+const BASE_APP_TABS: TabConfig[] = [{ id: 'overview', label: 'Overview', icon: Cpu }, ...RESOURCE_TABS];
 
 interface AppsPanelProps {
     appId: string;
@@ -51,15 +52,28 @@ export function AppsPanel({ appId, appName, fqn, nodeName, namespace, componentI
     const [faults, setFaults] = useState<Fault[]>([]);
     const [isLoading, setIsLoading] = useState(false);
 
-    const { selectEntity, configurations, fetchEntityData, fetchEntityOperations, listEntityFaults } = useAppStore(
-        useShallow((state) => ({
-            selectEntity: state.selectEntity,
-            configurations: state.configurations,
-            fetchEntityData: state.fetchEntityData,
-            fetchEntityOperations: state.fetchEntityOperations,
-            listEntityFaults: state.listEntityFaults,
-        }))
+    const { selectEntity, configurations, fetchEntityData, fetchEntityOperations, listEntityFaults, scriptsSupported } =
+        useAppStore(
+            useShallow((state) => ({
+                selectEntity: state.selectEntity,
+                configurations: state.configurations,
+                fetchEntityData: state.fetchEntityData,
+                fetchEntityOperations: state.fetchEntityOperations,
+                listEntityFaults: state.listEntityFaults,
+                scriptsSupported: state.scriptsSupported,
+            }))
+        );
+
+    const appTabs = useMemo(
+        () => (scriptsSupported ? [...BASE_APP_TABS, SCRIPTS_TAB] : BASE_APP_TABS),
+        [scriptsSupported]
     );
+
+    // Fall back to the default tab when the Scripts tab disappears (e.g. the
+    // gateway capability flips off) while it is the active tab.
+    useEffect(() => {
+        if (!scriptsSupported && activeTab === 'scripts') setActiveTab('overview');
+    }, [scriptsSupported, activeTab]);
 
     // Load app resources on mount (configurations are loaded by ConfigurationPanel)
     useEffect(() => {
@@ -147,7 +161,7 @@ export function AppsPanel({ appId, appName, fqn, nodeName, namespace, componentI
                 {/* Tab Navigation */}
                 <div className="px-6 pb-4">
                     <div className="flex gap-1 p-1 bg-muted rounded-lg overflow-x-auto">
-                        {APP_TABS.map((tab) => {
+                        {appTabs.map((tab) => {
                             const TabIcon = tab.icon;
                             const isActive = activeTab === tab.id;
                             let count = 0;
