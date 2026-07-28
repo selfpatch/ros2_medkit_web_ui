@@ -14,9 +14,14 @@
 
 /**
  * The gateway picks the interpreter from the uploaded file's extension:
- * `.py` runs under python3, `.bash` under bash, and everything else - including
- * no extension at all - under sh. `languageForFilename` mirrors that split so
- * the editor's syntax highlighting matches what will actually execute.
+ * `.py` runs under python3, `.bash` under bash, and everything else -
+ * including no extension at all - under sh. `languageForFilename` does not
+ * mirror that split one-to-one: `.sh` and `.bash` both highlight as `shell`,
+ * since both are shell syntax, but an unrecognised extension (or none)
+ * returns `plain` rather than guessing `shell` too. The file would still run
+ * under sh either way, but highlighting arbitrary, unrecognised content as
+ * shell would be wrong often enough to mislead - sh is just the gateway's
+ * fallback for "could be anything", not a signal that it looks like shell.
  */
 export type ScriptLanguage = 'python' | 'shell' | 'plain';
 
