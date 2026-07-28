@@ -87,6 +87,34 @@ Before opening or updating a Pull Request, you **must**:
     npm run dev
     ```
 
+> **Note:** `npm run typecheck` runs `tsc --noEmit` against the root `tsconfig.json`, which has no `files` of its own and therefore checks nothing. Type errors are actually caught by `npm run build` (`tsc -b`, which builds the referenced app, node and e2e project configs). Do not trust a green `typecheck` on its own; run `build` before opening a PR.
+
+### Running the End-to-End Suite Locally
+
+The Playwright suite in `e2e/` runs the real UI against a containerised gateway instead of mocks, so it needs Docker.
+
+1. Start the gateway:
+
+    ```bash
+    docker compose -f e2e/docker-compose.yml up -d
+    ```
+
+2. Run the suite:
+
+    ```bash
+    npm run test:e2e
+    ```
+
+    Use `npm run test:e2e:ui` instead to step through the tests with the Playwright UI.
+
+3. Stop the gateway once you are done, dropping the uploads volume along with it:
+
+    ```bash
+    docker compose -f e2e/docker-compose.yml down -v
+    ```
+
+`e2e/scripts.spec.ts` uploads, runs and deletes scripts against the shared gateway container, mutating its state as it goes, so it and the other specs that touch the live gateway are pinned to a single Playwright worker (see `playwright.config.ts`). Do not attempt to parallelize these specs or run them against a gateway instance you care about keeping in a known state.
+
 ### Pull Request Checklist
 
 Before submitting your PR, ensure:
