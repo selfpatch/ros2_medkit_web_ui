@@ -989,3 +989,50 @@ export interface UpdateEntry {
     id: string;
     status: UpdateStatus | null; // null = status fetch failed
 }
+
+// =============================================================================
+// Scripts
+// =============================================================================
+
+export type ScriptMetadata = components['schemas']['ScriptMetadata'];
+export type ScriptExecution = components['schemas']['ScriptExecution'];
+/** Wire wrapper of the list endpoint: {items, _links}. */
+export type ScriptList = components['schemas']['ScriptList'];
+export type ScriptUploadResponse = components['schemas']['ScriptUploadResponse'];
+
+/**
+ * Entity types exposing the scripts collection.
+ * The gateway registers script routes for apps and components only.
+ */
+export type ScriptEntityType = Extract<SovdResourceEntityType, 'apps' | 'components'>;
+
+/**
+ * Execution record tracked client-side. The gateway has no endpoint listing
+ * executions, so the UI remembers the ids it started. In-memory only.
+ */
+export interface ScriptExecutionRecord {
+    execution: ScriptExecution;
+    scriptId: string;
+    scriptName: string;
+    entityType: ScriptEntityType;
+    entityId: string;
+    /** Set when polling returned 404: the gateway no longer knows this execution. */
+    lost?: boolean;
+}
+
+export interface StartScriptExecutionRequest {
+    execution_type: string;
+    parameters?: Record<string, unknown>;
+    proximity_response?: string;
+}
+
+/** errorStatus lets the panel tell 501 from an empty list. */
+export interface ScriptsFetchResult {
+    items: ScriptMetadata[];
+    errorStatus?: number;
+}
+
+export interface ScriptUploadMetadata {
+    name?: string;
+    description?: string;
+}

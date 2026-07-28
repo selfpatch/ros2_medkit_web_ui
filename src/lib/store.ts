@@ -16,6 +16,14 @@ import type {
     App,
     VersionInfo,
     SovdFunction,
+    ScriptEntityType,
+    ScriptExecution,
+    ScriptExecutionRecord,
+    ScriptMetadata,
+    ScriptsFetchResult,
+    ScriptUploadMetadata,
+    ScriptUploadResponse,
+    StartScriptExecutionRequest,
 } from './types';
 import { createMedkitClient, normalizeBaseUrl, type MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
 import type { SovdResourceEntityType } from './types';
@@ -47,11 +55,30 @@ import {
     getEntityLogs,
     getEntityLogsConfiguration,
     putEntityLogsConfiguration,
+    getEntityScripts,
+    uploadEntityScript,
+    deleteEntityScript,
+    startScriptExecution,
+    getScriptExecution,
+    controlScriptExecution,
+    deleteScriptExecution,
 } from './api-dispatch';
 import type { LogCollection, LogsConfiguration, LogsFetchResult, LogsQueryParams } from './log-types';
+import { collectActiveExecutions, pollScriptExecutionsOnce } from './scripts-polling';
+import {
+    ScriptsApiError,
+    toScriptsApiError,
+    scriptErrorCode,
+    scriptEntityKey,
+    upsertExecutionRecord,
+    markExecutionLost,
+    removeExecutionRecord,
+    SCRIPT_ERROR_CODE,
+} from './scripts';
 
 const STORAGE_KEY = 'ros2_medkit_web_ui_server_url';
 const EXECUTION_POLL_INTERVAL_MS = 1000;
+const SCRIPT_POLL_INTERVAL_MS = 1000;
 const EXECUTION_CLEANUP_AFTER_MS = 5 * 60 * 1000; // 5 minutes
 
 export type TreeViewMode = 'logical' | 'functional';
@@ -102,6 +129,13 @@ export interface AppState {
     activeExecutions: Map<string, TrackedExecution>; // executionId -> tracked execution with metadata
     autoRefreshExecutions: boolean; // flag for auto-refresh polling
     executionPollingIntervalId: ReturnType<typeof setInterval> | null; // polling interval ID
+
+    // Scripts state (diagnostic scripts uploaded per app/component). In-memory
+    // only: the gateway has no endpoint listing executions, so history does
+    // not survive a reload.
+    scriptsSupported: boolean; // gateway capability from GET /
+    scriptExecutions: Map<string, ScriptExecutionRecord[]>; // scriptEntityKey(entityType, entityId) -> history
+    scriptPollingIntervalId: ReturnType<typeof setInterval> | null; // polling interval ID
 
     // Faults state (diagnostic trouble codes)
     faults: Fault[];
@@ -156,6 +190,47 @@ export interface AppState {
     setAutoRefreshExecutions: (enabled: boolean) => void;
     startExecutionPolling: () => void;
     stopExecutionPolling: () => void;
+
+    // Scripts actions
+    fetchEntityScripts: (
+        entityType: ScriptEntityType,
+        entityId: string,
+        signal?: AbortSignal
+    ) => Promise<ScriptsFetchResult>;
+    uploadScript: (
+        entityType: ScriptEntityType,
+        entityId: string,
+        file: File,
+        metadata?: ScriptUploadMetadata
+    ) => Promise<ScriptUploadResponse>;
+    deleteScript: (entityType: ScriptEntityType, entityId: string, scriptId: string) => Promise<void>;
+    startScriptExecutionAction: (
+        entityType: ScriptEntityType,
+        entityId: string,
+        script: ScriptMetadata,
+        request: StartScriptExecutionRequest
+    ) => Promise<void>;
+    stopScriptExecution: (
+        entityType: ScriptEntityType,
+        entityId: string,
+        scriptId: string,
+        executionId: string,
+        action: string
+    ) => Promise<void>;
+    removeScriptExecution: (
+        entityType: ScriptEntityType,
+        entityId: string,
+        scriptId: string,
+        executionId: string
+    ) => Promise<void>;
+    refreshScriptExecution: (
+        entityType: ScriptEntityType,
+        entityId: string,
+        scriptId: string,
+        executionId: string
+    ) => Promise<void>;
+    startScriptPolling: () => void;
+    stopScriptPolling: () => void;
 
     // Faults actions
     fetchFaults: () => Promise<void>;
@@ -860,6 +935,11 @@ export const useAppStore = create<AppState>()(
             autoRefreshExecutions: true,
             executionPollingIntervalId: null,
 
+            // Scripts state
+            scriptsSupported: false,
+            scriptExecutions: new Map(),
+            scriptPollingIntervalId: null,
+
             // Faults state
             faults: [],
             isLoadingFaults: false,
@@ -897,6 +977,32 @@ export const useAppStore = create<AppState>()(
                         client,
                     });
 
+                    // A reconnect must not carry executions of the previous gateway:
+                    // ids would 404 and show up as ghost records under matching entity ids.
+                    get().stopScriptPolling();
+                    set({ scriptExecutions: new Map(), scriptsSupported: false });
+
+                    // Scripts tab visibility follows the gateway capability. Guarded by
+                    // the same 5s timeout as the health check so a slow gateway cannot
+                    // stall entity loading.
+                    try {
+                        const capsController = new AbortController();
+                        const capsTimeout = setTimeout(() => capsController.abort(), 5000);
+                        const { data: root } = await client
+                            .GET('/', { signal: capsController.signal })
+                            .finally(() => clearTimeout(capsTimeout));
+                        // A disconnect or a newer connect() may have completed while this
+                        // probe was in flight; a stale result must not clobber the state
+                        // of the session that is current now.
+                        if (get().client === client) {
+                            set({ scriptsSupported: root?.capabilities.scripts === true });
+                        }
+                    } catch {
+                        if (get().client === client) {
+                            set({ scriptsSupported: false });
+                        }
+                    }
+
                     // Load root entities after successful connection
                     await get().loadRootEntities();
 
@@ -925,6 +1031,9 @@ export const useAppStore = create<AppState>()(
                 // Stop execution polling
                 get().stopExecutionPolling();
 
+                // Stop script execution polling
+                get().stopScriptPolling();
+
                 // Unsubscribe from fault stream
                 get().unsubscribeFaultStream();
 
@@ -940,6 +1049,8 @@ export const useAppStore = create<AppState>()(
                     selectedPath: null,
                     selectedEntity: null,
                     activeExecutions: new Map(),
+                    scriptsSupported: false,
+                    scriptExecutions: new Map(),
                 });
             },
 
@@ -1875,6 +1986,254 @@ export const useAppStore = create<AppState>()(
                     clearInterval(executionPollingIntervalId);
                     set({ executionPollingIntervalId: null });
                 }
+            },
+
+            // ===========================================================================
+            // SCRIPTS ACTIONS (diagnostic scripts uploaded per app/component)
+            // ===========================================================================
+
+            fetchEntityScripts: async (entityType: ScriptEntityType, entityId: string, signal?: AbortSignal) => {
+                const { client } = get();
+                if (!client) return { items: [], errorStatus: -1 };
+                try {
+                    const { data, error, response } = await getEntityScripts(client, entityType, entityId, signal);
+                    if (error) {
+                        return { items: [], errorStatus: response?.status ?? -1 };
+                    }
+                    return { items: data ? unwrapItems<ScriptMetadata>(data) : [] };
+                } catch (err) {
+                    if ((err as { name?: string }).name === 'AbortError') throw err;
+                    console.error('[store] fetchEntityScripts failed', err);
+                    return { items: [], errorStatus: -1 };
+                }
+            },
+
+            uploadScript: async (
+                entityType: ScriptEntityType,
+                entityId: string,
+                file: File,
+                metadata?: ScriptUploadMetadata
+            ) => {
+                const { client } = get();
+                if (!client) throw new ScriptsApiError('Not connected', 0, '');
+
+                const form = new FormData();
+                form.append('file', file, file.name);
+                if (metadata?.name || metadata?.description) {
+                    form.append('metadata', JSON.stringify(metadata));
+                }
+
+                const { data, error, response } = await uploadEntityScript(client, entityType, entityId, form);
+                if (error) throw toScriptsApiError(error, response?.status ?? 0);
+                return data as ScriptUploadResponse;
+            },
+
+            deleteScript: async (entityType: ScriptEntityType, entityId: string, scriptId: string) => {
+                const { client } = get();
+                if (!client) throw new ScriptsApiError('Not connected', 0, '');
+
+                const { error, response } = await deleteEntityScript(client, entityType, entityId, scriptId);
+                if (error) throw toScriptsApiError(error, response?.status ?? 0);
+            },
+
+            startScriptExecutionAction: async (
+                entityType: ScriptEntityType,
+                entityId: string,
+                script: ScriptMetadata,
+                request: StartScriptExecutionRequest
+            ) => {
+                const { client } = get();
+                if (!client) throw new ScriptsApiError('Not connected', 0, '');
+
+                const { data, error, response } = await startScriptExecution(
+                    client,
+                    entityType,
+                    entityId,
+                    script.id,
+                    request
+                );
+                if (error) throw toScriptsApiError(error, response?.status ?? 0);
+
+                const key = scriptEntityKey(entityType, entityId);
+                const record: ScriptExecutionRecord = {
+                    execution: data as ScriptExecution,
+                    scriptId: script.id,
+                    scriptName: script.name,
+                    entityType,
+                    entityId,
+                };
+                set({ scriptExecutions: upsertExecutionRecord(get().scriptExecutions, key, record) });
+                get().startScriptPolling();
+            },
+
+            stopScriptExecution: async (
+                entityType: ScriptEntityType,
+                entityId: string,
+                scriptId: string,
+                executionId: string,
+                action: string
+            ) => {
+                const { client } = get();
+                if (!client) throw new ScriptsApiError('Not connected', 0, '');
+
+                const { data, error, response } = await controlScriptExecution(
+                    client,
+                    entityType,
+                    entityId,
+                    scriptId,
+                    executionId,
+                    action
+                );
+                if (error) throw toScriptsApiError(error, response?.status ?? 0);
+
+                const key = scriptEntityKey(entityType, entityId);
+                const existing = get()
+                    .scriptExecutions.get(key)
+                    ?.find((r) => r.execution.id === executionId);
+                if (existing) {
+                    const record: ScriptExecutionRecord = { ...existing, execution: data as ScriptExecution };
+                    set({ scriptExecutions: upsertExecutionRecord(get().scriptExecutions, key, record) });
+                    get().startScriptPolling();
+                }
+            },
+
+            removeScriptExecution: async (
+                entityType: ScriptEntityType,
+                entityId: string,
+                scriptId: string,
+                executionId: string
+            ) => {
+                const { client } = get();
+                if (!client) throw new ScriptsApiError('Not connected', 0, '');
+
+                const { error, response } = await deleteScriptExecution(
+                    client,
+                    entityType,
+                    entityId,
+                    scriptId,
+                    executionId
+                );
+                // A 404 means the gateway already forgot this execution - treat as success.
+                if (error && response?.status !== 404) throw toScriptsApiError(error, response?.status ?? 0);
+
+                const key = scriptEntityKey(entityType, entityId);
+                set({ scriptExecutions: removeExecutionRecord(get().scriptExecutions, key, executionId) });
+            },
+
+            refreshScriptExecution: async (
+                entityType: ScriptEntityType,
+                entityId: string,
+                scriptId: string,
+                executionId: string
+            ) => {
+                const { client } = get();
+                if (!client) return;
+
+                const key = scriptEntityKey(entityType, entityId);
+                try {
+                    const { data, error } = await getScriptExecution(
+                        client,
+                        entityType,
+                        entityId,
+                        scriptId,
+                        executionId
+                    );
+                    if (error) {
+                        // Only resource-not-found means the execution itself is gone.
+                        // entity-not-found means the entity is momentarily absent (a
+                        // node restarting under runtime discovery, for example) and
+                        // must not evict a record Refresh is meant to rescue.
+                        if (scriptErrorCode(error) === SCRIPT_ERROR_CODE.resourceNotFound) {
+                            set({ scriptExecutions: markExecutionLost(get().scriptExecutions, key, executionId) });
+                        }
+                        return;
+                    }
+                    if (!data) return;
+
+                    const existing = get()
+                        .scriptExecutions.get(key)
+                        ?.find((r) => r.execution.id === executionId);
+                    if (existing) {
+                        // Clear `lost`: a successful refresh means the gateway answered,
+                        // so this is exactly the rescue path a lost record needs.
+                        const record: ScriptExecutionRecord = {
+                            ...existing,
+                            execution: data as ScriptExecution,
+                            lost: false,
+                        };
+                        set({ scriptExecutions: upsertExecutionRecord(get().scriptExecutions, key, record) });
+                        get().startScriptPolling();
+                    }
+                } catch (err) {
+                    console.error('[store] refreshScriptExecution failed', err);
+                }
+            },
+
+            startScriptPolling: () => {
+                const { scriptPollingIntervalId, client } = get();
+                if (scriptPollingIntervalId || !client) return;
+                if (collectActiveExecutions(get().scriptExecutions).length === 0) return;
+
+                let inFlight = false;
+                const intervalId = setInterval(async () => {
+                    const currentClient = get().client;
+                    if (!currentClient) {
+                        get().stopScriptPolling();
+                        return;
+                    }
+                    // Skip the tick while the tab is hidden, but keep the interval
+                    // running so returning to the tab resumes polling by itself.
+                    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+                    // Never let two cycles overlap: on a slow link the responses would
+                    // arrive out of order and an old "running" could overwrite a fresh
+                    // terminal status, freezing the card forever.
+                    if (inFlight) return;
+
+                    inFlight = true;
+                    try {
+                        const outcomes = await pollScriptExecutionsOnce(currentClient, get().scriptExecutions);
+                        if (outcomes === null) {
+                            get().stopScriptPolling();
+                            return;
+                        }
+                        // The client may have changed while the cycle was in flight
+                        // (disconnect or reconnect); dropping the result keeps the
+                        // fresh session clean.
+                        if (get().client !== currentClient) return;
+
+                        // Fold onto state read AFTER the await, not the snapshot the cycle
+                        // started with: a sibling action (start/stop/remove) may have
+                        // written to scriptExecutions while the requests were in flight,
+                        // and that write must not be discarded.
+                        let next = get().scriptExecutions;
+                        for (const outcome of outcomes) {
+                            const key = scriptEntityKey(outcome.record.entityType, outcome.record.entityId);
+                            const stillTracked = next
+                                .get(key)
+                                ?.some((r) => r.execution.id === outcome.record.execution.id);
+                            // If the user removed the record mid-cycle, the tick must not resurrect it.
+                            if (!stillTracked) continue;
+                            next =
+                                'lost' in outcome
+                                    ? markExecutionLost(next, key, outcome.record.execution.id)
+                                    : upsertExecutionRecord(next, key, {
+                                          ...outcome.record,
+                                          execution: outcome.execution,
+                                      });
+                        }
+                        if (next !== get().scriptExecutions) set({ scriptExecutions: next });
+                    } finally {
+                        inFlight = false;
+                    }
+                }, SCRIPT_POLL_INTERVAL_MS);
+
+                set({ scriptPollingIntervalId: intervalId });
+            },
+
+            stopScriptPolling: () => {
+                const { scriptPollingIntervalId } = get();
+                if (scriptPollingIntervalId) clearInterval(scriptPollingIntervalId);
+                set({ scriptPollingIntervalId: null });
             },
 
             // ===========================================================================
