@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import { useAppStore } from '@/lib/store';
 import { scriptErrorMessage } from '@/lib/scripts';
-import { hasExtension, templateFor } from '@/lib/script-language';
+import { hasExtension, isPlainBasename, templateFor } from '@/lib/script-language';
 import type { ScriptEntityType, ScriptUploadMetadata } from '@/lib/types';
 
 // Defined once at module scope: creating the lazy wrapper inside the component
@@ -164,6 +164,15 @@ export function ScriptUploadDialog({ open, onOpenChange, entityId, entityType, o
             return;
         }
         const trimmedFileName = writeFileName.trim();
+        // Checked before hasExtension, and independently of it: the name ends
+        // up verbatim in the multipart upload's filename field, which the
+        // gateway uses to name a file on the robot. A path (../../etc/cron.d/evil.sh)
+        // must never reach that request, regardless of whether it happens to
+        // carry something that looks like an extension too.
+        if (!isPlainBasename(trimmedFileName)) {
+            setError('File name must be a plain file name, with no path separators');
+            return;
+        }
         if (!hasExtension(trimmedFileName)) {
             setError('File name needs an extension, e.g. check.sh or check.py');
             return;
@@ -178,19 +187,54 @@ export function ScriptUploadDialog({ open, onOpenChange, entityId, entityType, o
     const submitDisabled =
         submitting || (mode === 'write' ? !writeFileName.trim() || writeContent.length === 0 : !file);
 
+    /**
+     * Gate for every way this dialog can be dismissed while write mode holds
+     * content the user actually typed (contentTouchedRef, not just a
+     * pristine auto-inserted template). Returns false to keep the dialog
+     * open. Not gated on the upload-file mode: a merely *selected* file is
+     * trivial to reselect and was never at risk of being "lost work".
+     */
+    const requestDismiss = (): boolean => {
+        if (submitting) return false;
+        if (mode === 'write' && contentTouchedRef.current && writeContent.trim() !== '') {
+            return window.confirm('Discard the script you wrote? This cannot be undone.');
+        }
+        return true;
+    };
+
+    const dismiss = () => {
+        if (requestDismiss()) onOpenChange(false);
+    };
+
     return (
         <Dialog
             open={open}
             onOpenChange={(next) => {
-                if (next || submitting) return;
-                onOpenChange(false);
+                // Reached by the dialog's visible X close button, which
+                // (unlike Escape or an outside click) is not routed through
+                // the DismissableLayer callbacks below, so it is not
+                // pre-empted by their preventDefault() and lands here directly.
+                if (next) return;
+                dismiss();
             }}
         >
             <DialogContent
                 className="max-h-[80vh] overflow-y-auto"
-                onEscapeKeyDown={(e) => submitting && e.preventDefault()}
-                onPointerDownOutside={(e) => submitting && e.preventDefault()}
-                onInteractOutside={(e) => submitting && e.preventDefault()}
+                onEscapeKeyDown={(e) => {
+                    // Always pre-empt Radix's own dismissal so the decision is
+                    // made exactly once, here, instead of a second time when
+                    // the resulting close reaches the Dialog's onOpenChange above.
+                    e.preventDefault();
+                    dismiss();
+                }}
+                onPointerDownOutside={(e) => {
+                    e.preventDefault();
+                    dismiss();
+                }}
+                onInteractOutside={(e) => {
+                    e.preventDefault();
+                    dismiss();
+                }}
             >
                 <DialogHeader>
                     <DialogTitle>Upload Script</DialogTitle>
@@ -299,7 +343,7 @@ export function ScriptUploadDialog({ open, onOpenChange, entityId, entityType, o
                     )}
                 </div>
                 <DialogFooter>
-                    <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+                    <Button variant="outline" onClick={dismiss} disabled={submitting}>
                         Cancel
                     </Button>
                     <Button onClick={() => void handleSubmit()} disabled={submitDisabled}>

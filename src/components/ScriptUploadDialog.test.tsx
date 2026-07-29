@@ -393,6 +393,32 @@ describe('ScriptUploadDialog', () => {
             expect(mockUploadScript).not.toHaveBeenCalled();
         });
 
+        it('rejects a path traversal file name inline and does not call the store', async () => {
+            const user = await openInWriteMode();
+            await screen.findByTestId('script-editor');
+
+            await user.type(screen.getByLabelText(/file name/i), '../../etc/cron.d/evil.sh');
+            await user.click(screen.getByRole('button', { name: /^upload$/i }));
+
+            expect(await screen.findByRole('alert')).toHaveTextContent(/plain file name/i);
+            expect(mockUploadScript).not.toHaveBeenCalled();
+        });
+
+        it('rejects a name with a dot in an earlier path segment, since it has no real extension', async () => {
+            // extensionOf must read the last path segment only: my.dir/check
+            // has a dot before the separator but no extension on `check`
+            // itself, so this must fail basename validation, not slip
+            // through as if it had a usable extension.
+            const user = await openInWriteMode();
+            await screen.findByTestId('script-editor');
+
+            await user.type(screen.getByLabelText(/file name/i), 'my.dir/check');
+            await user.click(screen.getByRole('button', { name: /^upload$/i }));
+
+            expect(await screen.findByRole('alert')).toHaveTextContent(/plain file name/i);
+            expect(mockUploadScript).not.toHaveBeenCalled();
+        });
+
         it('clears the inline error as soon as the file name is edited', async () => {
             const user = await openInWriteMode();
             await screen.findByTestId('script-editor');
@@ -492,6 +518,105 @@ describe('ScriptUploadDialog', () => {
             await user.click(screen.getByRole('button', { name: /from file/i }));
             expect(screen.getByLabelText(/^name$/i)).toHaveValue('Diagnostics');
             expect(screen.getByLabelText(/^description$/i)).toHaveValue('Checks sensors');
+        });
+    });
+
+    describe('dismissing with unsaved write-mode content', () => {
+        async function openInWriteModeWith(
+            onOpenChange: (open: boolean) => void
+        ): Promise<ReturnType<typeof userEvent.setup>> {
+            const user = userEvent.setup();
+            render(
+                <ScriptUploadDialog
+                    open
+                    onOpenChange={onOpenChange}
+                    entityId="ecu"
+                    entityType="components"
+                    onUploaded={vi.fn()}
+                />
+            );
+            await user.click(screen.getByRole('button', { name: /write script/i }));
+            return user;
+        }
+
+        async function typeCustomContent(): Promise<{
+            user: ReturnType<typeof userEvent.setup>;
+            editor: HTMLElement;
+        }> {
+            const user = userEvent.setup();
+            const editor = await screen.findByTestId('script-editor');
+            await user.clear(editor);
+            await user.type(editor, 'echo custom-content');
+            return { user, editor };
+        }
+
+        it('keeps the dialog open on Escape when the user declines to discard typed content', async () => {
+            const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+            const onOpenChange = vi.fn();
+            const user = await openInWriteModeWith(onOpenChange);
+            const { editor } = await typeCustomContent();
+
+            await user.keyboard('{Escape}');
+
+            expect(confirmSpy).toHaveBeenCalled();
+            expect(onOpenChange).not.toHaveBeenCalledWith(false);
+            expect(editor).toHaveValue('echo custom-content');
+        });
+
+        it('closes on Escape once the user confirms discarding typed content', async () => {
+            vi.spyOn(window, 'confirm').mockReturnValue(true);
+            const onOpenChange = vi.fn();
+            const user = await openInWriteModeWith(onOpenChange);
+            await typeCustomContent();
+
+            await user.keyboard('{Escape}');
+
+            expect(onOpenChange).toHaveBeenCalledWith(false);
+        });
+
+        it('closes on Escape without prompting while the editor still holds only the auto-inserted template', async () => {
+            const confirmSpy = vi.spyOn(window, 'confirm');
+            const onOpenChange = vi.fn();
+            const user = await openInWriteModeWith(onOpenChange);
+            await screen.findByTestId('script-editor');
+
+            await user.keyboard('{Escape}');
+
+            expect(confirmSpy).not.toHaveBeenCalled();
+            expect(onOpenChange).toHaveBeenCalledWith(false);
+        });
+
+        it('prompts before discarding when Cancel is clicked with typed content, and stays open when declined', async () => {
+            const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+            const onOpenChange = vi.fn();
+            const user = await openInWriteModeWith(onOpenChange);
+            await typeCustomContent();
+
+            await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+            expect(confirmSpy).toHaveBeenCalled();
+            expect(onOpenChange).not.toHaveBeenCalledWith(false);
+        });
+
+        it('does not prompt when Cancel is clicked in upload-file mode with a file selected', async () => {
+            const confirmSpy = vi.spyOn(window, 'confirm');
+            const onOpenChange = vi.fn();
+            const user = userEvent.setup();
+            render(
+                <ScriptUploadDialog
+                    open
+                    onOpenChange={onOpenChange}
+                    entityId="ecu"
+                    entityType="components"
+                    onUploaded={vi.fn()}
+                />
+            );
+            await user.upload(screen.getByLabelText(/^file$/i), makeFile(['#!/bin/sh\necho hi']));
+
+            await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+            expect(confirmSpy).not.toHaveBeenCalled();
+            expect(onOpenChange).toHaveBeenCalledWith(false);
         });
     });
 });

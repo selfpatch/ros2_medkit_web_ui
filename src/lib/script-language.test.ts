@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { describe, it, expect } from 'vitest';
-import { languageForFilename, hasExtension, templateFor } from './script-language';
+import { languageForFilename, hasExtension, isPlainBasename, templateFor } from './script-language';
 
 describe('languageForFilename', () => {
     it('returns python for .py', () => {
@@ -56,6 +56,45 @@ describe('hasExtension', () => {
 
     it('rejects a dotfile with no extension', () => {
         expect(hasExtension('.bashrc')).toBe(false);
+    });
+
+    it('reads the extension from the last path segment only, not the whole string', () => {
+        // A dot in an earlier path segment (my.dir/check) must not be picked
+        // up as the extension of the file itself - `check` has none.
+        expect(hasExtension('my.dir/check')).toBe(false);
+        expect(hasExtension('my.dir/check.sh')).toBe(true);
+    });
+});
+
+describe('isPlainBasename', () => {
+    it('accepts an ordinary file name', () => {
+        expect(isPlainBasename('check.sh')).toBe(true);
+    });
+
+    it('rejects an empty name', () => {
+        expect(isPlainBasename('')).toBe(false);
+    });
+
+    it('rejects "." and ".."', () => {
+        expect(isPlainBasename('.')).toBe(false);
+        expect(isPlainBasename('..')).toBe(false);
+    });
+
+    it('rejects a forward-slash path traversal attempt', () => {
+        expect(isPlainBasename('../../etc/cron.d/evil.sh')).toBe(false);
+    });
+
+    it('rejects any name containing a forward slash, even without traversal', () => {
+        expect(isPlainBasename('my.dir/check')).toBe(false);
+        expect(isPlainBasename('scripts/check.sh')).toBe(false);
+    });
+
+    it('rejects a back-slash path', () => {
+        expect(isPlainBasename('..\\..\\windows\\evil.bat')).toBe(false);
+    });
+
+    it('accepts a dotfile-like name that is not "." or ".."', () => {
+        expect(isPlainBasename('.bashrc')).toBe(true);
     });
 });
 
