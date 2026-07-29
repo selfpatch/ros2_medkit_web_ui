@@ -14,16 +14,46 @@
 
 /**
  * The gateway picks the interpreter from the uploaded file's extension:
- * `.py` runs under python3, `.bash` under bash, and everything else - including
- * no extension at all - under sh. `languageForFilename` mirrors that split so
- * the editor's syntax highlighting matches what will actually execute.
+ * `.py` runs under python3, `.bash` under bash, and everything else -
+ * including no extension at all - under sh. `languageForFilename` does not
+ * mirror that split one-to-one: `.sh` and `.bash` both highlight as `shell`,
+ * since both are shell syntax, but an unrecognised extension (or none)
+ * returns `plain` rather than guessing `shell` too. The file would still run
+ * under sh either way, but highlighting arbitrary, unrecognised content as
+ * shell would be wrong often enough to mislead - sh is just the gateway's
+ * fallback for "could be anything", not a signal that it looks like shell.
  */
 export type ScriptLanguage = 'python' | 'shell' | 'plain';
 
+/**
+ * Last path segment of `filename`. `extensionOf` must look here rather than
+ * at the whole string: a name like `my.dir/check` has a dot before the last
+ * separator but no extension at all, and reading the extension from the full
+ * string would report `dir/check` as one.
+ */
+function lastPathSegment(filename: string): string {
+    const separator = Math.max(filename.lastIndexOf('/'), filename.lastIndexOf('\\'));
+    return separator === -1 ? filename : filename.slice(separator + 1);
+}
+
 function extensionOf(filename: string): string {
-    const dot = filename.lastIndexOf('.');
-    if (dot <= 0 || dot === filename.length - 1) return '';
-    return filename.slice(dot + 1).toLowerCase();
+    const base = lastPathSegment(filename);
+    const dot = base.lastIndexOf('.');
+    if (dot <= 0 || dot === base.length - 1) return '';
+    return base.slice(dot + 1).toLowerCase();
+}
+
+/**
+ * True when `filename` is a plain basename: non-empty, containing no forward
+ * or back slash, and not `.` or `..`. Write mode puts this string verbatim
+ * into the multipart upload's filename field, which the gateway uses to name
+ * a file - and ultimately an executable script - on the robot; this repo
+ * must reject anything that looks like a path before it ever reaches that
+ * request, regardless of what the gateway itself does with it afterwards.
+ */
+export function isPlainBasename(filename: string): boolean {
+    if (filename === '' || filename === '.' || filename === '..') return false;
+    return !filename.includes('/') && !filename.includes('\\');
 }
 
 export function languageForFilename(filename: string): ScriptLanguage {
@@ -34,9 +64,11 @@ export function languageForFilename(filename: string): ScriptLanguage {
 }
 
 /**
- * True when `filename` has a non-empty extension after a non-leading dot.
- * A leading dot alone (`.bashrc`) does not count: the gateway needs a real
- * suffix to pick an interpreter, not a hidden-file marker.
+ * True when `filename` has a non-empty extension after a non-leading dot in
+ * its last path segment. A leading dot alone (`.bashrc`) does not count: the
+ * gateway needs a real suffix to pick an interpreter, not a hidden-file
+ * marker. Does not by itself guarantee `filename` is a safe upload name -
+ * pair with `isPlainBasename` for that.
  */
 export function hasExtension(filename: string): boolean {
     return extensionOf(filename) !== '';

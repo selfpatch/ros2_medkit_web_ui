@@ -22,7 +22,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useAppStore } from '@/lib/store';
-import { scriptErrorMessage } from '@/lib/scripts';
+import { isPlainJsonObject, scriptErrorMessage } from '@/lib/scripts';
 import { convertJsonSchemaToTopicSchema, getSchemaDefaults } from '@/lib/schema-utils';
 import { SchemaForm } from '@/components/SchemaFormField';
 import { ScriptExecutionCard } from '@/components/ScriptExecutionCard';
@@ -104,12 +104,22 @@ export function ScriptRow({ script, entityId, entityType, executions, onDeleted 
         } else {
             const trimmed = jsonText.trim();
             if (trimmed) {
+                let parsed: unknown;
                 try {
-                    parameters = JSON.parse(trimmed) as Record<string, unknown>;
+                    parsed = JSON.parse(trimmed);
                 } catch (err) {
                     setJsonError(err instanceof Error ? err.message : 'Invalid JSON');
                     return;
                 }
+                // JSON.parse happily accepts an array, a string, a number or
+                // null - all valid JSON, none of them usable as parameters.
+                // Catching that here, rather than letting the gateway 400 on
+                // it, keeps the failure on this field's existing inline path.
+                if (!isPlainJsonObject(parsed)) {
+                    setJsonError('Parameters must be a JSON object, e.g. {"key": "value"}');
+                    return;
+                }
+                parameters = parsed;
             }
             setJsonError(null);
         }
@@ -132,6 +142,12 @@ export function ScriptRow({ script, entityId, entityType, executions, onDeleted 
     };
 
     const handleDelete = async () => {
+        // Deleting a script from the robot is irreversible and one click
+        // away from Run in the same row - matches the confirmation already
+        // required for the other irreversible delete in this codebase
+        // (UpdatesDashboard).
+        if (!window.confirm(`Delete script "${script.name}"? This cannot be undone.`)) return;
+
         setIsDeleting(true);
         try {
             await deleteScript(entityType, entityId, script.id);
