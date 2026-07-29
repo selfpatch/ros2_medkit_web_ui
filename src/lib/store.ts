@@ -17,7 +17,6 @@ import type {
     VersionInfo,
     SovdFunction,
     ScriptEntityType,
-    ScriptExecution,
     ScriptExecutionRecord,
     ScriptMetadata,
     ScriptsFetchResult,
@@ -73,6 +72,7 @@ import {
     upsertExecutionRecord,
     markExecutionLost,
     removeExecutionRecord,
+    toScriptExecution,
     SCRIPT_ERROR_CODE,
 } from './scripts';
 
@@ -982,26 +982,29 @@ export const useAppStore = create<AppState>()(
                     get().stopScriptPolling();
                     set({ scriptExecutions: new Map(), scriptsSupported: false });
 
-                    // Scripts tab visibility follows the gateway capability. Guarded by
-                    // the same 5s timeout as the health check so a slow gateway cannot
-                    // stall entity loading.
-                    try {
-                        const capsController = new AbortController();
-                        const capsTimeout = setTimeout(() => capsController.abort(), 5000);
-                        const { data: root } = await client
-                            .GET('/', { signal: capsController.signal })
-                            .finally(() => clearTimeout(capsTimeout));
-                        // A disconnect or a newer connect() may have completed while this
-                        // probe was in flight; a stale result must not clobber the state
-                        // of the session that is current now.
-                        if (get().client === client) {
-                            set({ scriptsSupported: root?.capabilities.scripts === true });
-                        }
-                    } catch {
-                        if (get().client === client) {
-                            set({ scriptsSupported: false });
-                        }
-                    }
+                    // Scripts tab visibility follows the gateway capability. Not
+                    // awaited: a gateway that answers /health and then hangs on
+                    // GET / must not stall entity loading behind this probe -
+                    // that is exactly the "connected over an empty tree" state
+                    // this is meant to avoid. It still carries its own 5s
+                    // timeout, and the client-identity guard below makes a late
+                    // (or stale, from a disconnect/reconnect mid-flight) result
+                    // safe to ignore.
+                    const capsController = new AbortController();
+                    const capsTimeout = setTimeout(() => capsController.abort(), 5000);
+                    void client
+                        .GET('/', { signal: capsController.signal })
+                        .then(({ data: root }) => {
+                            if (get().client === client) {
+                                set({ scriptsSupported: root?.capabilities.scripts === true });
+                            }
+                        })
+                        .catch(() => {
+                            if (get().client === client) {
+                                set({ scriptsSupported: false });
+                            }
+                        })
+                        .finally(() => clearTimeout(capsTimeout));
 
                     // Load root entities after successful connection
                     await get().loadRootEntities();
@@ -2053,10 +2056,11 @@ export const useAppStore = create<AppState>()(
                     request
                 );
                 if (error) throw toScriptsApiError(error, response?.status ?? 0);
+                const execution = toScriptExecution(data);
 
                 const key = scriptEntityKey(entityType, entityId);
                 const record: ScriptExecutionRecord = {
-                    execution: data as ScriptExecution,
+                    execution,
                     scriptId: script.id,
                     scriptName: script.name,
                     entityType,
@@ -2085,13 +2089,14 @@ export const useAppStore = create<AppState>()(
                     action
                 );
                 if (error) throw toScriptsApiError(error, response?.status ?? 0);
+                const execution = toScriptExecution(data);
 
                 const key = scriptEntityKey(entityType, entityId);
                 const existing = get()
                     .scriptExecutions.get(key)
                     ?.find((r) => r.execution.id === executionId);
                 if (existing) {
-                    const record: ScriptExecutionRecord = { ...existing, execution: data as ScriptExecution };
+                    const record: ScriptExecutionRecord = { ...existing, execution };
                     set({ scriptExecutions: upsertExecutionRecord(get().scriptExecutions, key, record) });
                     get().startScriptPolling();
                 }
@@ -2127,45 +2132,42 @@ export const useAppStore = create<AppState>()(
                 executionId: string
             ) => {
                 const { client } = get();
-                if (!client) return;
+                if (!client) throw new ScriptsApiError('Not connected', 0, '');
 
                 const key = scriptEntityKey(entityType, entityId);
-                try {
-                    const { data, error } = await getScriptExecution(
-                        client,
-                        entityType,
-                        entityId,
-                        scriptId,
-                        executionId
-                    );
-                    if (error) {
-                        // Only resource-not-found means the execution itself is gone.
-                        // entity-not-found means the entity is momentarily absent (a
-                        // node restarting under runtime discovery, for example) and
-                        // must not evict a record Refresh is meant to rescue.
-                        if (scriptErrorCode(error) === SCRIPT_ERROR_CODE.resourceNotFound) {
-                            set({ scriptExecutions: markExecutionLost(get().scriptExecutions, key, executionId) });
-                        }
+                const { data, error, response } = await getScriptExecution(
+                    client,
+                    entityType,
+                    entityId,
+                    scriptId,
+                    executionId
+                );
+                if (error) {
+                    // Only resource-not-found means the execution itself is gone -
+                    // mark it lost and treat that as the answer Refresh was
+                    // looking for, not a failure to surface.
+                    if (scriptErrorCode(error) === SCRIPT_ERROR_CODE.resourceNotFound) {
+                        set({ scriptExecutions: markExecutionLost(get().scriptExecutions, key, executionId) });
                         return;
                     }
-                    if (!data) return;
+                    // Anything else - entity-not-found (the entity is momentarily
+                    // absent, e.g. a node restarting under runtime discovery, and
+                    // must not evict a record Refresh is meant to rescue), a 500,
+                    // a network error - must reach the caller so the card's
+                    // "Failed to refresh" toast can fire.
+                    throw toScriptsApiError(error, response?.status ?? 0);
+                }
+                const execution = toScriptExecution(data);
 
-                    const existing = get()
-                        .scriptExecutions.get(key)
-                        ?.find((r) => r.execution.id === executionId);
-                    if (existing) {
-                        // Clear `lost`: a successful refresh means the gateway answered,
-                        // so this is exactly the rescue path a lost record needs.
-                        const record: ScriptExecutionRecord = {
-                            ...existing,
-                            execution: data as ScriptExecution,
-                            lost: false,
-                        };
-                        set({ scriptExecutions: upsertExecutionRecord(get().scriptExecutions, key, record) });
-                        get().startScriptPolling();
-                    }
-                } catch (err) {
-                    console.error('[store] refreshScriptExecution failed', err);
+                const existing = get()
+                    .scriptExecutions.get(key)
+                    ?.find((r) => r.execution.id === executionId);
+                if (existing) {
+                    // Clear `lost`: a successful refresh means the gateway answered,
+                    // so this is exactly the rescue path a lost record needs.
+                    const record: ScriptExecutionRecord = { ...existing, execution, lost: false };
+                    set({ scriptExecutions: upsertExecutionRecord(get().scriptExecutions, key, record) });
+                    get().startScriptPolling();
                 }
             },
 
