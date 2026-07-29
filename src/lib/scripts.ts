@@ -74,6 +74,34 @@ export function scriptErrorMessage(err: unknown, fallback: string): string {
 }
 
 /**
+ * Validate an openapi-fetch success payload as a usable `ScriptExecution`
+ * before it enters the store. `data as ScriptExecution` is a cast, not a
+ * check: openapi-fetch yields `undefined` data for an empty body on a 2xx
+ * response (legitimate for a 202), and an unchecked cast would let that - or
+ * any other malformed payload - become a record whose `execution` is
+ * unusable. The very next read of `record.execution.status` (the next
+ * polling tick, or the card's render) would then throw on something that is
+ * not actually broken, just not yet reflected correctly.
+ */
+export function toScriptExecution(data: unknown): ScriptExecution {
+    if (isRecord(data) && typeof data.id === 'string' && typeof data.status === 'string') {
+        return data as ScriptExecution;
+    }
+    throw new ScriptsApiError('The gateway returned an unusable response for this execution', 0, '');
+}
+
+/**
+ * True for a plain JSON object: excludes arrays, `null`, and primitives.
+ * `JSON.parse` accepts all of those too, so a bare cast to
+ * `Record<string, unknown>` would let `[1,2]`, `"hello"`, `42` and `null`
+ * all pass through as script parameters and earn a gateway 400 instead of
+ * the inline error the parameter field already knows how to show.
+ */
+export function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+    return isRecord(value) && !Array.isArray(value);
+}
+
+/**
  * Statuses worth polling. Deliberately a white list: `status` is a free-form
  * string on the wire (plugin backends return their own values) and a black list
  * of terminal statuses would poll an unknown status forever.
@@ -91,6 +119,27 @@ export function scriptEntityKey(entityType: ScriptEntityType, entityId: string):
 export type ScriptOutput = { kind: 'stdout'; text: string } | { kind: 'json'; value: unknown };
 
 /**
+ * Characters of stdout kept from the start and the end of an oversized dump.
+ * The content is entirely gateway-controlled and rendered into a single
+ * `<pre>` text node whose CSS `max-height` only limits the scrollable box,
+ * not the size of the DOM node itself - a script that prints a few megabytes
+ * would otherwise sit there in full, and up to MAX_EXECUTION_HISTORY of
+ * them can be held per entity at once.
+ */
+export const SCRIPT_OUTPUT_HEAD_CHARS = 4000;
+export const SCRIPT_OUTPUT_TAIL_CHARS = 2000;
+const SCRIPT_OUTPUT_MAX_CHARS = SCRIPT_OUTPUT_HEAD_CHARS + SCRIPT_OUTPUT_TAIL_CHARS;
+
+/** Keeps a head and a tail of `text`, with an explicit marker showing what was cut. */
+function truncateOutput(text: string): string {
+    if (text.length <= SCRIPT_OUTPUT_MAX_CHARS) return text;
+    const head = text.slice(0, SCRIPT_OUTPUT_HEAD_CHARS);
+    const tail = text.slice(text.length - SCRIPT_OUTPUT_TAIL_CHARS);
+    const omitted = text.length - SCRIPT_OUTPUT_HEAD_CHARS - SCRIPT_OUTPUT_TAIL_CHARS;
+    return `${head}\n\n... [truncated ${omitted} characters] ...\n\n${tail}`;
+}
+
+/**
  * Narrow `ScriptExecution.parameters` (typed `unknown | null`, because the spec
  * declares it as free-form). The gateway parses stdout as JSON and falls back to
  * `{stdout: "..."}` when it is not JSON, so the stdout-only shape gets rendered
@@ -103,7 +152,7 @@ export function scriptOutput(execution: ScriptExecution): ScriptOutput | null {
         const keys = Object.keys(value);
         if (keys.length === 0) return null;
         if (keys.length === 1 && keys[0] === 'stdout' && typeof value.stdout === 'string') {
-            return { kind: 'stdout', text: value.stdout };
+            return { kind: 'stdout', text: truncateOutput(value.stdout) };
         }
     }
     return { kind: 'json', value };
@@ -130,9 +179,12 @@ export const MAX_EXECUTION_HISTORY = 20;
 type HistoryMap = Map<string, ScriptExecutionRecord[]>;
 
 /**
- * Trim to MAX_EXECUTION_HISTORY, dropping the oldest *inactive* records first.
- * Dropping a running execution would orphan the process: the gateway has no
- * endpoint to list executions, so its id could never be recovered.
+ * Caps the *inactive* records at MAX_EXECUTION_HISTORY, dropping the oldest
+ * ones first - not the list as a whole, which can end up longer than that
+ * when active executions push it over the cap. Dropping a running execution
+ * would orphan the process: the gateway has no endpoint to list executions,
+ * so its id could never be recovered. Every currently active record is kept
+ * regardless of how many there are.
  */
 function trimHistory(records: ScriptExecutionRecord[]): ScriptExecutionRecord[] {
     if (records.length <= MAX_EXECUTION_HISTORY) return records;

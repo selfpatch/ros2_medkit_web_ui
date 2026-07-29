@@ -27,6 +27,10 @@ import {
     markExecutionLost,
     removeExecutionRecord,
     MAX_EXECUTION_HISTORY,
+    toScriptExecution,
+    isPlainJsonObject,
+    SCRIPT_OUTPUT_HEAD_CHARS,
+    SCRIPT_OUTPUT_TAIL_CHARS,
 } from './scripts';
 import type { ScriptExecution, ScriptExecutionRecord } from './types';
 
@@ -107,6 +111,56 @@ describe('scriptErrorMessage', () => {
     });
 });
 
+describe('toScriptExecution', () => {
+    it('returns the value unchanged when it has a string id and status', () => {
+        const value = { id: 'e1', status: 'running' };
+        expect(toScriptExecution(value)).toBe(value);
+    });
+
+    it('throws a ScriptsApiError for undefined data (an empty 2xx body, e.g. a 202)', () => {
+        expect(() => toScriptExecution(undefined)).toThrow(ScriptsApiError);
+    });
+
+    it('throws for a value missing status', () => {
+        expect(() => toScriptExecution({ id: 'e1' })).toThrow(ScriptsApiError);
+    });
+
+    it('throws for a value missing id', () => {
+        expect(() => toScriptExecution({ status: 'running' })).toThrow(ScriptsApiError);
+    });
+
+    it('throws for a non-object value', () => {
+        expect(() => toScriptExecution('e1')).toThrow(ScriptsApiError);
+        expect(() => toScriptExecution(null)).toThrow(ScriptsApiError);
+    });
+});
+
+describe('isPlainJsonObject', () => {
+    it('accepts a plain object', () => {
+        expect(isPlainJsonObject({ verbose: true })).toBe(true);
+    });
+
+    it('accepts an empty object', () => {
+        expect(isPlainJsonObject({})).toBe(true);
+    });
+
+    it('rejects an array', () => {
+        expect(isPlainJsonObject([1, 2])).toBe(false);
+    });
+
+    it('rejects null', () => {
+        expect(isPlainJsonObject(null)).toBe(false);
+    });
+
+    it('rejects a string', () => {
+        expect(isPlainJsonObject('hello')).toBe(false);
+    });
+
+    it('rejects a number', () => {
+        expect(isPlainJsonObject(42)).toBe(false);
+    });
+});
+
 describe('scriptOutput', () => {
     it('returns null when parameters is null', () => {
         const execution: ScriptExecution = { id: 'e1', status: 'completed', parameters: null };
@@ -130,6 +184,37 @@ describe('scriptOutput', () => {
             parameters: { stdout: 'hi', exit_code: 0 },
         };
         expect(scriptOutput(execution)).toEqual({ kind: 'json', value: { stdout: 'hi', exit_code: 0 } });
+    });
+
+    it('leaves stdout under the cap untouched', () => {
+        const text = 'x'.repeat(SCRIPT_OUTPUT_HEAD_CHARS + SCRIPT_OUTPUT_TAIL_CHARS);
+        const execution: ScriptExecution = { id: 'e1', status: 'completed', parameters: { stdout: text } };
+        expect(scriptOutput(execution)).toEqual({ kind: 'stdout', text });
+    });
+
+    it('truncates stdout over the cap, keeping a head and a tail behind a marker', () => {
+        // A few megabytes is entirely gateway-controlled and would otherwise
+        // sit whole in a single DOM text node - the max-height CSS on the
+        // <pre> only limits the scrollable box, not the node's size.
+        const head = 'A'.repeat(SCRIPT_OUTPUT_HEAD_CHARS);
+        const middle = 'M'.repeat(50_000);
+        const tail = 'Z'.repeat(SCRIPT_OUTPUT_TAIL_CHARS);
+        const execution: ScriptExecution = {
+            id: 'e1',
+            status: 'completed',
+            parameters: { stdout: head + middle + tail },
+        };
+
+        const output = scriptOutput(execution);
+        expect(output?.kind).toBe('stdout');
+        const text = (output as { kind: 'stdout'; text: string }).text;
+
+        expect(text.startsWith(head)).toBe(true);
+        expect(text.endsWith(tail)).toBe(true);
+        expect(text).toContain('truncated');
+        expect(text).toContain('50000');
+        // Bounded well below the original size - not just "smaller".
+        expect(text.length).toBeLessThan(SCRIPT_OUTPUT_HEAD_CHARS + SCRIPT_OUTPUT_TAIL_CHARS + 200);
     });
 
     it('returns a json entry for a non-object payload', () => {
@@ -228,6 +313,22 @@ describe('execution history reducers', () => {
         const arr = next.get('components/ecu')!;
         expect(arr).toHaveLength(MAX_EXECUTION_HISTORY);
         expect(arr.some((r) => r.execution.id === 'running-1')).toBe(true);
+    });
+
+    it('can return more than MAX_EXECUTION_HISTORY records when active executions alone exceed the cap', () => {
+        // The cap only ever applies to *inactive* records - it is not a
+        // guarantee on the list's overall length. With more active records
+        // than MAX_EXECUTION_HISTORY, none of them may be dropped (their ids
+        // could never be recovered - the gateway has no endpoint to list
+        // executions), so the result is longer than the cap.
+        const running = Array.from({ length: MAX_EXECUTION_HISTORY + 5 }, (_, i) => record(`r${i}`, 'running'));
+        const initial: Map<string, ScriptExecutionRecord[]> = new Map([['components/ecu', running]]);
+
+        const next = upsertExecutionRecord(initial, 'components/ecu', record('r-new', 'running'));
+
+        const arr = next.get('components/ecu')!;
+        expect(arr.length).toBeGreaterThan(MAX_EXECUTION_HISTORY);
+        expect(arr).toHaveLength(running.length + 1);
     });
 
     it('marks a single record as lost without touching its neighbours', () => {
