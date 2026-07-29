@@ -57,18 +57,30 @@ export function ScriptsPanel({ entityId, entityType }: ScriptsPanelProps) {
     const [uploadOpen, setUploadOpen] = useState(false);
 
     const abortRef = useRef<AbortController | null>(null);
+    // Identifies the entity the currently-rendered `scripts` belong to, so a
+    // reload of the *same* entity (Refresh, or the reload after an upload or
+    // a delete) can be told apart from an actual entity switch.
+    const currentEntityKeyRef = useRef<string | null>(null);
 
     useEffect(() => {
         abortRef.current?.abort();
         const controller = new AbortController();
         abortRef.current = controller;
 
-        // Clear whatever the previous entity (or previous attempt) rendered so
-        // it never lingers under the new heading while the fresh request is
-        // in flight.
-        setScripts([]);
-        setErrorStatus(null);
-        setIsLoading(true);
+        const entityKey = `${entityType}:${entityId}`;
+        const isEntityChange = currentEntityKeyRef.current !== entityKey;
+        currentEntityKeyRef.current = entityKey;
+
+        if (isEntityChange) {
+            // Only an actual entity switch discards what is currently shown.
+            // A same-entity reload keeps rendering the existing rows while
+            // the refetch is in flight - clearing them here would unmount
+            // every row (and whatever the user was doing inside one, like a
+            // half-filled parameter form) for the duration of the request.
+            setScripts([]);
+            setErrorStatus(null);
+            setIsLoading(true);
+        }
 
         const load = async () => {
             try {
@@ -79,6 +91,7 @@ export function ScriptsPanel({ entityId, entityType }: ScriptsPanelProps) {
                     setErrorStatus(result.errorStatus);
                 } else {
                     setScripts(result.items);
+                    setErrorStatus(null);
                 }
             } catch (err) {
                 if ((err as { name?: string }).name === 'AbortError') return;

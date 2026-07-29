@@ -229,6 +229,36 @@ describe('ScriptsPanel', () => {
         });
     });
 
+    it('keeps the existing rows on screen while a same-entity refresh is in flight', async () => {
+        let resolveSecond: (value: ScriptsFetchResult) => void = () => {};
+        mockFetchEntityScripts.mockResolvedValueOnce({ items: [makeScript({ id: 'a' })] }).mockImplementationOnce(
+            () =>
+                new Promise<ScriptsFetchResult>((resolve) => {
+                    resolveSecond = resolve;
+                })
+        );
+
+        render(<ScriptsPanel entityId="ecu" entityType="components" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('script-row-a')).toBeInTheDocument();
+        });
+
+        const user = userEvent.setup();
+        await user.click(screen.getByRole('button', { name: /refresh/i }));
+
+        // The refetch above is for the same entity, so the row already on
+        // screen must stay mounted and the loading spinner must not replace
+        // it - unmounting it here is exactly what would collapse an expanded
+        // row's in-progress parameter form back to nothing.
+        expect(screen.getByTestId('script-row-a')).toBeInTheDocument();
+        expect(screen.queryByText(/Loading scripts/i)).not.toBeInTheDocument();
+
+        await act(async () => {
+            resolveSecond({ items: [makeScript({ id: 'a' })] });
+            await Promise.resolve();
+        });
+    });
+
     it('reloads the list after a successful upload', async () => {
         mockFetchEntityScripts
             .mockResolvedValueOnce({ items: [] })
