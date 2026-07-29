@@ -236,6 +236,30 @@ describe('ScriptRow', () => {
         expect(mockStartScriptExecutionAction).not.toHaveBeenCalled();
     });
 
+    it.each([
+        ['[1,2]', 'an array'],
+        ['"hello"', 'a string'],
+        ['42', 'a number'],
+        ['null', 'null'],
+    ])('blocks Run and shows an inline error when the JSON parses to %s (%s)', async (raw) => {
+        render(
+            <ScriptRow
+                script={makeScript({ parameters_schema: null })}
+                entityId="ecu"
+                entityType="components"
+                executions={[]}
+                onDeleted={vi.fn()}
+            />
+        );
+
+        const user = await expandRow('Diagnostics');
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: raw } });
+        await user.click(screen.getByRole('button', { name: 'Run' }));
+
+        expect(await screen.findByText(/must be a JSON object/i)).toBeInTheDocument();
+        expect(mockStartScriptExecutionAction).not.toHaveBeenCalled();
+    });
+
     it('keeps typed values while the row re-renders', async () => {
         const script = makeScript({
             parameters_schema: { type: 'object', properties: { verbose: { type: 'boolean' } } },
@@ -354,7 +378,8 @@ describe('ScriptRow', () => {
         expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
     });
 
-    it('calls deleteScript and onDeleted when Delete succeeds', async () => {
+    it('calls deleteScript and onDeleted when Delete succeeds and the confirmation is accepted', async () => {
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
         const onDeleted = vi.fn();
         render(
             <ScriptRow
@@ -370,9 +395,31 @@ describe('ScriptRow', () => {
         await user.click(screen.getByRole('button', { name: 'Delete' }));
 
         await waitFor(() => {
+            expect(window.confirm).toHaveBeenCalled();
             expect(mockDeleteScript).toHaveBeenCalledWith('components', 'ecu', 'diag');
             expect(onDeleted).toHaveBeenCalled();
         });
+    });
+
+    it('does not call deleteScript when the confirmation is declined', async () => {
+        vi.spyOn(window, 'confirm').mockReturnValue(false);
+        const onDeleted = vi.fn();
+        render(
+            <ScriptRow
+                script={makeScript()}
+                entityId="ecu"
+                entityType="components"
+                executions={[]}
+                onDeleted={onDeleted}
+            />
+        );
+
+        const user = await expandRow('Diagnostics');
+        await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+        expect(window.confirm).toHaveBeenCalled();
+        expect(mockDeleteScript).not.toHaveBeenCalled();
+        expect(onDeleted).not.toHaveBeenCalled();
     });
 
     it('disables Run while the request is in flight', async () => {
