@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import { test, expect, type Page } from '@playwright/test';
+import { clickDeleteAndConfirm } from './dialog-helpers';
 
 async function selectTestEcu(page: Page): Promise<void> {
     await page.goto('/');
@@ -139,7 +140,7 @@ test('reports that a managed script cannot be deleted', async ({ page }) => {
 
     await openScripts(page);
     await page.getByRole('button', { name: 'Hello' }).click();
-    await page.getByRole('button', { name: 'Delete' }).click();
+    await clickDeleteAndConfirm(page, 'Hello');
     await expect(page.getByText('Cannot delete managed script: hello')).toBeVisible({ timeout: 30_000 });
 });
 

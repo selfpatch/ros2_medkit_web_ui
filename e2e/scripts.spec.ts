@@ -14,6 +14,7 @@
 
 import path from 'node:path';
 import { test, expect, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { clickDeleteAndConfirm } from './dialog-helpers';
 
 async function openScripts(page: Page, entity: 'Test ECU' | 'Talker'): Promise<void> {
     await page.goto('/');
@@ -73,7 +74,7 @@ test.afterEach(async ({ page }, testInfo) => {
             let remaining = await row.count();
             while (remaining > 0) {
                 await row.first().click();
-                await page.getByRole('button', { name: 'Delete' }).click();
+                await clickDeleteAndConfirm(page, name);
                 await expect(row).toHaveCount(remaining - 1, { timeout: 30_000 });
                 remaining = await row.count();
             }
@@ -173,7 +174,7 @@ test('uploads, runs and deletes a script', async ({ page }, testInfo) => {
     const status = page.getByTestId('execution-status');
     await expect(status).toHaveText('completed', { timeout: 30_000 });
 
-    await page.getByRole('button', { name: 'Delete' }).click();
+    await clickDeleteAndConfirm(page, uploadedName);
     await expect(row).toBeHidden({ timeout: 30_000 });
 });
 
@@ -213,7 +214,7 @@ test('writes a bash script in the UI, runs it and shows its output', async ({ pa
     await expect(page.locator('pre')).toContainText('e2e-write-bash-ok');
     await expect(page.locator('pre')).toContainText('"greeting":"e2e-write-bash"');
 
-    await page.getByRole('button', { name: 'Delete' }).click();
+    await clickDeleteAndConfirm(page, scriptName);
     await expect(row).toBeHidden({ timeout: 30_000 });
 });
 
@@ -255,7 +256,7 @@ test('writes a python script in the UI, runs it and shows its output', async ({ 
     await expect(page.locator('pre')).toContainText('e2e-write-python-ok');
     await expect(page.locator('pre')).toContainText('"greeting":"e2e-write-python"');
 
-    await page.getByRole('button', { name: 'Delete' }).click();
+    await clickDeleteAndConfirm(page, scriptName);
     await expect(row).toBeHidden({ timeout: 30_000 });
 });
 
