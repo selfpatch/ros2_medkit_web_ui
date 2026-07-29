@@ -29,6 +29,8 @@ scripts:
       description: 'Runs long enough to be stopped'
       path: '/e2e-scripts/sleep.sh'
       format: 'bash'
-      timeout_sec: 300
+      # Matches sleep.sh's own sleep duration - see the comment there for why
+      # this is kept short rather than generously long.
+      timeout_sec: 30
       entity_filter:
           - 'ecu'

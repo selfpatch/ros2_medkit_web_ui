@@ -61,11 +61,21 @@ test.afterEach(async ({ page }, testInfo) => {
     const names = [uploadedNameFor(testInfo), writtenNameFor(testInfo, 'bash'), writtenNameFor(testInfo, 'python')];
     for (const name of names) {
         try {
+            // A substring, case-insensitive match on `name` can resolve to more
+            // than one row: workerIndex and repeatEachIndex are both 0 on an
+            // ordinary run, so uploadedNameFor/writtenNameFor produce the same
+            // name across separate runs, and the gateway happily accepts
+            // duplicate script names as separate entities. Loop on the
+            // locator's count instead of a single isVisible() check, deleting
+            // .first() each time, so every leftover is removed rather than
+            // only a uniquely-named one.
             const row = page.getByRole('button', { name });
-            if (await row.isVisible().catch(() => false)) {
-                await row.click();
+            let remaining = await row.count();
+            while (remaining > 0) {
+                await row.first().click();
                 await page.getByRole('button', { name: 'Delete' }).click();
-                await expect(row).toBeHidden({ timeout: 30_000 });
+                await expect(row).toHaveCount(remaining - 1, { timeout: 30_000 });
+                remaining = await row.count();
             }
         } catch (err) {
             console.warn(`afterEach cleanup: failed to remove leftover script "${name}"`, err);
@@ -141,7 +151,12 @@ test('stops a running script and reports it as stopped, not failed', async ({ pa
 test('uploads, runs and deletes a script', async ({ page }, testInfo) => {
     const uploadedName = uploadedNameFor(testInfo);
     await openScripts(page, 'Test ECU');
-    await page.getByRole('button', { name: 'Upload' }).click();
+    // exact: true - Playwright's role/name matching is a case-insensitive
+    // substring match by default, and script rows carry the script name as
+    // their accessible name. Leftover fixtures from this file are named
+    // `uploaded_<worker>_<repeat>`, which contains "upload", so a non-exact
+    // lookup for the toolbar button also resolves to every leftover row.
+    await page.getByRole('button', { name: 'Upload', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('File').setInputFiles(path.join(import.meta.dirname, 'fixtures', 'uploaded-script.sh'));
     await dialog.getByLabel('Name').fill(uploadedName);
@@ -165,10 +180,13 @@ test('uploads, runs and deletes a script', async ({ page }, testInfo) => {
 test('writes a bash script in the UI, runs it and shows its output', async ({ page }, testInfo) => {
     const scriptName = writtenNameFor(testInfo, 'bash');
     await openScripts(page, 'Test ECU');
-    await page.getByRole('button', { name: 'Upload' }).click();
+    await page.getByRole('button', { name: 'Upload', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByRole('button', { name: 'Write script' }).click();
-    await dialog.getByLabel('File name').fill(`${scriptName}.sh`);
+    // .bash, not .sh: the gateway only runs a script under bash when its name
+    // ends in .bash - .sh, like everything else, runs under sh - so this is
+    // the only extension that actually exercises the bash interpreter path.
+    await dialog.getByLabel('File name').fill(`${scriptName}.bash`);
     // Reachable by role and accessible name against the real CodeMirror
     // instance, not just the mocked editor the unit tests exercise - this is
     // the only place that would catch ScriptEditor's aria-label regressing.
@@ -202,7 +220,7 @@ test('writes a bash script in the UI, runs it and shows its output', async ({ pa
 test('writes a python script in the UI, runs it and shows its output', async ({ page }, testInfo) => {
     const scriptName = writtenNameFor(testInfo, 'python');
     await openScripts(page, 'Test ECU');
-    await page.getByRole('button', { name: 'Upload' }).click();
+    await page.getByRole('button', { name: 'Upload', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByRole('button', { name: 'Write script' }).click();
     await dialog.getByLabel('File name').fill(`${scriptName}.py`);
