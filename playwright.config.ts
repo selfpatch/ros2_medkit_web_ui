@@ -23,6 +23,9 @@ const APP_PORT = new URL(BASE_URL).port || '5173';
 export default defineConfig({
     testDir: './e2e',
     globalSetup: './e2e/global-setup.ts',
+    // Fails the run in CI if a `test.only` was committed, instead of silently
+    // running just that one test and reporting a spuriously green suite.
+    forbidOnly: !!process.env.CI,
     timeout: 60_000,
     expect: { timeout: 30_000 },
     reporter: [['html', { open: 'never' }], ['list']],

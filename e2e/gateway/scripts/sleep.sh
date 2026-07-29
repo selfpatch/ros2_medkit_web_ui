@@ -12,4 +12,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-sleep 300
+# Kept short on purpose: the gateway's concurrency cap is 5 and it is global,
+# not per script. A stopped-but-still-running execution (e.g. from a test run
+# interrupted mid-scenario) holds its slot until this sleep exits naturally,
+# and a running execution cannot be deleted - so a handful of interrupted runs
+# inside a long sleep window would block every execution the suite tries to
+# start afterwards, with no reset short of destroying the stack. 30 seconds is
+# still ample for the "stop a running script" scenario, which stops it within
+# a second or two of starting.
+sleep 30

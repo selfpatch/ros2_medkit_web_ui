@@ -15,7 +15,15 @@
 import { chromium } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
-const GATEWAY_URL = process.env.E2E_GATEWAY_URL ?? 'http://localhost:8080/api/v1';
+// e2e/docker-compose.yml publishes the gateway container on E2E_GATEWAY_PORT,
+// not E2E_GATEWAY_URL - deriving the URL's port from it here means overriding
+// the one variable that actually changes (the port, e.g. because 8080 is
+// already taken) is enough. Without this, setting only E2E_GATEWAY_PORT would
+// leave global setup polling the old default port for the full two-minute
+// deadline before failing. An explicit E2E_GATEWAY_URL still wins outright,
+// for the rarer case where the host part needs to change too.
+const GATEWAY_PORT = process.env.E2E_GATEWAY_PORT ?? '8080';
+const GATEWAY_URL = process.env.E2E_GATEWAY_URL ?? `http://localhost:${GATEWAY_PORT}/api/v1`;
 const APP_URL = process.env.E2E_APP_URL ?? 'http://localhost:5173';
 const STORAGE_KEY = 'ros2_medkit_web_ui_server_url';
 
