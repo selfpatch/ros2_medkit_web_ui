@@ -344,7 +344,7 @@ function FaultGroup({
                         isClearing={clearingCodes.has(fault.code)}
                         isExpanded={expandedFaults.has(fault.code)}
                         onToggle={() => onToggleFault(fault)}
-                        environmentData={faultDetails.get(fault.code)?.environment_data}
+                        environmentData={faultDetails.get(faultKey(fault))?.environment_data}
                         isLoadingDetails={loadingDetails.has(fault.code)}
                     />
                 ))}
@@ -393,6 +393,20 @@ function DashboardSkeleton() {
  * Uses shared faults state from useAppStore to avoid duplicate API calls
  * when both FaultsDashboard and FaultsCountBadge are visible.
  */
+/**
+ * Key for the per-fault caches in this dashboard.
+ *
+ * The dashboard lists faults from every entity at once, and a fault code is only
+ * unique within one entity - two apps can both report `LIDAR_RANGE_INVALID`.
+ * Keying the detail cache by code alone made the second entity's row render the
+ * first entity's environment data, i.e. download buttons pointing at another
+ * entity's recordings. Including the entity makes the key as specific as the
+ * request that filled it.
+ */
+function faultKey(fault: { code: string; entity_type?: string; entity_id?: string }): string {
+    return `${fault.entity_type ?? ''}/${fault.entity_id ?? ''}/${fault.code}`;
+}
+
 export function FaultsDashboard() {
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [autoRefresh, setAutoRefresh] = useState(true);
@@ -493,13 +507,15 @@ export function FaultsDashboard() {
             } else {
                 newExpanded.add(faultCode);
 
-                // Fetch details if not cached
-                if (!faultDetails.has(faultCode)) {
+                // Always refetch: a fault gains recordings while the page is open,
+                // and a cache filled once on first expand would keep serving the
+                // shorter list. The previous entry stays rendered meanwhile.
+                {
                     setLoadingDetails((prev) => new Set([...prev, faultCode]));
                     try {
                         const entityGroup = mapFaultEntityTypeToResourceType(fault.entity_type);
                         const details = await getFaultWithEnvironmentData(entityGroup, fault.entity_id, faultCode);
-                        setFaultDetails((prev) => new Map(prev).set(faultCode, details as FaultResponse));
+                        setFaultDetails((prev) => new Map(prev).set(faultKey(fault), details as FaultResponse));
                     } catch (err) {
                         console.error('Failed to fetch fault details:', err);
                     } finally {
@@ -514,7 +530,7 @@ export function FaultsDashboard() {
 
             setExpandedFaults(newExpanded);
         },
-        [getFaultWithEnvironmentData, expandedFaults, faultDetails]
+        [getFaultWithEnvironmentData, expandedFaults]
     );
 
     // Filter faults
@@ -825,7 +841,7 @@ export function FaultsDashboard() {
                                 isClearing={clearingCodes.has(fault.code)}
                                 isExpanded={expandedFaults.has(fault.code)}
                                 onToggle={() => handleToggleFault(fault)}
-                                environmentData={faultDetails.get(fault.code)?.environment_data}
+                                environmentData={faultDetails.get(faultKey(fault))?.environment_data}
                                 isLoadingDetails={loadingDetails.has(fault.code)}
                             />
                         ))}
