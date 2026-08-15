@@ -50,5 +50,9 @@ export default defineConfig({
         // concurrency limit), so they must not run in parallel with each other.
         { name: 'scripts-serial', testMatch: /(scripts|smoke)\.spec\.ts/, fullyParallel: false, workers: 1 },
         { name: 'mocked', testMatch: /.*-errors\.spec\.ts/ },
+        // Its own stack (e2e/docker-compose.rosbag.yml) on its own port, because
+        // it needs a fault manager the scripts gateway does not run. Serial for
+        // the same reason as scripts-serial: one shared gateway.
+        { name: 'rosbag-serial', testMatch: /rosbag-.*\.spec\.ts/, fullyParallel: false, workers: 1 },
     ],
 });

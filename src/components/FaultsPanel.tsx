@@ -309,8 +309,13 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
             } else {
                 newExpanded.add(faultCode);
 
-                // Fetch details if not cached
-                if (!faultDetails.has(faultCode)) {
+                // Always refetch, even when a detail is already cached. A fault can
+                // gain recordings while the page is open - it re-confirms, the black
+                // box is written, the snapshot list grows - and a cache that is
+                // filled once on first expand would keep serving the older list with
+                // no way to refresh short of remounting. The stale entry stays
+                // rendered until the new one lands, so re-expanding never flickers.
+                {
                     setLoadingDetails((prev) => new Set([...prev, faultCode]));
                     try {
                         // Use the fault's own entity info (app-level) for correct bulk_data_uri.
@@ -337,7 +342,7 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
 
             setExpandedFaults(newExpanded);
         },
-        [getFaultWithEnvironmentData, entityType, entityId, expandedFaults, faultDetails, faults]
+        [getFaultWithEnvironmentData, entityType, entityId, expandedFaults, faults]
     );
 
     const handleClear = useCallback(

@@ -1,0 +1,36 @@
+# Gateway + fault manager for the rosbag-history scenario.
+#
+# Separate from params.yaml on purpose: that stack is manifest-only with script
+# uploads and no fault manager at all, and this one needs the opposite - live
+# ROS discovery so the seeded fault's reporting source resolves to an app, and a
+# fault manager configured to keep a HISTORY of black-box recordings rather than
+# overwriting on every re-confirmation.
+/**:
+    ros__parameters:
+        server:
+            host: '0.0.0.0'
+            port: 8080
+        cors:
+            # Same reasoning as params.yaml: the browser's origin is the dev
+            # server, not the gateway, and E2E_APP_URL is overridable.
+            allowed_origins:
+                - '*'
+        # Rosbag retention. 3 leaves headroom above the two occurrences the seed
+        # drives, so a failing spec means "a recording was lost", not "the cap
+        # trimmed one".
+        snapshots:
+            rosbag:
+                enabled: true
+                duration_sec: 2.0
+                duration_after_sec: 0.5
+                include_topics: ['/e2e/probe']
+                format: 'mcap'
+                storage_path: '/e2e-bags'
+                max_bags_per_fault: 3
+                # Acknowledging a fault must not delete the evidence it just
+                # produced - the scenario is confirm, acknowledge, confirm again.
+                auto_cleanup: false
+                lazy_start: false
+        confirmation_threshold: -1
+        storage_type: 'sqlite'
+        database_path: '/e2e-bags/faults.db'

@@ -50,7 +50,6 @@ import {
     putEntityDataItem,
     deleteEntityConfiguration,
     deleteEntityConfigurations,
-    getEntityBulkData,
     getEntityLogs,
     getEntityLogsConfiguration,
     putEntityLogsConfiguration,
@@ -899,6 +898,38 @@ async function fetchEntityFromApi(
             isLoadingDetails: false,
         });
     }
+}
+
+/**
+ * Filename the server chose, out of a `Content-Disposition` header.
+ *
+ * Handles both the plain `filename="x"` form and RFC 5987's `filename*=UTF-8''x`,
+ * preferring the latter when present because that is the one that survives
+ * non-ASCII. Returns null when the header is absent or names nothing, so the
+ * caller can fall back rather than saving a file called "null".
+ */
+export function filenameFromContentDisposition(header: string | null): string | null {
+    if (!header) return null;
+
+    const extended = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/i.exec(header);
+    if (extended?.[1]) {
+        try {
+            const decoded = decodeURIComponent(extended[1].trim());
+            if (decoded) return decoded;
+        } catch {
+            // Malformed percent-encoding: fall through to the plain form.
+        }
+    }
+
+    // One alternative, then unquote: matching the quoted form separately means a
+    // `filename=""` falls through to the unquoted branch and comes back as the
+    // two literal quote characters instead of as "no name".
+    const plain = /filename\s*=\s*([^;]+)/i.exec(header);
+    const name = plain?.[1]
+        ?.trim()
+        .replace(/^"(.*)"$/, '$1')
+        .trim();
+    return name ? name : null;
 }
 
 export const useAppStore = create<AppState>()(
@@ -2550,13 +2581,6 @@ export const useAppStore = create<AppState>()(
                 const { client, serverUrl } = get();
                 if (!client || !serverUrl) return null;
 
-                // Fetch file list to get filename
-                const { data } = await getEntityBulkData(client, entityType, entityId, category);
-                if (!data) return null;
-                const items = (data as unknown as { items?: Array<{ id: string; name?: string }> })?.items || [];
-                const fileDesc = items.find((item) => item.id === fileId);
-                const filename = fileDesc?.name || fileId;
-
                 // Download binary via fetch (openapi-fetch doesn't support blob responses)
                 const baseUrl = normalizeBaseUrl(serverUrl);
                 const downloadUrl = `${baseUrl}/${entityType}/${encodeURIComponent(entityId)}/bulk-data/${encodeURIComponent(category)}/${encodeURIComponent(fileId)}`;
@@ -2567,6 +2591,14 @@ export const useAppStore = create<AppState>()(
                     clearTimeout(timer);
                     if (!response.ok) return null;
                     const blob = await response.blob();
+                    // The server names the file, and it is the only party that knows
+                    // the storage format, so only it can put the right extension on
+                    // the end. The descriptor's `name` is a human label ("<id>
+                    // recording <timestamp>"), not a filename: saving under it lands
+                    // a rosbag on disk with no `.mcap`/`.db3` at all, which neither
+                    // the OS nor `ros2 bag play` can make sense of.
+                    const filename =
+                        filenameFromContentDisposition(response.headers.get('content-disposition')) ?? fileId;
                     return { blob, filename };
                 } catch {
                     clearTimeout(timer);
