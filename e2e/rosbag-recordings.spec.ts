@@ -39,10 +39,23 @@ interface Descriptor {
     'x-medkit'?: { fault_codes?: string[]; recording_id?: string };
 }
 
+/** fetch that answers null instead of throwing when nothing is listening. */
+async function safeFetch(url: string): Promise<Response | null> {
+    try {
+        return await fetch(url);
+    } catch {
+        return null;
+    }
+}
+
 /** Recording ids the gateway attributes to the seeded fault, via its own API. */
 async function recordingsFromApi(appId: string): Promise<string[]> {
-    const response = await fetch(`${GATEWAY_URL}/apps/${appId}/bulk-data/rosbags`);
-    if (!response.ok) return [];
+    // Network errors are swallowed here and in appHoldingTheFault so a stack that
+    // is not up leaves expectedRecordings empty and the specs SKIP with a named
+    // reason. Letting fetch throw out of beforeAll fails them instead, which says
+    // nothing about this repo and turns CI red on a missing fixture.
+    const response = await safeFetch(`${GATEWAY_URL}/apps/${appId}/bulk-data/rosbags`);
+    if (!response?.ok) return [];
     const body = (await response.json()) as { items?: Descriptor[] };
     return (body.items ?? [])
         .filter((item) => item['x-medkit']?.fault_codes?.includes(FAULT_CODE))
@@ -51,12 +64,12 @@ async function recordingsFromApi(appId: string): Promise<string[]> {
 
 /** The app the seeded fault is attributed to, whatever the gateway named it. */
 async function appHoldingTheFault(): Promise<string | null> {
-    const response = await fetch(`${GATEWAY_URL}/apps`);
-    if (!response.ok) return null;
+    const response = await safeFetch(`${GATEWAY_URL}/apps`);
+    if (!response?.ok) return null;
     const body = (await response.json()) as { items?: Array<{ id: string }> };
     for (const app of body.items ?? []) {
-        const faults = await fetch(`${GATEWAY_URL}/apps/${app.id}/faults`);
-        if (!faults.ok) continue;
+        const faults = await safeFetch(`${GATEWAY_URL}/apps/${app.id}/faults`);
+        if (!faults?.ok) continue;
         const listing = (await faults.json()) as { items?: Array<{ fault_code?: string }> };
         if ((listing.items ?? []).some((f) => f.fault_code === FAULT_CODE)) return app.id;
     }
