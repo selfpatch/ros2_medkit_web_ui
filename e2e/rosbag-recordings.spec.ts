@@ -25,6 +25,8 @@
  * one: it needs a fault manager, which that stack does not run.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { expect, test } from '@playwright/test';
 
 const GATEWAY_PORT = process.env.E2E_ROSBAG_GATEWAY_PORT ?? '8081';
@@ -127,6 +129,7 @@ test('every recording downloads as its own bag', async ({ page }) => {
     await expect(buttons).toHaveCount(expectedRecordings.length);
 
     const filenames: string[] = [];
+    const payloads: Buffer[] = [];
     for (let i = 0; i < expectedRecordings.length; i += 1) {
         const [download] = await Promise.all([page.waitForEvent('download'), buttons.nth(i).click()]);
         const name = download.suggestedFilename();
@@ -140,10 +143,22 @@ test('every recording downloads as its own bag', async ({ page }) => {
 
         const path = await download.path();
         expect(path).toBeTruthy();
+        payloads.push(readFileSync(path!));
     }
 
     // Distinct files, not the same bag served twice under different buttons.
     expect(new Set(filenames).size).toBe(expectedRecordings.length);
+
+    // And distinct BYTES. Names alone would still pass on a build that resolved
+    // both ids to one recording but labelled the responses differently; this is
+    // what proves each button fetched its own occurrence.
+    expect(new Set(payloads.map((b) => b.toString('base64'))).size).toBe(expectedRecordings.length);
+    for (const payload of payloads) {
+        expect(payload.length).toBeGreaterThan(0);
+        // Every bag the fixture records is mcap; the magic is the cheapest proof
+        // that what arrived is a bag and not an error page.
+        expect(payload.subarray(0, 5)).toEqual(Buffer.from([0x89, 0x4d, 0x43, 0x41, 0x50]));
+    }
 });
 
 test('a recording that appears while the fault is open is reachable without a reload', async ({ page }) => {
