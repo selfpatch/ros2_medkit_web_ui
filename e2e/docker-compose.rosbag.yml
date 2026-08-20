@@ -49,8 +49,8 @@ services:
         # exits.
         command:
             - >
-                source /opt/ros/jazzy/setup.bash &&
-                source /home/medkit/ws/install/setup.bash &&
+                source /opt/ros/jazzy/setup.bash;
+                source /home/medkit/ws/install/setup.bash;
                 ros2 run ros2_medkit_fault_manager fault_manager_node
                 --ros-args --params-file /e2e/params.yaml &
                 FM=$!;
