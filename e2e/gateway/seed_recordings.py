@@ -38,7 +38,12 @@ from ros2_medkit_msgs.srv import ClearFault, ReportFault
 from std_msgs.msg import Float32
 
 FAULT_CODE = 'E2E_FLAPPING_SENSOR'
-SOURCE_ID = '/e2e/probe_publisher'
+# The node's own fully qualified name. The gateway attributes a fault to the app
+# whose FQN matches its reporting source, so a source that belongs to no live
+# node leaves the fault owned by nobody and invisible under any /apps/{id} -
+# which is also why this node stays up afterwards instead of exiting.
+NODE_NAME = 'e2e_rosbag_seeder'
+SOURCE_ID = f'/{NODE_NAME}'
 PROBE_TOPIC = '/e2e/probe'
 # Must exceed the configured duration_sec so the ring buffer holds a full window
 # before each confirmation; a bag flushed from an empty buffer has no content.
@@ -47,7 +52,7 @@ FILL_SECONDS = 3.0
 
 class Seeder(Node):
     def __init__(self):
-        super().__init__('e2e_rosbag_seeder')
+        super().__init__(NODE_NAME)
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
@@ -72,12 +77,24 @@ class Seeder(Node):
             rclpy.spin_once(self, timeout_sec=0.0)
             time.sleep(period)
 
-    def call(self, client, request):
-        future = client.call_async(request)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=20.0)
-        if future.result() is None:
-            raise SystemExit('service call timed out')
-        return future.result()
+    def call(self, client, request, attempts=5):
+        # Retried rather than one-shot: wait_for_service returns as soon as the
+        # service is advertised, which under DDS is before the fault manager has
+        # finished coming up, so the very first call can time out on a server
+        # that is seconds away from being fine.
+        for _ in range(attempts):
+            future = client.call_async(request)
+            rclpy.spin_until_future_complete(self, future, timeout_sec=20.0)
+            result = future.result()
+            if result is not None:
+                return result
+            # A future that outlived its timeout must not stay in flight: the
+            # request is not idempotent, and a late completion next to the retry
+            # would hand the fault manager two EVENT_FAILED reports for one
+            # occurrence.
+            future.cancel()
+            time.sleep(2.0)
+        raise SystemExit('service call timed out after retries')
 
     def confirm(self):
         request = ReportFault.Request()
@@ -86,18 +103,31 @@ class Seeder(Node):
         request.severity = Fault.SEVERITY_ERROR
         request.description = 'Intermittent sensor dropout seen twice'
         request.source_id = SOURCE_ID
-        return self.call(self.report, request)
+        response = self.call(self.report, request)
+        if not response.accepted:
+            # ReportFault's response carries no message field; accepted=False
+            # means the request itself was invalid.
+            raise SystemExit('ReportFault rejected the request as invalid')
+        return response
 
     def acknowledge(self):
         request = ClearFault.Request()
         request.fault_code = FAULT_CODE
-        return self.call(self.clear, request)
+        response = self.call(self.clear, request)
+        # A silent "Fault not found" here would leave one bag on disk and the
+        # whole suite skipping, with only a DEBUG log line to say why.
+        if not response.success:
+            raise SystemExit(f'ClearFault failed: {response.message}')
+        return response
 
 
 def main():
     rclpy.init()
     node = Seeder()
     node.wait_for_services()
+    # Let discovery settle before the first report; the gateway is coming up in
+    # the same window and a confirmation raced against it produces no bag.
+    time.sleep(5.0)
 
     # First occurrence.
     node.publish_for(FILL_SECONDS)
@@ -115,8 +145,17 @@ def main():
     # CONFIRMED-only listing, so acknowledging this one too would leave the specs
     # with two bags on disk and no fault on screen pointing at them.
     print('SEEDED', flush=True)
-    node.destroy_node()
-    rclpy.shutdown()
+
+    # Stay on the graph. The fault is attributed to this node, so letting it
+    # exit would take the owning app entity with it and the fault would stop
+    # being reachable under any /apps/{id}.
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
     return 0
 
 
