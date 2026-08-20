@@ -50,3 +50,16 @@ export function formatDuration(seconds: number): string {
     const secs = Math.round(seconds % 60);
     return `${mins}m ${secs}s`;
 }
+
+/**
+ * Key for per-fault UI caches (expand state, detail cache, in-flight sets).
+ *
+ * A fault code is only unique within one entity - two apps can both report
+ * `LIDAR_RANGE_INVALID` - so any cache keyed by code alone ties their rows
+ * together: expanding one opens both, and a clear resolves to whichever
+ * entity's fault happens to come first. Including the entity makes the key as
+ * specific as the request that filled the cache.
+ */
+export function faultKey(fault: { code: string; entity_type?: string; entity_id?: string }): string {
+    return `${fault.entity_type ?? ''}/${fault.entity_id ?? ''}/${fault.code}`;
+}

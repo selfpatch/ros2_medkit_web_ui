@@ -30,7 +30,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SnapshotCard } from './SnapshotCard';
 import { useAppStore } from '@/lib/store';
 import type { Fault, FaultSeverity, FaultStatus, FaultResponse } from '@/lib/types';
-import { mapFaultEntityTypeToResourceType } from '@/lib/utils';
+import { faultKey, mapFaultEntityTypeToResourceType } from '@/lib/utils';
 
 /**
  * Default polling interval in milliseconds
@@ -129,7 +129,7 @@ function FaultRow({
     isLoadingDetails,
 }: {
     fault: Fault;
-    onClear: (code: string) => void;
+    onClear: (fault: Fault) => void;
     isClearing: boolean;
     isExpanded: boolean;
     onToggle: () => void;
@@ -189,7 +189,7 @@ function FaultRow({
                                 size="sm"
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    onClear(fault.code);
+                                    onClear(fault);
                                 }}
                                 disabled={isClearing}
                                 className="shrink-0"
@@ -298,7 +298,7 @@ function FaultGroup({
     entityId: string;
     entityType: string;
     faults: Fault[];
-    onClear: (code: string) => void;
+    onClear: (fault: Fault) => void;
     clearingCodes: Set<string>;
     expandedFaults: Set<string>;
     onToggleFault: (fault: Fault) => void;
@@ -338,14 +338,14 @@ function FaultGroup({
             <CollapsibleContent className="pl-6 space-y-2 mt-2">
                 {faults.map((fault) => (
                     <FaultRow
-                        key={fault.code}
+                        key={faultKey(fault)}
                         fault={fault}
                         onClear={onClear}
-                        isClearing={clearingCodes.has(fault.code)}
-                        isExpanded={expandedFaults.has(fault.code)}
+                        isClearing={clearingCodes.has(faultKey(fault))}
+                        isExpanded={expandedFaults.has(faultKey(fault))}
                         onToggle={() => onToggleFault(fault)}
                         environmentData={faultDetails.get(faultKey(fault))?.environment_data}
-                        isLoadingDetails={loadingDetails.has(fault.code)}
+                        isLoadingDetails={loadingDetails.has(faultKey(fault))}
                     />
                 ))}
             </CollapsibleContent>
@@ -393,20 +393,6 @@ function DashboardSkeleton() {
  * Uses shared faults state from useAppStore to avoid duplicate API calls
  * when both FaultsDashboard and FaultsCountBadge are visible.
  */
-/**
- * Key for the per-fault caches in this dashboard.
- *
- * The dashboard lists faults from every entity at once, and a fault code is only
- * unique within one entity - two apps can both report `LIDAR_RANGE_INVALID`.
- * Keying the detail cache by code alone made the second entity's row render the
- * first entity's environment data, i.e. download buttons pointing at another
- * entity's recordings. Including the entity makes the key as specific as the
- * request that filled it.
- */
-function faultKey(fault: { code: string; entity_type?: string; entity_id?: string }): string {
-    return `${fault.entity_type ?? ''}/${fault.entity_id ?? ''}/${fault.code}`;
-}
-
 export function FaultsDashboard() {
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [autoRefresh, setAutoRefresh] = useState(true);
@@ -471,66 +457,75 @@ export function FaultsDashboard() {
 
     // Clear fault handler
     const handleClear = useCallback(
-        async (code: string) => {
-            setClearingCodes((prev) => new Set([...prev, code]));
+        // The whole Fault, not its code: two entities can report the same code,
+        // and resolving through `faults.find` cleared the FIRST entity's fault
+        // whichever row was clicked.
+        async (fault: Fault) => {
+            const key = faultKey(fault);
+            setClearingCodes((prev) => new Set([...prev, key]));
 
             try {
-                // Find the fault to get entity info
-                const fault = faults.find((f) => f.code === code);
-                if (fault) {
-                    // Map the fault's entity_type to the correct resource type for the API
-                    const entityGroup = mapFaultEntityTypeToResourceType(fault.entity_type);
-                    // Use store's clearFault which has proper error handling with toasts
-                    await clearFault(entityGroup, fault.entity_id, code);
-                }
+                // Map the fault's entity_type to the correct resource type for the API
+                const entityGroup = mapFaultEntityTypeToResourceType(fault.entity_type);
+                // Use store's clearFault which has proper error handling with toasts
+                await clearFault(entityGroup, fault.entity_id, fault.code);
                 // Reload faults after clearing
                 await fetchFaults();
             } finally {
                 setClearingCodes((prev) => {
                     const next = new Set(prev);
-                    next.delete(code);
+                    next.delete(key);
                     return next;
                 });
             }
         },
-        [faults, fetchFaults, clearFault]
+        [fetchFaults, clearFault]
     );
 
     // Toggle fault expansion and lazy-load environment data
     const handleToggleFault = useCallback(
         async (fault: Fault) => {
-            const faultCode = fault.code;
-            const newExpanded = new Set(expandedFaults);
-
-            if (newExpanded.has(faultCode)) {
-                newExpanded.delete(faultCode);
-            } else {
-                newExpanded.add(faultCode);
-
-                // Always refetch: a fault gains recordings while the page is open,
-                // and a cache filled once on first expand would keep serving the
-                // shorter list. The previous entry stays rendered meanwhile.
-                {
-                    setLoadingDetails((prev) => new Set([...prev, faultCode]));
-                    try {
-                        const entityGroup = mapFaultEntityTypeToResourceType(fault.entity_type);
-                        const details = await getFaultWithEnvironmentData(entityGroup, fault.entity_id, faultCode);
-                        setFaultDetails((prev) => new Map(prev).set(faultKey(fault), details as FaultResponse));
-                    } catch (err) {
-                        console.error('Failed to fetch fault details:', err);
-                    } finally {
-                        setLoadingDetails((prev) => {
-                            const next = new Set(prev);
-                            next.delete(faultCode);
-                            return next;
-                        });
-                    }
+            const key = faultKey(fault);
+            // Functional update, BEFORE the await: the row opens on the click
+            // (the previous entry stays rendered while the refetch runs), and a
+            // second click during the request collapses instead of reading a
+            // stale closed-over set and firing another GET.
+            let opened = false;
+            setExpandedFaults((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) {
+                    next.delete(key);
+                } else {
+                    next.add(key);
+                    opened = true;
                 }
-            }
+                return next;
+            });
+            if (!opened) return;
 
-            setExpandedFaults(newExpanded);
+            // Always refetch: a fault gains recordings while the page is open,
+            // and a cache filled once on first expand would keep serving the
+            // shorter list.
+            setLoadingDetails((prev) => new Set([...prev, key]));
+            try {
+                const entityGroup = mapFaultEntityTypeToResourceType(fault.entity_type);
+                const details = await getFaultWithEnvironmentData(entityGroup, fault.entity_id, fault.code);
+                // A 404 resolves to null rather than throwing; overwriting the
+                // cache with it would blank evidence that was already on screen.
+                if (details) {
+                    setFaultDetails((prev) => new Map(prev).set(key, details as FaultResponse));
+                }
+            } catch (err) {
+                console.error('Failed to fetch fault details:', err);
+            } finally {
+                setLoadingDetails((prev) => {
+                    const next = new Set(prev);
+                    next.delete(key);
+                    return next;
+                });
+            }
         },
-        [getFaultWithEnvironmentData, expandedFaults]
+        [getFaultWithEnvironmentData]
     );
 
     // Filter faults
@@ -835,14 +830,14 @@ export function FaultsDashboard() {
                     <CardContent className="pt-4 space-y-2">
                         {filteredFaults.map((fault) => (
                             <FaultRow
-                                key={fault.code}
+                                key={faultKey(fault)}
                                 fault={fault}
                                 onClear={handleClear}
-                                isClearing={clearingCodes.has(fault.code)}
-                                isExpanded={expandedFaults.has(fault.code)}
+                                isClearing={clearingCodes.has(faultKey(fault))}
+                                isExpanded={expandedFaults.has(faultKey(fault))}
                                 onToggle={() => handleToggleFault(fault)}
                                 environmentData={faultDetails.get(faultKey(fault))?.environment_data}
-                                isLoadingDetails={loadingDetails.has(fault.code)}
+                                isLoadingDetails={loadingDetails.has(faultKey(fault))}
                             />
                         ))}
                     </CardContent>

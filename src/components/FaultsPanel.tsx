@@ -19,7 +19,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { SnapshotCard } from './SnapshotCard';
 import { useAppStore, type AppState } from '@/lib/store';
 import type { Fault, FaultSeverity, FaultStatus, FaultResponse, SovdResourceEntityType } from '@/lib/types';
-import { mapFaultEntityTypeToResourceType } from '@/lib/utils';
+import { faultKey, mapFaultEntityTypeToResourceType } from '@/lib/utils';
 
 interface FaultsPanelProps {
     entityId: string;
@@ -301,48 +301,59 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
     }, [loadFaults]);
 
     const handleToggleFault = useCallback(
-        async (faultCode: string) => {
-            const newExpanded = new Set(expandedFaults);
-
-            if (newExpanded.has(faultCode)) {
-                newExpanded.delete(faultCode);
-            } else {
-                newExpanded.add(faultCode);
-
-                // Always refetch, even when a detail is already cached. A fault can
-                // gain recordings while the page is open - it re-confirms, the black
-                // box is written, the snapshot list grows - and a cache that is
-                // filled once on first expand would keep serving the older list with
-                // no way to refresh short of remounting. The stale entry stays
-                // rendered until the new one lands, so re-expanding never flickers.
-                {
-                    setLoadingDetails((prev) => new Set([...prev, faultCode]));
-                    try {
-                        // Use the fault's own entity info (app-level) for correct bulk_data_uri.
-                        // Components have a synthetic FQN that doesn't match fault reporting sources,
-                        // so fetching via /components/{id}/faults/{code} produces an unusable bulk_data_uri.
-                        const fault = faults.find((f) => f.code === faultCode);
-                        const detailEntityType: SovdResourceEntityType = fault?.entity_type
-                            ? mapFaultEntityTypeToResourceType(fault.entity_type)
-                            : entityType;
-                        const detailEntityId = fault?.entity_id || entityId;
-                        const details = await getFaultWithEnvironmentData(detailEntityType, detailEntityId, faultCode);
-                        setFaultDetails((prev) => new Map(prev).set(faultCode, details as FaultResponse));
-                    } catch (err) {
-                        console.error('Failed to fetch fault details:', err);
-                    } finally {
-                        setLoadingDetails((prev) => {
-                            const next = new Set(prev);
-                            next.delete(faultCode);
-                            return next;
-                        });
-                    }
+        // The whole Fault, not its code: a component's list spans every app it
+        // hosts, so two apps under one component can report the same code and a
+        // code-keyed lookup cannot tell them apart.
+        async (fault: Fault) => {
+            const key = faultKey(fault);
+            // Functional update, BEFORE the await: the row opens on the click
+            // (the previous entry stays rendered while the refetch runs), and a
+            // second click during the request collapses instead of reading a
+            // stale closed-over set and firing another GET.
+            let opened = false;
+            setExpandedFaults((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) {
+                    next.delete(key);
+                } else {
+                    next.add(key);
+                    opened = true;
                 }
-            }
+                return next;
+            });
+            if (!opened) return;
 
-            setExpandedFaults(newExpanded);
+            // Always refetch, even when a detail is already cached. A fault can
+            // gain recordings while the page is open - it re-confirms, the black
+            // box is written, the snapshot list grows - and a cache that is
+            // filled once on first expand would keep serving the older list with
+            // no way to refresh short of remounting.
+            setLoadingDetails((prev) => new Set([...prev, key]));
+            try {
+                // Use the fault's own entity info (app-level) for correct bulk_data_uri.
+                // Components have a synthetic FQN that doesn't match fault reporting sources,
+                // so fetching via /components/{id}/faults/{code} produces an unusable bulk_data_uri.
+                const detailEntityType: SovdResourceEntityType = fault.entity_type
+                    ? mapFaultEntityTypeToResourceType(fault.entity_type)
+                    : entityType;
+                const detailEntityId = fault.entity_id || entityId;
+                const details = await getFaultWithEnvironmentData(detailEntityType, detailEntityId, fault.code);
+                // A 404 resolves to null rather than throwing; overwriting the
+                // cache with it would blank evidence that was already on screen.
+                if (details) {
+                    setFaultDetails((prev) => new Map(prev).set(key, details as FaultResponse));
+                }
+            } catch (err) {
+                console.error('Failed to fetch fault details:', err);
+            } finally {
+                setLoadingDetails((prev) => {
+                    const next = new Set(prev);
+                    next.delete(key);
+                    return next;
+                });
+            }
         },
-        [getFaultWithEnvironmentData, entityType, entityId, expandedFaults, faults]
+        [getFaultWithEnvironmentData, entityType, entityId]
     );
 
     const handleClear = useCallback(
@@ -424,10 +435,10 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
                                 fault={fault}
                                 onClear={handleClear}
                                 isClearing={clearingCodes.has(fault.code)}
-                                isExpanded={expandedFaults.has(fault.code)}
-                                onToggle={() => handleToggleFault(fault.code)}
-                                environmentData={faultDetails.get(fault.code)?.environment_data}
-                                isLoadingDetails={loadingDetails.has(fault.code)}
+                                isExpanded={expandedFaults.has(faultKey(fault))}
+                                onToggle={() => handleToggleFault(fault)}
+                                environmentData={faultDetails.get(faultKey(fault))?.environment_data}
+                                isLoadingDetails={loadingDetails.has(faultKey(fault))}
                             />
                         ))}
                     </div>

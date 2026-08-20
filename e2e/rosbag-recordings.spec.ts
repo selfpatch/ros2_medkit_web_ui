@@ -174,23 +174,25 @@ test('every recording downloads as its own bag', async ({ page }) => {
     }
 });
 
-test('a recording that appears while the fault is open is reachable without a reload', async ({ page }) => {
+test('re-expanding the fault asks the gateway again instead of replaying a cache', async ({ page }) => {
     // The detail used to be fetched once per fault and cached forever, so a
     // recording written after the first expand stayed invisible until the
-    // component remounted - which for a technician watching a machine fault
-    // again is exactly the recording they are waiting for.
+    // component remounted. This drives the collapse/re-expand path and pins
+    // that the second expand goes back to the gateway with a 2xx; seeding a
+    // THIRD recording mid-test would need a second seeder pass, so the
+    // count-grows half lives in the jsdom tests that stub the store.
     await openTheFault(page);
     await expect(downloadButtons(page)).toHaveCount(expectedRecordings.length);
 
-    // Collapse and re-expand: the second expand must go back to the gateway
-    // rather than replay the first response.
-    let refetched = false;
-    page.on('response', (response) => {
-        if (response.url().includes(`/faults/${FAULT_CODE}`)) refetched = true;
-    });
+    // Collapse.
+    await page.getByText(FAULT_CODE).first().click();
 
+    // Re-expand, armed BEFORE the click and only satisfied by a 2xx: an error
+    // response must not count as "refetched".
+    const refetch = page.waitForResponse(
+        (response) => response.url().includes(`/faults/${FAULT_CODE}`) && response.ok()
+    );
     await page.getByText(FAULT_CODE).first().click();
-    await page.getByText(FAULT_CODE).first().click();
+    await refetch;
     await expect(downloadButtons(page)).toHaveCount(expectedRecordings.length);
-    expect(refetched).toBe(true);
 });
