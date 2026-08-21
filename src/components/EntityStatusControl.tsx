@@ -61,6 +61,25 @@ const DISABLED_BY_STATUS: Record<string, Set<LifecycleAction>> = {
 const DESTRUCTIVE_ACTIONS = new Set<LifecycleAction>(['shutdown', 'force-shutdown']);
 
 /**
+ * Message carried by an openapi-fetch error value, which is the parsed JSON body
+ * when there is one and the raw text otherwise. Returns '' when the body held
+ * nothing usable, so callers can fall back to a status-derived message.
+ */
+function errorMessageOf(error: unknown): string {
+    if (typeof error === 'string') return error.trim();
+    if (error && typeof error === 'object' && 'message' in error) {
+        const message = (error as { message?: unknown }).message;
+        if (typeof message === 'string') return message.trim();
+    }
+    return '';
+}
+
+/** Fallback for a failed transition whose response body said nothing. */
+function failureMessage(action: LifecycleAction, httpStatus: number | undefined): string {
+    return httpStatus ? `Failed to ${action}: the gateway answered HTTP ${httpStatus}` : `Failed to ${action}`;
+}
+
+/**
  * Entity lifecycle status control for apps and components (gateway 0.6.0
  * lifecycle API). Shows the current readiness as a badge and exposes the five
  * lifecycle transitions as buttons.
@@ -126,12 +145,19 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                     // so every transition button disables, and warn (not error) -
                     // this is a missing capability, not a failed request.
                     setActuationSupported(false);
-                    const msg = result.error?.message;
+                    const msg = errorMessageOf(result.error);
                     toast.warning(`${action} is not implemented by this gateway${msg ? `: ${msg}` : ''}`);
                     return;
                 }
-                if (result.error) {
-                    const message = result.error.message || `Failed to ${action}`;
+                // Success is the HTTP status, never the truthiness of `error`.
+                // openapi-fetch yields a falsy `error` on a failed request whenever
+                // the body carries nothing it can parse - `undefined` for 204/HEAD
+                // or `Content-Length: 0`, `''` for an empty body with no
+                // Content-Length - which a proxy or an aborting gateway produces on
+                // a 5xx. Branching on `error` reports those as a completed
+                // transition and marks the gateway as able to actuate.
+                if (!result.response?.ok) {
+                    const message = errorMessageOf(result.error) || failureMessage(action, httpStatus);
                     setError(message);
                     toast.error(`Failed to ${action} ${entityId}: ${message}`);
                     return;

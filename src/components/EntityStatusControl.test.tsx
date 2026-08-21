@@ -47,13 +47,30 @@ import { EntityStatusControl } from './EntityStatusControl';
 
 const fakeClient = { __fake: true } as never;
 
-/** Build an openapi-fetch style result. */
+/**
+ * Build an openapi-fetch style result. `ok` is derived from the status the same
+ * way `Response.ok` is, because that is the field the control decides success
+ * on - a double that omits it cannot tell a 204 from a 502.
+ */
 function ok(status: number, data: unknown = undefined) {
-    return { data, error: undefined, response: { status } as Response };
+    return { data, error: undefined, response: httpResponse(status) };
 }
 
 function errResult(status: number, message: string) {
-    return { data: undefined, error: { message }, response: { status } as Response };
+    return { data: undefined, error: { message }, response: httpResponse(status) };
+}
+
+/**
+ * A non-2xx whose body openapi-fetch could not turn into an error value:
+ * `{ error: undefined }` for 204/HEAD/`Content-Length: 0`, `''` for an empty
+ * body with no `Content-Length` (openapi-fetch 0.17.0, src/index.js:245/268).
+ */
+function emptyBodyFailure(status: number, error: unknown = undefined) {
+    return { data: undefined, error, response: httpResponse(status) };
+}
+
+function httpResponse(status: number): Response {
+    return { status, ok: status >= 200 && status < 300 } as Response;
 }
 
 /**
@@ -246,6 +263,42 @@ describe('EntityStatusControl', () => {
 
         await waitFor(() => expect(toast.success).toHaveBeenCalled());
         expect(useAppStore.getState().actuationSupported).toBe(true);
+    });
+
+    it.each([
+        ['undefined error (Content-Length: 0)', undefined],
+        ['empty-string error (empty body, no Content-Length)', ''],
+    ])('treats a 502 with an %s as a failure, not a success', async (_label, errorValue) => {
+        seedStatus('apps:planner', 'notReady');
+        useAppStore.setState({ actuationSupported: null });
+        mockSetStatus.mockResolvedValue(emptyBodyFailure(502, errorValue));
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        await userEvent.click(screen.getByRole('button', { name: /^start/i }));
+
+        await waitFor(() => expect(toast.error).toHaveBeenCalled());
+        expect(toast.success).not.toHaveBeenCalled();
+        // A failed transition proves nothing about actuation support.
+        expect(useAppStore.getState().actuationSupported).toBeNull();
+        // The gateway said nothing usable, so the status has to carry the message.
+        expect(await screen.findByRole('alert')).toHaveTextContent(/502/);
+    });
+
+    it('does not refetch the status after a failed transition', async () => {
+        const refresh = vi.fn();
+        useAppStore.setState({
+            statusByEntity: { 'apps:planner': 'notReady' },
+            fetchEntityStatus: refresh,
+            client: fakeClient,
+        });
+        mockSetStatus.mockResolvedValue(emptyBodyFailure(503));
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+        await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+        await userEvent.click(screen.getByRole('button', { name: /^start/i }));
+
+        await waitFor(() => expect(toast.error).toHaveBeenCalled());
+        expect(refresh).toHaveBeenCalledTimes(1);
     });
 
     // -----------------------------------------------------------------------
