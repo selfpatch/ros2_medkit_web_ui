@@ -38,6 +38,20 @@ describe('fetchEntityStatus', () => {
         expect(useAppStore.getState().statusByEntity[entityStatusKey('apps', 'planner')]).toBe('unavailable');
     });
 
+    it('maps a 404 response to "unavailable" like a 501', async () => {
+        // A gateway built without the lifecycle routes answers 404, which tells
+        // the UI the same thing a 501 does: there is nothing to actuate here.
+        getStatusMock.mockResolvedValue({ data: undefined, response: { status: 404 } } as never);
+        await useAppStore.getState().fetchEntityStatus('apps', 'planner');
+        expect(useAppStore.getState().statusByEntity[entityStatusKey('apps', 'planner')]).toBe('unavailable');
+    });
+
+    it('maps any other failed read to "unknown"', async () => {
+        getStatusMock.mockResolvedValue({ data: undefined, response: { status: 500 } } as never);
+        await useAppStore.getState().fetchEntityStatus('apps', 'planner');
+        expect(useAppStore.getState().statusByEntity[entityStatusKey('apps', 'planner')]).toBe('unknown');
+    });
+
     it('de-dupes concurrent in-flight calls for the same key', async () => {
         getStatusMock.mockResolvedValue({ data: { status: 'notReady' }, response: { status: 200 } } as never);
         await Promise.all([

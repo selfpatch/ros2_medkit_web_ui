@@ -132,16 +132,22 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
     // A 501 from any transition means the gateway has no actuation provider:
     // disable every action (Start included), gateway-wide.
     const actuationUnsupported = actuationSupported === false;
+    // No readiness to gate on: either the first read has not landed, or it
+    // failed, or a transition dropped it. Every transition is conditional on the
+    // current state, so none can be offered here. The refresh loop settles it.
+    const readinessUnknown = status === undefined || status === 'unknown';
 
     const isDisabled = (action: LifecycleAction): boolean =>
         !client ||
         notAvailable ||
         actuationUnsupported ||
+        readinessUnknown ||
         pendingAction !== null ||
         (DISABLED_BY_STATUS[status ?? '']?.has(action) ?? false);
 
     const tooltipFor = (action: LifecycleAction): string => {
         if (actuationUnsupported) return 'Not implemented by this gateway';
+        if (readinessUnknown) return 'Waiting for the current status';
         if (status === 'ready' && action === 'start') return 'Already running';
         if (status === 'notReady' && DISABLED_BY_STATUS.notReady!.has(action)) return 'Entity is not running';
         return '';

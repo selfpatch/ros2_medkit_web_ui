@@ -370,6 +370,26 @@ describe('EntityStatusControl', () => {
     });
 
     // -----------------------------------------------------------------------
+    // Gating on a readiness the UI does not have
+    // -----------------------------------------------------------------------
+
+    it.each([
+        ['the first read has not landed yet', undefined],
+        ['the read failed', 'unknown'],
+    ])('offers no transition while %s', async (_label, cached) => {
+        useAppStore.setState({
+            statusByEntity: cached ? { 'apps:planner': cached as never } : {},
+            watchEntityStatus: noopWatch,
+            client: fakeClient,
+        });
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        for (const name of [/^start$/i, /^restart$/i, /force restart/i, /^shutdown$/i, /force shutdown/i]) {
+            expect(await screen.findByRole('button', { name })).toBeDisabled();
+        }
+    });
+
+    // -----------------------------------------------------------------------
     // Task C: disable + "not implemented" note when actuationSupported === false
     // -----------------------------------------------------------------------
 

@@ -1997,7 +1997,12 @@ export const useAppStore = create<AppState>()(
                     try {
                         const result = await getStatus(client, entityType, entityId);
                         let value: EntityStatusValue = 'unknown';
-                        if (result.response?.status === 501) {
+                        // 501 is a gateway with no lifecycle provider; 404 is a
+                        // gateway built without the routes at all. Both mean the
+                        // same thing here, and only these two are a capability
+                        // answer - every other failure leaves the readiness
+                        // genuinely unknown rather than known to be absent.
+                        if (result.response?.status === 501 || result.response?.status === 404) {
                             value = 'unavailable';
                         } else if (result.data?.status === 'ready' || result.data?.status === 'notReady') {
                             value = result.data.status;
