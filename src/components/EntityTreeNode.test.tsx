@@ -62,6 +62,53 @@ describe('EntityTreeNode lifecycle lamp', () => {
         expect(screen.getByLabelText(/status: notReady/i)).toBeInTheDocument();
     });
 
+    it('exposes the lamp to the accessibility tree with a computed name', () => {
+        // getByLabelText reads the attribute; getByRole computes the accessible
+        // name the way a screen reader does, so it fails on an element whose
+        // implicit role forbids aria-label.
+        const fetchEntityStatus = vi.fn();
+        useAppStore.setState({ statusByEntity: { 'apps:talker': 'ready' }, fetchEntityStatus } as never);
+        render(
+            <EntityTreeNode
+                node={{ id: 'talker', name: 'talker', type: 'app', path: '/server/h/talker' } as never}
+                depth={0}
+            />
+        );
+        expect(screen.getByRole('img', { name: /status: ready/i })).toBeInTheDocument();
+    });
+
+    it('separates ready from notReady by more than colour', () => {
+        const fetchEntityStatus = vi.fn();
+        useAppStore.setState({ statusByEntity: { 'apps:talker': 'ready' }, fetchEntityStatus } as never);
+        render(
+            <EntityTreeNode
+                node={{ id: 'talker', name: 'talker', type: 'app', path: '/a/talker' } as never}
+                depth={0}
+            />
+        );
+        const ready = screen.getByRole('img', { name: /status: ready/i }).className;
+        cleanup();
+
+        useAppStore.setState({ statusByEntity: { 'apps:talker': 'notReady' }, fetchEntityStatus } as never);
+        render(
+            <EntityTreeNode
+                node={{ id: 'talker', name: 'talker', type: 'app', path: '/a/talker' } as never}
+                depth={0}
+            />
+        );
+        const notReady = screen.getByRole('img', { name: /status: notReady/i }).className;
+
+        // Drop every class carrying a colour token: what is left is the shape,
+        // and it has to differ on its own for a colour-blind reader.
+        const shapeOf = (cls: string) =>
+            cls
+                .split(/\s+/)
+                .filter((c) => !/emerald|amber|muted-foreground|transparent/.test(c))
+                .sort()
+                .join(' ');
+        expect(shapeOf(ready)).not.toBe(shapeOf(notReady));
+    });
+
     it('area node renders no lamp and triggers no status fetch', () => {
         const fetchEntityStatus = vi.fn();
         useAppStore.setState({ fetchEntityStatus } as never);

@@ -115,17 +115,19 @@ function getEntityColor(type: string, isSelected?: boolean): string {
 }
 
 /**
- * Tailwind colour for the readiness lamp. Green = ready, amber = notReady,
- * grey for unavailable / unknown / not-yet-fetched.
+ * Tailwind classes for the readiness lamp. Colour and shape both carry the
+ * state, so the lamp still reads for someone who cannot separate green from
+ * amber: ready is a filled disc, notReady a hollow ring, and anything the UI
+ * has not established a square.
  */
-function getLampColor(status: string | undefined): string {
+function getLampClass(status: string | undefined): string {
     switch (status) {
         case 'ready':
-            return 'bg-emerald-500';
+            return 'rounded-full bg-emerald-500';
         case 'notReady':
-            return 'bg-amber-500';
+            return 'rounded-full border-2 border-amber-500 bg-transparent';
         default:
-            return 'bg-muted-foreground/40';
+            return 'rounded-sm bg-muted-foreground/40';
     }
 }
 
@@ -255,9 +257,13 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
                 <Icon className={cn('w-4 h-4 shrink-0', iconColorClass)} />
 
                 {isLifecycleEntity && (
+                    // role="img" is what carries the label: a span with no role
+                    // and no content maps to `generic`, on which aria-label is
+                    // prohibited and dropped, leaving colour as the only channel.
                     <span
+                        role="img"
                         aria-label={`status: ${status ?? 'unknown'}`}
-                        className={cn('w-2 h-2 rounded-full shrink-0', getLampColor(status))}
+                        className={cn('w-2 h-2 shrink-0', getLampClass(status))}
                     />
                 )}
 
