@@ -911,8 +911,18 @@ export const useAppStore = create<AppState>()(
 
             // Connect to ros2_medkit gateway
             connect: async (url: string) => {
-                // Clear any stale actuation flag so a reconnect re-probes support.
-                set({ isConnecting: true, connectionError: null, actuationSupported: null });
+                // Drop everything the previous session learned about lifecycle:
+                // entity ids are not unique across gateways, so a surviving
+                // `statusByEntity` entry would render one robot's readiness for
+                // another, and a surviving in-flight promise would be handed to
+                // the new session instead of a request against the new gateway.
+                __resetStatusRequestCache();
+                set({
+                    isConnecting: true,
+                    connectionError: null,
+                    actuationSupported: null,
+                    statusByEntity: {},
+                });
 
                 try {
                     const client = createMedkitClient({ baseUrl: url, fetch: fetch.bind(globalThis) });
@@ -970,6 +980,10 @@ export const useAppStore = create<AppState>()(
                 // Stop execution polling
                 get().stopExecutionPolling();
 
+                // See connect: lifecycle readiness is scoped to one gateway, and
+                // an in-flight request must not be handed to the next session.
+                __resetStatusRequestCache();
+
                 // Unsubscribe from fault stream
                 get().unsubscribeFaultStream();
 
@@ -986,6 +1000,7 @@ export const useAppStore = create<AppState>()(
                     selectedEntity: null,
                     activeExecutions: new Map(),
                     actuationSupported: null,
+                    statusByEntity: {},
                 });
             },
 
@@ -1944,11 +1959,19 @@ export const useAppStore = create<AppState>()(
                         } else if (result.data?.status === 'ready' || result.data?.status === 'notReady') {
                             value = result.data.status;
                         }
-                        set((s) => ({ statusByEntity: { ...s.statusByEntity, [key]: value } }));
+                        writeStatus(value);
                     } catch {
-                        set((s) => ({ statusByEntity: { ...s.statusByEntity, [key]: 'unknown' } }));
+                        writeStatus('unknown');
                     } finally {
                         inFlightStatusRequests.delete(key);
+                    }
+
+                    // A response that outlived its session belongs to a gateway
+                    // the UI is no longer talking to, and entity ids collide
+                    // across gateways, so it must not land in the new cache.
+                    function writeStatus(value: EntityStatusValue): void {
+                        if (get().client !== client) return;
+                        set((s) => ({ statusByEntity: { ...s.statusByEntity, [key]: value } }));
                     }
                 })();
 

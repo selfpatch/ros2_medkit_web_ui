@@ -8,7 +8,7 @@ vi.mock('./api-dispatch', () => ({
     setStatus: vi.fn(),
 }));
 
-import { useAppStore, entityStatusKey } from './store';
+import { useAppStore, entityStatusKey, __resetStatusRequestCache } from './store';
 import * as api from './api-dispatch';
 
 const getStatusMock = vi.mocked(api.getStatus);
@@ -45,6 +45,61 @@ describe('fetchEntityStatus', () => {
             useAppStore.getState().fetchEntityStatus('apps', 'planner'),
         ]);
         expect(getStatusMock).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('lifecycle status cache across sessions', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        __resetStatusRequestCache();
+        useAppStore.setState({ statusByEntity: {}, client: {} as never });
+    });
+
+    it('disconnect clears the cached statuses', () => {
+        useAppStore.setState({ statusByEntity: { 'components:host1': 'ready' } });
+        useAppStore.getState().disconnect();
+        expect(useAppStore.getState().statusByEntity).toEqual({});
+    });
+
+    it('connect clears the cached statuses before it reaches the network', async () => {
+        useAppStore.setState({ statusByEntity: { 'components:host1': 'ready' } });
+        // The reset is in connect's first synchronous `set`, so it is observable
+        // without waiting for (or reaching) the health check.
+        const pending = useAppStore.getState().connect('http://127.0.0.1:1/');
+        expect(useAppStore.getState().statusByEntity).toEqual({});
+        await pending;
+    });
+
+    it('a fetch left in flight by the previous session does not satisfy the next one', async () => {
+        // Entity ids collide across gateways ('components:host1' is not unique
+        // per robot), so a promise held over a reconnect would answer the new
+        // session with the old gateway's readiness and never hit the network.
+        getStatusMock.mockReturnValue(new Promise(() => {}) as never);
+        void useAppStore.getState().fetchEntityStatus('components', 'host1');
+        expect(getStatusMock).toHaveBeenCalledTimes(1);
+
+        useAppStore.getState().disconnect();
+        useAppStore.setState({ client: {} as never });
+        getStatusMock.mockResolvedValue({ data: { status: 'notReady' }, response: { status: 200 } } as never);
+
+        await useAppStore.getState().fetchEntityStatus('components', 'host1');
+
+        expect(getStatusMock).toHaveBeenCalledTimes(2);
+        expect(useAppStore.getState().statusByEntity[entityStatusKey('components', 'host1')]).toBe('notReady');
+    });
+
+    it('a late response from the previous session is not written into the new one', async () => {
+        let settle: (value: unknown) => void = () => {};
+        getStatusMock.mockReturnValue(new Promise((resolve) => (settle = resolve)) as never);
+        const stale = useAppStore.getState().fetchEntityStatus('components', 'host1');
+
+        useAppStore.getState().disconnect();
+        useAppStore.setState({ client: {} as never, statusByEntity: { 'components:host1': 'notReady' } });
+
+        settle({ data: { status: 'ready' }, response: { status: 200 } });
+        await stale;
+
+        expect(useAppStore.getState().statusByEntity[entityStatusKey('components', 'host1')]).toBe('notReady');
     });
 });
 
