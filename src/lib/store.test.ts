@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock api-dispatch so the store's getStatus call hits our spy. A namespace
 // spy (vi.spyOn) does not patch the store's named-import binding, so mock the
@@ -100,6 +100,119 @@ describe('lifecycle status cache across sessions', () => {
         await stale;
 
         expect(useAppStore.getState().statusByEntity[entityStatusKey('components', 'host1')]).toBe('notReady');
+    });
+});
+
+describe('readiness refresh loop', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        __resetStatusRequestCache();
+        useAppStore.getState().stopStatusPolling();
+        useAppStore.setState({ statusByEntity: {}, client: {} as never });
+        getStatusMock.mockResolvedValue({ data: { status: 'ready' }, response: { status: 200 } } as never);
+    });
+
+    afterEach(() => {
+        useAppStore.getState().stopStatusPolling();
+        vi.useRealTimers();
+    });
+
+    it('re-reads a watched entity on the interval', async () => {
+        vi.useFakeTimers();
+        useAppStore.getState().watchEntityStatus('apps', 'talker');
+        expect(getStatusMock).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(getStatusMock).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(getStatusMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('stops re-reading an entity once nothing watches it', async () => {
+        vi.useFakeTimers();
+        const unwatch = useAppStore.getState().watchEntityStatus('apps', 'talker');
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(getStatusMock).toHaveBeenCalledTimes(2);
+
+        unwatch();
+        await vi.advanceTimersByTimeAsync(15000);
+
+        expect(getStatusMock).toHaveBeenCalledTimes(2);
+        expect(useAppStore.getState().statusPollingIntervalId).toBeNull();
+    });
+
+    it('keeps watching while a second watcher is still mounted', async () => {
+        vi.useFakeTimers();
+        // The control and the tree lamp watch the same entity at once.
+        const unwatchA = useAppStore.getState().watchEntityStatus('apps', 'talker');
+        useAppStore.getState().watchEntityStatus('apps', 'talker');
+        getStatusMock.mockClear();
+
+        unwatchA();
+        await vi.advanceTimersByTimeAsync(5000);
+
+        expect(getStatusMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('disconnect stops the loop', async () => {
+        vi.useFakeTimers();
+        useAppStore.getState().watchEntityStatus('apps', 'talker');
+        getStatusMock.mockClear();
+
+        useAppStore.getState().disconnect();
+        await vi.advanceTimersByTimeAsync(15000);
+
+        expect(getStatusMock).not.toHaveBeenCalled();
+        expect(useAppStore.getState().statusPollingIntervalId).toBeNull();
+    });
+
+    it('splits the cache key on its first colon so ids keep their own separators', async () => {
+        vi.useFakeTimers();
+        useAppStore.getState().watchEntityStatus('components', 'host1');
+        await vi.advanceTimersByTimeAsync(5000);
+
+        expect(getStatusMock).toHaveBeenLastCalledWith(expect.anything(), 'components', 'host1');
+    });
+});
+
+describe('invalidateEntityStatus', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        __resetStatusRequestCache();
+        useAppStore.setState({ statusByEntity: {}, client: {} as never });
+    });
+
+    it('drops the cached value', () => {
+        useAppStore.setState({ statusByEntity: { 'apps:talker': 'ready' } });
+        useAppStore.getState().invalidateEntityStatus('apps', 'talker');
+        expect(useAppStore.getState().statusByEntity[entityStatusKey('apps', 'talker')]).toBe('unknown');
+    });
+
+    it('a read issued before the invalidation cannot restore the old value', async () => {
+        // This is the read the control's own mount effect (or the refresh loop)
+        // had in flight when the transition was dispatched.
+        let settle: (value: unknown) => void = () => {};
+        getStatusMock.mockReturnValue(new Promise((resolve) => (settle = resolve)) as never);
+        const inFlight = useAppStore.getState().fetchEntityStatus('apps', 'talker');
+
+        useAppStore.getState().invalidateEntityStatus('apps', 'talker');
+        settle({ data: { status: 'ready' }, response: { status: 200 } });
+        await inFlight;
+
+        expect(useAppStore.getState().statusByEntity[entityStatusKey('apps', 'talker')]).toBe('unknown');
+    });
+
+    it('the next read after an invalidation is a fresh request', async () => {
+        getStatusMock.mockReturnValue(new Promise(() => {}) as never);
+        void useAppStore.getState().fetchEntityStatus('apps', 'talker');
+        expect(getStatusMock).toHaveBeenCalledTimes(1);
+
+        useAppStore.getState().invalidateEntityStatus('apps', 'talker');
+        getStatusMock.mockResolvedValue({ data: { status: 'notReady' }, response: { status: 200 } } as never);
+        await useAppStore.getState().fetchEntityStatus('apps', 'talker');
+
+        expect(getStatusMock).toHaveBeenCalledTimes(2);
+        expect(useAppStore.getState().statusByEntity[entityStatusKey('apps', 'talker')]).toBe('notReady');
     });
 });
 

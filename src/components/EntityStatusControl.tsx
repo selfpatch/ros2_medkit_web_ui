@@ -85,9 +85,10 @@ function failureMessage(action: LifecycleAction, httpStatus: number | undefined)
  * lifecycle transitions as buttons.
  *
  * Status is read from the shared `statusByEntity` store slice (the single
- * source of truth, also feeding the tree readiness lamp). Actions are gated by
- * that status (disabled + tooltip), and every transition except Start asks for
- * confirmation before dispatch.
+ * source of truth, also feeding the tree readiness lamp) and kept current by
+ * the slice's refresh loop for as long as this control is mounted. Actions are
+ * gated by that status (disabled + tooltip), and every transition except Start
+ * asks for confirmation before dispatch.
  *
  * The gateway returns 501 until a lifecycle provider is configured. That case
  * surfaces as the cached value `'unavailable'` -> a disabled "not available"
@@ -97,7 +98,8 @@ function failureMessage(action: LifecycleAction, httpStatus: number | undefined)
 export function EntityStatusControl({ entityType, entityId }: EntityStatusControlProps) {
     const client = useAppStore((s) => s.client);
     const status = useAppStore((s) => s.statusByEntity[entityStatusKey(entityType, entityId)]);
-    const fetchEntityStatus = useAppStore((s) => s.fetchEntityStatus);
+    const watchEntityStatus = useAppStore((s) => s.watchEntityStatus);
+    const invalidateEntityStatus = useAppStore((s) => s.invalidateEntityStatus);
     const setActuationSupported = useAppStore((s) => s.setActuationSupported);
     const actuationSupported = useAppStore((s) => s.actuationSupported);
 
@@ -113,7 +115,8 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
     const shownKeyRef = useRef(shownKey);
     shownKeyRef.current = shownKey;
 
-    // Fetch the live status on mount; the slice de-dupes against the tree lamp.
+    // Watch the live status while this entity is shown; the slice reads it once
+    // now and keeps it in the refresh loop until the cleanup runs.
     // The control is rendered at a fixed position in EntityDetailPanel and
     // AppsPanel, so a new selection changes entityId without remounting: the
     // per-entity UI state has to be cleared here or it belongs to the previous
@@ -122,8 +125,8 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
         setError(null);
         setPendingAction(null);
         setConfirmAction(null);
-        fetchEntityStatus(entityType, entityId);
-    }, [entityType, entityId, fetchEntityStatus]);
+        return watchEntityStatus(entityType, entityId);
+    }, [entityType, entityId, watchEntityStatus]);
 
     const notAvailable = status === 'unavailable';
     // A 501 from any transition means the gateway has no actuation provider:
@@ -181,7 +184,11 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                 // Any 2xx proves the gateway can actuate; clear a stale "unsupported".
                 setActuationSupported(true);
                 toast.success(`${action} requested for ${entityId}`);
-                await fetchEntityStatus(entityType, entityId);
+                // 202 means accepted, not applied: a node takes longer to come
+                // back than this round trip, so reading now returns the readiness
+                // from before the transition and the gating would act on it. Drop
+                // the value instead and let the refresh loop establish the new one.
+                invalidateEntityStatus(entityType, entityId);
             } catch (err) {
                 const message = err instanceof Error ? err.message : 'Unknown error';
                 if (stillShown()) setError(message);
@@ -192,7 +199,7 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                 if (stillShown()) setPendingAction(null);
             }
         },
-        [client, entityType, entityId, fetchEntityStatus, setActuationSupported]
+        [client, entityType, entityId, invalidateEntityStatus, setActuationSupported]
     );
 
     const handleClick = useCallback(

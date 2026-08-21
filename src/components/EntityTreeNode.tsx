@@ -164,16 +164,16 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
     const status = useAppStore((s) =>
         isLifecycleEntity ? s.statusByEntity[entityStatusKey(lifecycleType, node.id)] : undefined
     );
-    const fetchEntityStatus = useAppStore((s) => s.fetchEntityStatus);
+    const watchEntityStatus = useAppStore((s) => s.watchEntityStatus);
 
-    // Lazily fetch readiness on mount. This node only mounts when its parent is
-    // expanded, so this is the on-expand fetch. The slice de-dupes with the
-    // control's own fetch.
+    // This node only mounts while its parent is expanded, so watching from here
+    // is what scopes the refresh loop to the branches that are actually open -
+    // a collapsed branch stops costing requests, and an open one stops showing
+    // the readiness it had when it was opened.
     useEffect(() => {
-        if (isLifecycleEntity) {
-            fetchEntityStatus(lifecycleType, node.id);
-        }
-    }, [isLifecycleEntity, lifecycleType, node.id, fetchEntityStatus]);
+        if (!isLifecycleEntity) return;
+        return watchEntityStatus(lifecycleType, node.id);
+    }, [isLifecycleEntity, lifecycleType, node.id, watchEntityStatus]);
 
     const isExpanded = expandedPaths.includes(node.path);
     const isLoading = loadingPaths.includes(node.path);

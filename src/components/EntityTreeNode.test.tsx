@@ -36,29 +36,29 @@ describe('EntityTreeNode lifecycle lamp', () => {
         cleanup();
     });
 
-    it('app node fetches status on mount and renders a lamp from the cache', () => {
-        const fetchEntityStatus = vi.fn();
-        useAppStore.setState({ statusByEntity: { 'apps:talker': 'ready' }, fetchEntityStatus } as never);
+    it('app node watches status on mount and renders a lamp from the cache', () => {
+        const watchEntityStatus = vi.fn(() => () => {});
+        useAppStore.setState({ statusByEntity: { 'apps:talker': 'ready' }, watchEntityStatus } as never);
         render(
             <EntityTreeNode
                 node={{ id: 'talker', name: 'talker', type: 'app', path: '/server/h/talker' } as never}
                 depth={0}
             />
         );
-        expect(fetchEntityStatus).toHaveBeenCalledWith('apps', 'talker');
+        expect(watchEntityStatus).toHaveBeenCalledWith('apps', 'talker');
         expect(screen.getByLabelText(/status: ready/i)).toBeInTheDocument();
     });
 
-    it('component node fetches status on mount mapped to the plural resource type', () => {
-        const fetchEntityStatus = vi.fn();
-        useAppStore.setState({ statusByEntity: { 'components:host1': 'notReady' }, fetchEntityStatus } as never);
+    it('component node watches status on mount mapped to the plural resource type', () => {
+        const watchEntityStatus = vi.fn(() => () => {});
+        useAppStore.setState({ statusByEntity: { 'components:host1': 'notReady' }, watchEntityStatus } as never);
         render(
             <EntityTreeNode
                 node={{ id: 'host1', name: 'host1', type: 'component', path: '/server/host1' } as never}
                 depth={0}
             />
         );
-        expect(fetchEntityStatus).toHaveBeenCalledWith('components', 'host1');
+        expect(watchEntityStatus).toHaveBeenCalledWith('components', 'host1');
         expect(screen.getByLabelText(/status: notReady/i)).toBeInTheDocument();
     });
 
@@ -66,8 +66,8 @@ describe('EntityTreeNode lifecycle lamp', () => {
         // getByLabelText reads the attribute; getByRole computes the accessible
         // name the way a screen reader does, so it fails on an element whose
         // implicit role forbids aria-label.
-        const fetchEntityStatus = vi.fn();
-        useAppStore.setState({ statusByEntity: { 'apps:talker': 'ready' }, fetchEntityStatus } as never);
+        const watchEntityStatus = vi.fn(() => () => {});
+        useAppStore.setState({ statusByEntity: { 'apps:talker': 'ready' }, watchEntityStatus } as never);
         render(
             <EntityTreeNode
                 node={{ id: 'talker', name: 'talker', type: 'app', path: '/server/h/talker' } as never}
@@ -78,8 +78,8 @@ describe('EntityTreeNode lifecycle lamp', () => {
     });
 
     it('separates ready from notReady by more than colour', () => {
-        const fetchEntityStatus = vi.fn();
-        useAppStore.setState({ statusByEntity: { 'apps:talker': 'ready' }, fetchEntityStatus } as never);
+        const watchEntityStatus = vi.fn(() => () => {});
+        useAppStore.setState({ statusByEntity: { 'apps:talker': 'ready' }, watchEntityStatus } as never);
         render(
             <EntityTreeNode
                 node={{ id: 'talker', name: 'talker', type: 'app', path: '/a/talker' } as never}
@@ -89,7 +89,7 @@ describe('EntityTreeNode lifecycle lamp', () => {
         const ready = screen.getByRole('img', { name: /status: ready/i }).className;
         cleanup();
 
-        useAppStore.setState({ statusByEntity: { 'apps:talker': 'notReady' }, fetchEntityStatus } as never);
+        useAppStore.setState({ statusByEntity: { 'apps:talker': 'notReady' }, watchEntityStatus } as never);
         render(
             <EntityTreeNode
                 node={{ id: 'talker', name: 'talker', type: 'app', path: '/a/talker' } as never}
@@ -109,11 +109,11 @@ describe('EntityTreeNode lifecycle lamp', () => {
         expect(shapeOf(ready)).not.toBe(shapeOf(notReady));
     });
 
-    it('area node renders no lamp and triggers no status fetch', () => {
-        const fetchEntityStatus = vi.fn();
-        useAppStore.setState({ fetchEntityStatus } as never);
+    it('area node renders no lamp and watches nothing', () => {
+        const watchEntityStatus = vi.fn(() => () => {});
+        useAppStore.setState({ watchEntityStatus } as never);
         render(<EntityTreeNode node={{ id: 'nav', name: 'nav', type: 'area', path: '/nav' } as never} depth={0} />);
-        expect(fetchEntityStatus).not.toHaveBeenCalled();
+        expect(watchEntityStatus).not.toHaveBeenCalled();
         expect(screen.queryByLabelText(/status:/i)).not.toBeInTheDocument();
     });
 });

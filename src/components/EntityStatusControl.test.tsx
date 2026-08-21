@@ -22,8 +22,8 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 //
 // Status is read from the real store slice (statusByEntity), seeded per-test.
 // Only setStatus (the transition dispatch) is mocked; the rest of api-dispatch
-// stays real so the store module loads. fetchEntityStatus is seeded as a no-op
-// vi.fn() in every test so the on-mount fetch does not overwrite the seeded
+// stays real so the store module loads. watchEntityStatus is seeded as a no-op
+// vi.fn() in every test so the on-mount read does not overwrite the seeded
 // status with 'unknown' against the fake client.
 // ---------------------------------------------------------------------------
 
@@ -80,10 +80,13 @@ function httpResponse(status: number): Response {
 function seedStatus(key: string, value: string) {
     useAppStore.setState({
         statusByEntity: { [key]: value as never },
-        fetchEntityStatus: vi.fn(),
+        watchEntityStatus: noopWatch,
         client: fakeClient,
     });
 }
+
+/** watchEntityStatus stand-in: registers nothing, unsubscribes to nothing. */
+const noopWatch = vi.fn(() => () => {});
 
 const renderControl = (ui: React.ReactElement) => render(<TooltipProvider>{ui}</TooltipProvider>);
 
@@ -93,7 +96,7 @@ describe('EntityStatusControl', () => {
         mockSetStatus.mockResolvedValue(ok(204));
         useAppStore.setState({
             statusByEntity: {},
-            fetchEntityStatus: vi.fn(),
+            watchEntityStatus: noopWatch,
             client: fakeClient,
             actuationSupported: null,
         });
@@ -140,24 +143,39 @@ describe('EntityStatusControl', () => {
         expect(call[3]).toBe('restart');
     });
 
-    it('refreshes the status after a successful confirmed action', async () => {
+    it('drops the cached readiness after a successful confirmed action', async () => {
         const user = userEvent.setup();
-        const refresh = vi.fn();
+        const invalidate = vi.fn();
         useAppStore.setState({
             statusByEntity: { 'apps:motor': 'ready' },
-            fetchEntityStatus: refresh,
+            watchEntityStatus: noopWatch,
+            invalidateEntityStatus: invalidate,
             client: fakeClient,
         });
         renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
 
-        // Mount effect calls fetchEntityStatus once.
-        await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
-
         await user.click(screen.getByRole('button', { name: /^shutdown$/i }));
         await user.click(await screen.findByRole('button', { name: /confirm/i }));
 
-        // The post-dispatch refresh calls fetchEntityStatus again.
-        await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+        // 202 means accepted: reading now would return the pre-transition value,
+        // so the value is dropped and the refresh loop establishes the new one.
+        await waitFor(() => expect(invalidate).toHaveBeenCalledWith('apps', 'motor'));
+    });
+
+    it('watches the entity for as long as it is shown, and stops on unmount', () => {
+        const unwatch = vi.fn();
+        const watch = vi.fn(() => unwatch);
+        useAppStore.setState({
+            statusByEntity: { 'apps:motor': 'ready' },
+            watchEntityStatus: watch,
+            client: fakeClient,
+        });
+        const { unmount } = renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
+        expect(watch).toHaveBeenCalledWith('apps', 'motor');
+        expect(unwatch).not.toHaveBeenCalled();
+
+        unmount();
+        expect(unwatch).toHaveBeenCalledTimes(1);
     });
 
     it('shows a disabled "not available" state when status is unavailable (501)', async () => {
@@ -295,21 +313,22 @@ describe('EntityStatusControl', () => {
         expect(await screen.findByRole('alert')).toHaveTextContent(/502/);
     });
 
-    it('does not refetch the status after a failed transition', async () => {
-        const refresh = vi.fn();
+    it('keeps the known readiness after a failed transition', async () => {
+        const invalidate = vi.fn();
         useAppStore.setState({
             statusByEntity: { 'apps:planner': 'notReady' },
-            fetchEntityStatus: refresh,
+            watchEntityStatus: noopWatch,
+            invalidateEntityStatus: invalidate,
             client: fakeClient,
         });
         mockSetStatus.mockResolvedValue(emptyBodyFailure(503));
         renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
-        await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
 
         await userEvent.click(screen.getByRole('button', { name: /^start/i }));
 
         await waitFor(() => expect(toast.error).toHaveBeenCalled());
-        expect(refresh).toHaveBeenCalledTimes(1);
+        // Nothing moved, so the readiness the UI already has is still correct.
+        expect(invalidate).not.toHaveBeenCalled();
     });
 
     // -----------------------------------------------------------------------
@@ -323,7 +342,7 @@ describe('EntityStatusControl', () => {
         mockSetStatus.mockReturnValue(new Promise((resolve) => (finish = resolve)));
         useAppStore.setState({
             statusByEntity: { 'apps:alpha': 'ready', 'apps:beta': 'ready' },
-            fetchEntityStatus: vi.fn(),
+            watchEntityStatus: noopWatch,
             client: fakeClient,
         });
 

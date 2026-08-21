@@ -70,7 +70,7 @@ function setStore(overrides: Record<string, unknown>) {
         // so the rendered control mounts without touching the network.
         client: null,
         statusByEntity: {},
-        fetchEntityStatus: vi.fn(),
+        watchEntityStatus: vi.fn(() => () => {}),
         ...overrides,
     };
 }
