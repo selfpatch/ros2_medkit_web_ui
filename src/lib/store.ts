@@ -121,10 +121,12 @@ export interface AppState {
     // Key is `${entityType}:${entityId}` (plural type); see entityStatusKey.
     statusByEntity: Record<string, EntityStatusValue>;
 
-    // Gateway-wide lifecycle actuation support, derived from observed transition
-    // responses: null = unknown, true = a transition succeeded (2xx), false = the
-    // gateway answered 501 (no actuation provider). Reset on every (re)connect.
-    actuationSupported: boolean | null;
+    // Lifecycle actuation support per entity, keyed like statusByEntity and
+    // derived from observed transition responses: absent = never exercised,
+    // true = a transition succeeded (2xx), false = the gateway answered 501 (no
+    // actuation provider for that entity). A provider is registered per entity,
+    // so one entity's answer says nothing about the next. Reset on (re)connect.
+    actuationByEntity: Record<string, boolean>;
 
     // Interval driving the readiness refresh for watched entities.
     statusPollingIntervalId: ReturnType<typeof setInterval> | null;
@@ -193,8 +195,8 @@ export interface AppState {
     startStatusPolling: () => void;
     stopStatusPolling: () => void;
 
-    // Records whether the gateway supports lifecycle actuation (see actuationSupported).
-    setActuationSupported: (value: boolean) => void;
+    // Records whether an entity supports lifecycle actuation (see actuationByEntity).
+    setEntityActuation: (entityType: LifecycleEntityType, entityId: string, supported: boolean) => void;
 
     // Faults actions
     fetchFaults: () => Promise<void>;
@@ -945,8 +947,8 @@ export const useAppStore = create<AppState>()(
             // Lifecycle status cache
             statusByEntity: {},
 
-            // Gateway-wide lifecycle actuation support (unknown until observed).
-            actuationSupported: null,
+            // Per-entity lifecycle actuation support (unknown until observed).
+            actuationByEntity: {},
             statusPollingIntervalId: null,
 
             // Connect to ros2_medkit gateway
@@ -960,7 +962,7 @@ export const useAppStore = create<AppState>()(
                 set({
                     isConnecting: true,
                     connectionError: null,
-                    actuationSupported: null,
+                    actuationByEntity: {},
                     statusByEntity: {},
                 });
 
@@ -1040,7 +1042,7 @@ export const useAppStore = create<AppState>()(
                     selectedPath: null,
                     selectedEntity: null,
                     activeExecutions: new Map(),
-                    actuationSupported: null,
+                    actuationByEntity: {},
                     statusByEntity: {},
                 });
             },
@@ -2078,7 +2080,10 @@ export const useAppStore = create<AppState>()(
                 }
             },
 
-            setActuationSupported: (value: boolean) => set({ actuationSupported: value }),
+            setEntityActuation: (entityType: LifecycleEntityType, entityId: string, supported: boolean) => {
+                const key = entityStatusKey(entityType, entityId);
+                set((s) => ({ actuationByEntity: { ...s.actuationByEntity, [key]: supported } }));
+            },
 
             // ===========================================================================
             // FAULTS ACTIONS (Diagnostic Trouble Codes)

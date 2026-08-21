@@ -98,7 +98,7 @@ describe('EntityStatusControl', () => {
             statusByEntity: {},
             watchEntityStatus: noopWatch,
             client: fakeClient,
-            actuationSupported: null,
+            actuationByEntity: {},
         });
     });
 
@@ -269,9 +269,9 @@ describe('EntityStatusControl', () => {
     // Task B: response-driven transition feedback (replaces the 501 no-op)
     // -----------------------------------------------------------------------
 
-    it('501 transition warns "not implemented" and sets actuationSupported false', async () => {
+    it('501 transition warns "not implemented" and records it for that entity', async () => {
         seedStatus('apps:planner', 'notReady');
-        useAppStore.setState({ actuationSupported: null });
+        useAppStore.setState({ actuationByEntity: {} });
         mockSetStatus.mockResolvedValue(errResult(501, 'no actuation provider'));
         renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
 
@@ -279,19 +279,19 @@ describe('EntityStatusControl', () => {
 
         await waitFor(() => expect(toast.warning).toHaveBeenCalled());
         expect(toast.error).not.toHaveBeenCalled();
-        expect(useAppStore.getState().actuationSupported).toBe(false);
+        expect(useAppStore.getState().actuationByEntity['apps:planner']).toBe(false);
     });
 
-    it('2xx transition reports success and sets actuationSupported true', async () => {
+    it('2xx transition reports success and records the entity as actuable', async () => {
         seedStatus('apps:planner', 'notReady');
-        useAppStore.setState({ actuationSupported: null });
+        useAppStore.setState({ actuationByEntity: {} });
         mockSetStatus.mockResolvedValue(ok(202));
         renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
 
         await userEvent.click(screen.getByRole('button', { name: /^start/i }));
 
         await waitFor(() => expect(toast.success).toHaveBeenCalled());
-        expect(useAppStore.getState().actuationSupported).toBe(true);
+        expect(useAppStore.getState().actuationByEntity['apps:planner']).toBe(true);
     });
 
     it.each([
@@ -299,7 +299,7 @@ describe('EntityStatusControl', () => {
         ['empty-string error (empty body, no Content-Length)', ''],
     ])('treats a 502 with an %s as a failure, not a success', async (_label, errorValue) => {
         seedStatus('apps:planner', 'notReady');
-        useAppStore.setState({ actuationSupported: null });
+        useAppStore.setState({ actuationByEntity: {} });
         mockSetStatus.mockResolvedValue(emptyBodyFailure(502, errorValue));
         renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
 
@@ -308,7 +308,7 @@ describe('EntityStatusControl', () => {
         await waitFor(() => expect(toast.error).toHaveBeenCalled());
         expect(toast.success).not.toHaveBeenCalled();
         // A failed transition proves nothing about actuation support.
-        expect(useAppStore.getState().actuationSupported).toBeNull();
+        expect(useAppStore.getState().actuationByEntity['apps:planner']).toBeUndefined();
         // The gateway said nothing usable, so the status has to carry the message.
         expect(await screen.findByRole('alert')).toHaveTextContent(/502/);
     });
@@ -389,17 +389,42 @@ describe('EntityStatusControl', () => {
         }
     });
 
+    it('a 501 on one entity leaves another entity actuable', async () => {
+        const user = userEvent.setup();
+        useAppStore.setState({
+            statusByEntity: { 'apps:alpha': 'notReady', 'apps:beta': 'notReady' },
+            watchEntityStatus: noopWatch,
+            client: fakeClient,
+        });
+        mockSetStatus.mockResolvedValue(errResult(501, 'no actuation provider'));
+
+        const { rerender } = renderControl(<EntityStatusControl entityType="apps" entityId="alpha" />);
+        await user.click(screen.getByRole('button', { name: /^start$/i }));
+        await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+        expect(screen.getByRole('button', { name: /^start$/i })).toBeDisabled();
+
+        rerender(
+            <TooltipProvider>
+                <EntityStatusControl entityType="apps" entityId="beta" />
+            </TooltipProvider>
+        );
+
+        // beta may well have a provider: alpha's answer says nothing about it.
+        expect(screen.getByRole('button', { name: /^start$/i })).toBeEnabled();
+        expect(screen.queryByText(/not implemented for this entity/i)).not.toBeInTheDocument();
+    });
+
     // -----------------------------------------------------------------------
-    // Task C: disable + "not implemented" note when actuationSupported === false
+    // Task C: disable + "not implemented" note when the entity answered 501
     // -----------------------------------------------------------------------
 
     it('disables all transition buttons and shows a note when actuation is unsupported', async () => {
         seedStatus('apps:planner', 'notReady');
-        useAppStore.setState({ actuationSupported: false });
+        useAppStore.setState({ actuationByEntity: { 'apps:planner': false } });
         renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
 
         expect(await screen.findByRole('button', { name: /^start/i })).toBeDisabled();
         expect(screen.getByRole('button', { name: /^restart/i })).toBeDisabled();
-        expect(screen.getByText(/not implemented by this gateway/i)).toBeInTheDocument();
+        expect(screen.getByText(/not implemented for this entity/i)).toBeInTheDocument();
     });
 });

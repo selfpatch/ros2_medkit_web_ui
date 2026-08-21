@@ -90,18 +90,20 @@ function failureMessage(action: LifecycleAction, httpStatus: number | undefined)
  * gated by that status (disabled + tooltip), and every transition except Start
  * asks for confirmation before dispatch.
  *
- * The gateway returns 501 until a lifecycle provider is configured. That case
+ * The gateway returns 501 for an entity with no lifecycle provider. That case
  * surfaces as the cached value `'unavailable'` -> a disabled "not available"
  * state rather than an error toast, so the control degrades gracefully on stock
- * gateways.
+ * gateways. A provider is registered per entity, so both the read side and the
+ * transition side remember the answer per entity: one entity without a provider
+ * does not disable the ones that have one.
  */
 export function EntityStatusControl({ entityType, entityId }: EntityStatusControlProps) {
     const client = useAppStore((s) => s.client);
     const status = useAppStore((s) => s.statusByEntity[entityStatusKey(entityType, entityId)]);
     const watchEntityStatus = useAppStore((s) => s.watchEntityStatus);
     const invalidateEntityStatus = useAppStore((s) => s.invalidateEntityStatus);
-    const setActuationSupported = useAppStore((s) => s.setActuationSupported);
-    const actuationSupported = useAppStore((s) => s.actuationSupported);
+    const setEntityActuation = useAppStore((s) => s.setEntityActuation);
+    const actuationSupported = useAppStore((s) => s.actuationByEntity[entityStatusKey(entityType, entityId)]);
 
     const [pendingAction, setPendingAction] = useState<LifecycleAction | null>(null);
     const [confirmAction, setConfirmAction] = useState<LifecycleAction | null>(null);
@@ -129,8 +131,10 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
     }, [entityType, entityId, watchEntityStatus]);
 
     const notAvailable = status === 'unavailable';
-    // A 501 from any transition means the gateway has no actuation provider:
-    // disable every action (Start included), gateway-wide.
+    // A 501 from a transition means this entity has no actuation provider:
+    // disable every action on it (Start included). It says nothing about any
+    // other entity, so the answer is remembered per entity, the same way the
+    // read side already records a 501 from GET /status.
     const actuationUnsupported = actuationSupported === false;
     // No readiness to gate on: either the first read has not landed, or it
     // failed, or a transition dropped it. Every transition is conditional on the
@@ -146,7 +150,7 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
         (DISABLED_BY_STATUS[status ?? '']?.has(action) ?? false);
 
     const tooltipFor = (action: LifecycleAction): string => {
-        if (actuationUnsupported) return 'Not implemented by this gateway';
+        if (actuationUnsupported) return 'Not implemented for this entity';
         if (readinessUnknown) return 'Waiting for the current status';
         if (status === 'ready' && action === 'start') return 'Already running';
         if (status === 'notReady' && DISABLED_BY_STATUS.notReady!.has(action)) return 'Entity is not running';
@@ -167,9 +171,9 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                     // The gateway has no actuation provider: record it gateway-wide
                     // so every transition button disables, and warn (not error) -
                     // this is a missing capability, not a failed request.
-                    setActuationSupported(false);
+                    setEntityActuation(entityType, entityId, false);
                     const msg = errorMessageOf(result.error);
-                    toast.warning(`${action} is not implemented by this gateway${msg ? `: ${msg}` : ''}`);
+                    toast.warning(`${action} is not implemented for ${entityId}${msg ? `: ${msg}` : ''}`);
                     return;
                 }
                 // Success is the HTTP status, never the truthiness of `error`.
@@ -187,8 +191,8 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                     toast.error(`Failed to ${action} ${entityId}: ${message}`);
                     return;
                 }
-                // Any 2xx proves the gateway can actuate; clear a stale "unsupported".
-                setActuationSupported(true);
+                // Any 2xx proves this entity can actuate; clear a stale "unsupported".
+                setEntityActuation(entityType, entityId, true);
                 toast.success(`${action} requested for ${entityId}`);
                 // 202 means accepted, not applied: a node takes longer to come
                 // back than this round trip, so reading now returns the readiness
@@ -205,7 +209,7 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                 if (stillShown()) setPendingAction(null);
             }
         },
-        [client, entityType, entityId, invalidateEntityStatus, setActuationSupported]
+        [client, entityType, entityId, invalidateEntityStatus, setEntityActuation]
     );
 
     const handleClick = useCallback(
@@ -305,7 +309,7 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
             {actuationUnsupported && (
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                     <AlertCircle className="w-3.5 h-3.5" />
-                    Transitions not implemented by this gateway (yet)
+                    Transitions not implemented for this entity (yet)
                 </span>
             )}
 

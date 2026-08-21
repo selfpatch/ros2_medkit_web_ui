@@ -230,15 +230,22 @@ describe('invalidateEntityStatus', () => {
     });
 });
 
-describe('actuationSupported', () => {
-    it('defaults to null and setActuationSupported updates it', () => {
-        useAppStore.setState({ actuationSupported: null });
-        useAppStore.getState().setActuationSupported(false);
-        expect(useAppStore.getState().actuationSupported).toBe(false);
+describe('actuationByEntity', () => {
+    it('records the answer under the entity that produced it', () => {
+        useAppStore.setState({ actuationByEntity: {} });
+        useAppStore.getState().setEntityActuation('apps', 'planner', false);
+        expect(useAppStore.getState().actuationByEntity).toEqual({ 'apps:planner': false });
     });
-    it('disconnect resets the flag to null', () => {
-        useAppStore.setState({ actuationSupported: false });
+
+    it('leaves every other entity untouched', () => {
+        useAppStore.setState({ actuationByEntity: { 'apps:talker': true } });
+        useAppStore.getState().setEntityActuation('apps', 'planner', false);
+        expect(useAppStore.getState().actuationByEntity['apps:talker']).toBe(true);
+    });
+
+    it('disconnect clears what the session learned', () => {
+        useAppStore.setState({ actuationByEntity: { 'apps:planner': false } });
         useAppStore.getState().disconnect();
-        expect(useAppStore.getState().actuationSupported).toBeNull();
+        expect(useAppStore.getState().actuationByEntity).toEqual({});
     });
 });
