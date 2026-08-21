@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Activity, AlertCircle, Loader2, Play, Power, RotateCw, Zap } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { Badge } from '@/components/ui/badge';
@@ -105,11 +105,23 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
     const [confirmAction, setConfirmAction] = useState<LifecycleAction | null>(null);
     const [error, setError] = useState<string | null>(null);
 
+    // The entity this control is currently showing. A transition already in
+    // flight captured the entity it was dispatched against, and resolves against
+    // whatever is selected by then; comparing the two is what keeps its result
+    // off an unrelated entity's panel.
+    const shownKey = entityStatusKey(entityType, entityId);
+    const shownKeyRef = useRef(shownKey);
+    shownKeyRef.current = shownKey;
+
     // Fetch the live status on mount; the slice de-dupes against the tree lamp.
-    // Clear any prior error so a failed transition on one entity can't linger in
-    // the badge area after the selection switches to another entity.
+    // The control is rendered at a fixed position in EntityDetailPanel and
+    // AppsPanel, so a new selection changes entityId without remounting: the
+    // per-entity UI state has to be cleared here or it belongs to the previous
+    // entity.
     useEffect(() => {
         setError(null);
+        setPendingAction(null);
+        setConfirmAction(null);
         fetchEntityStatus(entityType, entityId);
     }, [entityType, entityId, fetchEntityStatus]);
 
@@ -135,6 +147,8 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
     const dispatchAction = useCallback(
         async (action: LifecycleAction) => {
             if (!client) return;
+            const dispatchedFor = entityStatusKey(entityType, entityId);
+            const stillShown = () => shownKeyRef.current === dispatchedFor;
             setPendingAction(action);
             setError(null);
             try {
@@ -158,7 +172,9 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                 // transition and marks the gateway as able to actuate.
                 if (!result.response?.ok) {
                     const message = errorMessageOf(result.error) || failureMessage(action, httpStatus);
-                    setError(message);
+                    // The toast names the entity, so it stays useful after the
+                    // selection moves on; the inline error does not.
+                    if (stillShown()) setError(message);
                     toast.error(`Failed to ${action} ${entityId}: ${message}`);
                     return;
                 }
@@ -168,10 +184,12 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                 await fetchEntityStatus(entityType, entityId);
             } catch (err) {
                 const message = err instanceof Error ? err.message : 'Unknown error';
-                setError(message);
+                if (stillShown()) setError(message);
                 toast.error(`Failed to ${action} ${entityId}: ${message}`);
             } finally {
-                setPendingAction(null);
+                // A late finish must not clear a spinner that now belongs to a
+                // transition dispatched against the newly selected entity.
+                if (stillShown()) setPendingAction(null);
             }
         },
         [client, entityType, entityId, fetchEntityStatus, setActuationSupported]

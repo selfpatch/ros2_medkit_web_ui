@@ -313,6 +313,44 @@ describe('EntityStatusControl', () => {
     });
 
     // -----------------------------------------------------------------------
+    // The control sits at a fixed position in EntityDetailPanel and AppsPanel,
+    // so selecting another entity changes entityId without remounting.
+    // -----------------------------------------------------------------------
+
+    it('does not carry a pending action over to the next selected entity', async () => {
+        const user = userEvent.setup();
+        let finish: (value: unknown) => void = () => {};
+        mockSetStatus.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+        useAppStore.setState({
+            statusByEntity: { 'apps:alpha': 'ready', 'apps:beta': 'ready' },
+            fetchEntityStatus: vi.fn(),
+            client: fakeClient,
+        });
+
+        const { rerender } = renderControl(<EntityStatusControl entityType="apps" entityId="alpha" />);
+        await user.click(screen.getByRole('button', { name: /^shutdown$/i }));
+        await user.click(await screen.findByRole('button', { name: /confirm/i }));
+        await waitFor(() => expect(mockSetStatus).toHaveBeenCalledTimes(1));
+        expect(screen.getByRole('button', { name: /^restart$/i })).toBeDisabled();
+
+        rerender(
+            <TooltipProvider>
+                <EntityStatusControl entityType="apps" entityId="beta" />
+            </TooltipProvider>
+        );
+
+        // beta is ready and has nothing in flight: everything but Start is live.
+        await waitFor(() => expect(screen.getByRole('button', { name: /^restart$/i })).toBeEnabled());
+
+        finish(errResult(500, 'alpha refused'));
+
+        // alpha's failure is still reported, but it must not land on beta's panel.
+        await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('alpha')));
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^restart$/i })).toBeEnabled();
+    });
+
+    // -----------------------------------------------------------------------
     // Task C: disable + "not implemented" note when actuationSupported === false
     // -----------------------------------------------------------------------
 
