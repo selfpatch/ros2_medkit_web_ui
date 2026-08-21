@@ -209,6 +209,17 @@ describe('EntityStatusControl', () => {
         expect(screen.getByRole('button', { name: /^shutdown/i })).toBeDisabled();
     });
 
+    it('leaves Start as the only enabled action when status is notReady', async () => {
+        // Every restart and shutdown variant interrupts a running entity, so on a
+        // stopped one they are all unavailable - Force restart included.
+        seedStatus('apps:planner', 'notReady');
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+        expect(await screen.findByRole('button', { name: /^start$/i })).toBeEnabled();
+        for (const name of [/^restart$/i, /force restart/i, /^shutdown$/i, /force shutdown/i]) {
+            expect(screen.getByRole('button', { name })).toBeDisabled();
+        }
+    });
+
     // -----------------------------------------------------------------------
     // Task 3: confirmation dialog for non-Start actions
     // -----------------------------------------------------------------------

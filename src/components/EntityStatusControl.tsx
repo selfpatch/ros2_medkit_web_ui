@@ -54,7 +54,7 @@ const ACTIONS: ActionConfig[] = [
 /** Transitions disabled for a given cached readiness value. */
 const DISABLED_BY_STATUS: Record<string, Set<LifecycleAction>> = {
     ready: new Set<LifecycleAction>(['start']),
-    notReady: new Set<LifecycleAction>(['restart', 'shutdown', 'force-shutdown']),
+    notReady: new Set<LifecycleAction>(['restart', 'force-restart', 'shutdown', 'force-shutdown']),
 };
 
 /** Destructive transitions get the destructive confirm-button variant. */
