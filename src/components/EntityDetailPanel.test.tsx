@@ -176,7 +176,11 @@ describe('EntityDetailPanel - scripts tab gating (component view)', () => {
             scriptsSupported: false,
         });
 
-        render(<EntityDetailPanel onConnectClick={() => {}} />);
+        render(
+            <TooltipProvider>
+                <EntityDetailPanel onConnectClick={() => {}} />
+            </TooltipProvider>
+        );
 
         await waitFor(() => {
             expect(screen.getByRole('button', { name: /Data/ })).toBeInTheDocument();
@@ -195,7 +199,11 @@ describe('EntityDetailPanel - scripts tab gating (component view)', () => {
             scriptsSupported: true,
         });
 
-        render(<EntityDetailPanel onConnectClick={() => {}} />);
+        render(
+            <TooltipProvider>
+                <EntityDetailPanel onConnectClick={() => {}} />
+            </TooltipProvider>
+        );
 
         const scriptsButton = await screen.findByRole('button', { name: /scripts/i });
         fireEvent.click(scriptsButton);

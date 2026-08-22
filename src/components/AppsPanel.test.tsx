@@ -15,6 +15,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { AppsPanel } from './AppsPanel';
 
 vi.mock('@/components/ScriptsPanel', () => ({
@@ -30,15 +31,28 @@ const mockState = {
     fetchEntityOperations: vi.fn().mockResolvedValue([]),
     listEntityFaults: vi.fn().mockResolvedValue({ items: [], count: 0 }),
     scriptsSupported: false,
+    // EntityStatusControl reads these from the store; inert values keep the
+    // control mounted without reaching the network.
+    client: null,
+    statusByEntity: {},
+    actuationByEntity: {},
+    watchEntityStatus: vi.fn(() => () => {}),
 };
 
 vi.mock('@/lib/store', () => ({
     useAppStore: vi.fn((selector) => selector(mockState)),
+    entityStatusKey: (entityType: string, entityId: string) => `${entityType}:${entityId}`,
 }));
 
 function renderAppsPanel(overrides: Partial<typeof mockState> = {}) {
     Object.assign(mockState, { scriptsSupported: false }, overrides);
-    return render(<AppsPanel appId="talker" appName="Talker" path="/server/ecu/talker" />);
+    // App.tsx wraps the tree in a TooltipProvider, and the panel renders a
+    // tooltip for any lifecycle action the current status does not allow.
+    return render(
+        <TooltipProvider>
+            <AppsPanel appId="talker" appName="Talker" path="/server/ecu/talker" />
+        </TooltipProvider>
+    );
 }
 
 describe('AppsPanel scripts tab', () => {
