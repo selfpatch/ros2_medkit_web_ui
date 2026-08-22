@@ -16,6 +16,8 @@
         "test": "vitest",
         "test:ui": "vitest --ui",
         "test:coverage": "vitest --coverage",
+        "test:e2e": "playwright test",
+        "test:e2e:ui": "playwright test --ui",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "typecheck": "tsc -b --emitDeclarationOnly false --noEmit",
@@ -31,6 +33,9 @@
         ]
     },
     "dependencies": {
+        "@codemirror/lang-python": "^6.2.1",
+        "@codemirror/language": "^6.12.4",
+        "@codemirror/legacy-modes": "^6.5.3",
         "@radix-ui/react-collapsible": "^1.1.12",
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -39,6 +44,7 @@
         "@radix-ui/react-tooltip": "^1.2.8",
         "@selfpatch/ros2-medkit-client-ts": "^0.6.0",
         "@tailwindcss/vite": "^4.1.14",
+        "@uiw/react-codemirror": "^4.25.11",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "cmdk": "^1.1.1",
@@ -53,6 +59,7 @@
     },
     "devDependencies": {
         "@eslint/js": "^9.36.0",
+        "@playwright/test": "^1.62.0",
         "@tailwindcss/postcss": "^4.1.14",
         "@testing-library/dom": "^10.4.1",
         "@testing-library/jest-dom": "^6.9.1",

@@ -22,7 +22,7 @@
  */
 
 import type { MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
-import type { SovdResourceEntityType, LifecycleAction } from './types';
+import type { SovdResourceEntityType, LifecycleAction, ScriptEntityType, StartScriptExecutionRequest } from './types';
 import type { LogsQueryParams, LogsConfiguration } from './log-types';
 
 // =============================================================================
@@ -688,5 +688,192 @@ export function setStatus(
             return client.PUT('/components/{component_id}/status/shutdown', { params, signal });
         case 'force-shutdown':
             return client.PUT('/components/{component_id}/status/force-shutdown', { params, signal });
+    }
+}
+
+// =============================================================================
+// Scripts
+// =============================================================================
+
+export function getEntityScripts(
+    client: MedkitClient,
+    entityType: ScriptEntityType,
+    entityId: string,
+    signal?: AbortSignal
+) {
+    switch (entityType) {
+        case 'apps':
+            return client.GET('/apps/{app_id}/scripts', { params: { path: { app_id: entityId } }, signal });
+        case 'components':
+            return client.GET('/components/{component_id}/scripts', {
+                params: { path: { component_id: entityId } },
+                signal,
+            });
+    }
+}
+
+export function getEntityScript(
+    client: MedkitClient,
+    entityType: ScriptEntityType,
+    entityId: string,
+    scriptId: string
+) {
+    switch (entityType) {
+        case 'apps':
+            return client.GET('/apps/{app_id}/scripts/{script_id}', {
+                params: { path: { app_id: entityId, script_id: scriptId } },
+            });
+        case 'components':
+            return client.GET('/components/{component_id}/scripts/{script_id}', {
+                params: { path: { component_id: entityId, script_id: scriptId } },
+            });
+    }
+}
+
+/**
+ * Multipart upload.
+ *
+ * The spec declares the body as `{type: object, additionalProperties: true}`, so
+ * the generated type is `{ [key: string]: unknown }` and FormData (a DOM interface)
+ * is not assignable to it. bodySerializer returns the FormData unchanged so fetch
+ * sets Content-Type with the multipart boundary itself - the gateway rejects the
+ * request without it.
+ */
+export function uploadEntityScript(
+    client: MedkitClient,
+    entityType: ScriptEntityType,
+    entityId: string,
+    form: FormData
+) {
+    const body = form as unknown as Record<string, unknown>;
+    const bodySerializer = (value: unknown) => value as FormData;
+    switch (entityType) {
+        case 'apps':
+            return client.POST('/apps/{app_id}/scripts', {
+                params: { path: { app_id: entityId } },
+                body,
+                bodySerializer,
+            });
+        case 'components':
+            return client.POST('/components/{component_id}/scripts', {
+                params: { path: { component_id: entityId } },
+                body,
+                bodySerializer,
+            });
+    }
+}
+
+export function deleteEntityScript(
+    client: MedkitClient,
+    entityType: ScriptEntityType,
+    entityId: string,
+    scriptId: string
+) {
+    switch (entityType) {
+        case 'apps':
+            return client.DELETE('/apps/{app_id}/scripts/{script_id}', {
+                params: { path: { app_id: entityId, script_id: scriptId } },
+            });
+        case 'components':
+            return client.DELETE('/components/{component_id}/scripts/{script_id}', {
+                params: { path: { component_id: entityId, script_id: scriptId } },
+            });
+    }
+}
+
+/**
+ * Start an execution.
+ *
+ * The spec declares this request body as a bare `type: object`, so the generated
+ * type is `Record<string, never>` and any real body fails the type check. The cast
+ * keeps the runtime payload correct; removing it requires a spec fix in the gateway.
+ */
+export function startScriptExecution(
+    client: MedkitClient,
+    entityType: ScriptEntityType,
+    entityId: string,
+    scriptId: string,
+    request: StartScriptExecutionRequest
+) {
+    const body = request as unknown as Record<string, never>;
+    switch (entityType) {
+        case 'apps':
+            return client.POST('/apps/{app_id}/scripts/{script_id}/executions', {
+                params: { path: { app_id: entityId, script_id: scriptId } },
+                body,
+            });
+        case 'components':
+            return client.POST('/components/{component_id}/scripts/{script_id}/executions', {
+                params: { path: { component_id: entityId, script_id: scriptId } },
+                body,
+            });
+    }
+}
+
+export function getScriptExecution(
+    client: MedkitClient,
+    entityType: ScriptEntityType,
+    entityId: string,
+    scriptId: string,
+    executionId: string,
+    signal?: AbortSignal
+) {
+    switch (entityType) {
+        case 'apps':
+            return client.GET('/apps/{app_id}/scripts/{script_id}/executions/{execution_id}', {
+                params: { path: { app_id: entityId, script_id: scriptId, execution_id: executionId } },
+                signal,
+            });
+        case 'components':
+            return client.GET('/components/{component_id}/scripts/{script_id}/executions/{execution_id}', {
+                params: { path: { component_id: entityId, script_id: scriptId, execution_id: executionId } },
+                signal,
+            });
+    }
+}
+
+/**
+ * `action` is a plain string, not a union: the gateway forwards it verbatim to
+ * plugin backends, which may support control actions beyond stop and
+ * forced_termination.
+ */
+export function controlScriptExecution(
+    client: MedkitClient,
+    entityType: ScriptEntityType,
+    entityId: string,
+    scriptId: string,
+    executionId: string,
+    action: string
+) {
+    switch (entityType) {
+        case 'apps':
+            return client.PUT('/apps/{app_id}/scripts/{script_id}/executions/{execution_id}', {
+                params: { path: { app_id: entityId, script_id: scriptId, execution_id: executionId } },
+                body: { action },
+            });
+        case 'components':
+            return client.PUT('/components/{component_id}/scripts/{script_id}/executions/{execution_id}', {
+                params: { path: { component_id: entityId, script_id: scriptId, execution_id: executionId } },
+                body: { action },
+            });
+    }
+}
+
+export function deleteScriptExecution(
+    client: MedkitClient,
+    entityType: ScriptEntityType,
+    entityId: string,
+    scriptId: string,
+    executionId: string
+) {
+    switch (entityType) {
+        case 'apps':
+            return client.DELETE('/apps/{app_id}/scripts/{script_id}/executions/{execution_id}', {
+                params: { path: { app_id: entityId, script_id: scriptId, execution_id: executionId } },
+            });
+        case 'components':
+            return client.DELETE('/components/{component_id}/scripts/{script_id}/executions/{execution_id}', {
+                params: { path: { component_id: entityId, script_id: scriptId, execution_id: executionId } },
+            });
     }
 }

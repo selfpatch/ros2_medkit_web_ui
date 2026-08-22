@@ -71,20 +71,19 @@ function App() {
         }
     }, [selectedPath]);
 
-    // Auto-connect on mount if we have a stored URL (once only)
+    // Auto-connect on mount if we have a stored URL (once only). The ref guard
+    // alone survives React Strict Mode's mount-cleanup-remount cycle in dev;
+    // deferring the call via setTimeout previously let the Strict Mode cleanup
+    // cancel it before it ever fired, so connect() was never actually called.
     useEffect(() => {
         if (!serverUrl || isConnected || autoConnectAttempted.current) return;
         autoConnectAttempted.current = true;
 
-        const timeoutId = setTimeout(() => {
-            connect(serverUrl).then((success) => {
-                if (!success) {
-                    setShowConnectionDialog(true);
-                }
-            });
-        }, 0);
-
-        return () => clearTimeout(timeoutId);
+        connect(serverUrl).then((success) => {
+            if (!success) {
+                setShowConnectionDialog(true);
+            }
+        });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 

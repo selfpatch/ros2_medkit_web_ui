@@ -13,11 +13,12 @@
 // limitations under the License.
 
 import type { ReactNode } from 'react';
-import { AlertTriangle, Database, ScrollText, Settings, Zap } from 'lucide-react';
+import { AlertTriangle, Database, ScrollText, Settings, Terminal, Zap } from 'lucide-react';
 import { ConfigurationPanel } from '@/components/ConfigurationPanel';
 import { FaultsPanel } from '@/components/FaultsPanel';
 import { LogsPanel } from '@/components/LogsPanel';
 import { OperationsPanel } from '@/components/OperationsPanel';
+import { ScriptsPanel } from '@/components/ScriptsPanel';
 import type { SovdResourceEntityType } from '@/lib/types';
 
 /**
@@ -32,11 +33,11 @@ import type { SovdResourceEntityType } from '@/lib/types';
  * rendering stays per-panel because each entity type displays data
  * differently (apps: topics list, components: DataTabContent grid,
  * areas: aggregated grid). The helper `renderResourceTabContent` below
- * therefore only handles operations / configurations / faults / logs;
+ * therefore only handles operations / configurations / faults / logs / scripts;
  * callers are responsible for rendering their own data tab content.
  */
 
-export type ResourceTabId = 'data' | 'operations' | 'configurations' | 'faults' | 'logs';
+export type ResourceTabId = 'data' | 'operations' | 'configurations' | 'faults' | 'logs' | 'scripts';
 
 export interface ResourceTabConfig {
     id: ResourceTabId;
@@ -52,8 +53,22 @@ export const RESOURCE_TABS: ResourceTabConfig[] = [
     { id: 'logs', label: 'Logs', icon: ScrollText },
 ];
 
+/**
+ * Not part of RESOURCE_TABS: script routes exist for apps and components only,
+ * and the tab additionally requires the gateway to report capabilities.scripts.
+ * Panels append it themselves.
+ */
+export const SCRIPTS_TAB: ResourceTabConfig = { id: 'scripts', label: 'Scripts', icon: Terminal };
+
 export function isResourceTabId(id: string): id is ResourceTabId {
-    return id === 'data' || id === 'operations' || id === 'configurations' || id === 'faults' || id === 'logs';
+    return (
+        id === 'data' ||
+        id === 'operations' ||
+        id === 'configurations' ||
+        id === 'faults' ||
+        id === 'logs' ||
+        id === 'scripts'
+    );
 }
 
 /**
@@ -76,6 +91,10 @@ export function renderResourceTabContent(
             return <FaultsPanel entityId={entityId} entityType={entityType} />;
         case 'logs':
             return <LogsPanel entityId={entityId} entityType={entityType} />;
+        case 'scripts':
+            return entityType === 'apps' || entityType === 'components' ? (
+                <ScriptsPanel entityId={entityId} entityType={entityType} />
+            ) : null;
         case 'data':
             return null;
     }
