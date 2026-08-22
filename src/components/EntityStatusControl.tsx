@@ -26,6 +26,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import { useAppStore, entityStatusKey } from '@/lib/store';
 import { setStatus, type LifecycleEntityType } from '@/lib/api-dispatch';
 import type { LifecycleAction } from '@/lib/types';
@@ -271,15 +272,25 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
             <div className="flex items-center gap-2 flex-wrap">
                 {ACTIONS.map(({ action, label, icon: Icon, variant }) => {
                     const isPending = pendingAction === action;
-                    const disabled = isDisabled(action);
-                    const tip = disabled ? tooltipFor(action) : '';
+                    const unavailable = isDisabled(action);
+                    const tip = unavailable ? tooltipFor(action) : '';
+                    // aria-disabled rather than disabled: a disabled button leaves
+                    // the accessibility tree and the tab order, so the reason it
+                    // cannot be used becomes unreachable by keyboard. Marked this
+                    // way the button keeps its name, announces as unavailable, and
+                    // focusing it opens the tooltip that says why. The handler
+                    // rejects the action, which the attribute alone does not.
                     const button = (
                         <Button
                             key={action}
                             variant={variant}
                             size="sm"
-                            disabled={disabled}
-                            onClick={() => handleClick(action)}
+                            aria-disabled={unavailable || undefined}
+                            className={cn(unavailable && 'opacity-50 cursor-not-allowed')}
+                            onClick={() => {
+                                if (unavailable) return;
+                                handleClick(action);
+                            }}
                         >
                             {isPending ? (
                                 <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
@@ -290,14 +301,10 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                         </Button>
                     );
 
-                    // A disabled button does not fire pointer events, so wrap it
-                    // in a focusable span to let the tooltip explain why.
                     if (tip) {
                         return (
                             <Tooltip key={action}>
-                                <TooltipTrigger asChild>
-                                    <span tabIndex={0}>{button}</span>
-                                </TooltipTrigger>
+                                <TooltipTrigger asChild>{button}</TooltipTrigger>
                                 <TooltipContent>{tip}</TooltipContent>
                             </Tooltip>
                         );

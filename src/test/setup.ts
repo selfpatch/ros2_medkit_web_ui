@@ -11,3 +11,14 @@ if (typeof Blob !== 'undefined' && !Blob.prototype.text) {
         });
     };
 }
+
+// jsdom has no ResizeObserver, which Radix's floating layer (tooltip, popover)
+// constructs as soon as it opens - without it those components throw on render
+// rather than failing an assertion.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+    globalThis.ResizeObserver = class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+    };
+}

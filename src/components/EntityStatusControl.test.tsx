@@ -184,9 +184,9 @@ describe('EntityStatusControl', () => {
         renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
 
         expect(await screen.findByText(/not available/i)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /^start$/i })).toBeDisabled();
-        expect(screen.getByRole('button', { name: /^restart$/i })).toBeDisabled();
-        expect(screen.getByRole('button', { name: /^shutdown$/i })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^start$/i })).toHaveAttribute('aria-disabled', 'true');
+        expect(screen.getByRole('button', { name: /^restart$/i })).toHaveAttribute('aria-disabled', 'true');
+        expect(screen.getByRole('button', { name: /^shutdown$/i })).toHaveAttribute('aria-disabled', 'true');
     });
 
     it('shows the "not available" state when the cached status is unavailable for components', async () => {
@@ -205,7 +205,7 @@ describe('EntityStatusControl', () => {
         await user.click(screen.getByRole('button', { name: /^start$/i }));
 
         expect(await screen.findByText(/invalid transition/i)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /^start$/i })).not.toBeDisabled();
+        expect(screen.getByRole('button', { name: /^start$/i })).not.toHaveAttribute('aria-disabled');
     });
 
     // -----------------------------------------------------------------------
@@ -215,16 +215,16 @@ describe('EntityStatusControl', () => {
     it('disables Start with a tooltip when status is ready', async () => {
         seedStatus('components:host1', 'ready');
         renderControl(<EntityStatusControl entityType="components" entityId="host1" />);
-        expect(await screen.findByRole('button', { name: /^start$/i })).toBeDisabled();
-        expect(screen.getByRole('button', { name: /^restart$/i })).toBeEnabled();
+        expect(await screen.findByRole('button', { name: /^start$/i })).toHaveAttribute('aria-disabled', 'true');
+        expect(screen.getByRole('button', { name: /^restart$/i })).not.toHaveAttribute('aria-disabled');
     });
 
     it('disables Restart/Shutdown when status is notReady, keeps Start enabled', async () => {
         seedStatus('apps:planner', 'notReady');
         renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
-        expect(await screen.findByRole('button', { name: /^start/i })).toBeEnabled();
-        expect(screen.getByRole('button', { name: /^restart/i })).toBeDisabled();
-        expect(screen.getByRole('button', { name: /^shutdown/i })).toBeDisabled();
+        expect(await screen.findByRole('button', { name: /^start/i })).not.toHaveAttribute('aria-disabled');
+        expect(screen.getByRole('button', { name: /^restart/i })).toHaveAttribute('aria-disabled', 'true');
+        expect(screen.getByRole('button', { name: /^shutdown/i })).toHaveAttribute('aria-disabled', 'true');
     });
 
     it('leaves Start as the only enabled action when status is notReady', async () => {
@@ -232,9 +232,9 @@ describe('EntityStatusControl', () => {
         // stopped one they are all unavailable - Force restart included.
         seedStatus('apps:planner', 'notReady');
         renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
-        expect(await screen.findByRole('button', { name: /^start$/i })).toBeEnabled();
+        expect(await screen.findByRole('button', { name: /^start$/i })).not.toHaveAttribute('aria-disabled');
         for (const name of [/^restart$/i, /force restart/i, /^shutdown$/i, /force shutdown/i]) {
-            expect(screen.getByRole('button', { name })).toBeDisabled();
+            expect(screen.getByRole('button', { name })).toHaveAttribute('aria-disabled', 'true');
         }
     });
 
@@ -350,7 +350,7 @@ describe('EntityStatusControl', () => {
         await user.click(screen.getByRole('button', { name: /^shutdown$/i }));
         await user.click(await screen.findByRole('button', { name: /confirm/i }));
         await waitFor(() => expect(mockSetStatus).toHaveBeenCalledTimes(1));
-        expect(screen.getByRole('button', { name: /^restart$/i })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^restart$/i })).toHaveAttribute('aria-disabled', 'true');
 
         rerender(
             <TooltipProvider>
@@ -359,14 +359,16 @@ describe('EntityStatusControl', () => {
         );
 
         // beta is ready and has nothing in flight: everything but Start is live.
-        await waitFor(() => expect(screen.getByRole('button', { name: /^restart$/i })).toBeEnabled());
+        await waitFor(() =>
+            expect(screen.getByRole('button', { name: /^restart$/i })).not.toHaveAttribute('aria-disabled')
+        );
 
         finish(errResult(500, 'alpha refused'));
 
         // alpha's failure is still reported, but it must not land on beta's panel.
         await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('alpha')));
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /^restart$/i })).toBeEnabled();
+        expect(screen.getByRole('button', { name: /^restart$/i })).not.toHaveAttribute('aria-disabled');
     });
 
     // -----------------------------------------------------------------------
@@ -385,7 +387,7 @@ describe('EntityStatusControl', () => {
         renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
 
         for (const name of [/^start$/i, /^restart$/i, /force restart/i, /^shutdown$/i, /force shutdown/i]) {
-            expect(await screen.findByRole('button', { name })).toBeDisabled();
+            expect(await screen.findByRole('button', { name })).toHaveAttribute('aria-disabled', 'true');
         }
     });
 
@@ -401,7 +403,7 @@ describe('EntityStatusControl', () => {
         const { rerender } = renderControl(<EntityStatusControl entityType="apps" entityId="alpha" />);
         await user.click(screen.getByRole('button', { name: /^start$/i }));
         await waitFor(() => expect(toast.warning).toHaveBeenCalled());
-        expect(screen.getByRole('button', { name: /^start$/i })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^start$/i })).toHaveAttribute('aria-disabled', 'true');
 
         rerender(
             <TooltipProvider>
@@ -410,8 +412,45 @@ describe('EntityStatusControl', () => {
         );
 
         // beta may well have a provider: alpha's answer says nothing about it.
-        expect(screen.getByRole('button', { name: /^start$/i })).toBeEnabled();
+        expect(screen.getByRole('button', { name: /^start$/i })).not.toHaveAttribute('aria-disabled');
         expect(screen.queryByText(/not implemented for this entity/i)).not.toBeInTheDocument();
+    });
+
+    // -----------------------------------------------------------------------
+    // Unavailable actions stay reachable so their reason is announced
+    // -----------------------------------------------------------------------
+
+    it('keeps an unavailable action in the accessibility tree with its name', async () => {
+        seedStatus('components:host1', 'ready');
+        renderControl(<EntityStatusControl entityType="components" entityId="host1" />);
+
+        // getByRole ignores elements removed from the accessibility tree, and a
+        // `disabled` button is not focusable - both of which hide the reason.
+        const start = await screen.findByRole('button', { name: /^start$/i });
+        expect(start).toHaveAttribute('aria-disabled', 'true');
+        expect(start).not.toHaveAttribute('disabled');
+        start.focus();
+        expect(start).toHaveFocus();
+    });
+
+    it('rejects a click on an unavailable action', async () => {
+        const user = userEvent.setup();
+        seedStatus('components:host1', 'ready');
+        renderControl(<EntityStatusControl entityType="components" entityId="host1" />);
+
+        await user.click(screen.getByRole('button', { name: /^start$/i }));
+
+        expect(mockSetStatus).not.toHaveBeenCalled();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('describes an unavailable action when it takes focus', async () => {
+        const user = userEvent.setup();
+        seedStatus('components:host1', 'ready');
+        renderControl(<EntityStatusControl entityType="components" entityId="host1" />);
+
+        await user.tab();
+        await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(/already running/i));
     });
 
     // -----------------------------------------------------------------------
@@ -423,8 +462,8 @@ describe('EntityStatusControl', () => {
         useAppStore.setState({ actuationByEntity: { 'apps:planner': false } });
         renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
 
-        expect(await screen.findByRole('button', { name: /^start/i })).toBeDisabled();
-        expect(screen.getByRole('button', { name: /^restart/i })).toBeDisabled();
+        expect(await screen.findByRole('button', { name: /^start/i })).toHaveAttribute('aria-disabled', 'true');
+        expect(screen.getByRole('button', { name: /^restart/i })).toHaveAttribute('aria-disabled', 'true');
         expect(screen.getByText(/not implemented for this entity/i)).toBeInTheDocument();
     });
 });
