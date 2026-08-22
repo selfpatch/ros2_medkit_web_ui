@@ -64,6 +64,29 @@ export type {
  */
 export type SovdResourceEntityType = 'areas' | 'components' | 'apps' | 'functions';
 
+// =============================================================================
+// Lifecycle Status (gateway 0.6.0 lifecycle API)
+//
+// Only apps and components expose the lifecycle status collection. The gateway
+// returns 501 until a lifecycle provider is configured; callers should treat
+// that as "not available" rather than an error.
+// =============================================================================
+
+/**
+ * Lifecycle transition action. Each maps to a distinct
+ * PUT /{entity}/{id}/status/{action} endpoint.
+ */
+export type LifecycleAction = 'start' | 'restart' | 'force-restart' | 'shutdown' | 'force-shutdown';
+
+/**
+ * Lifecycle readiness value reported by GET /{entity}/{id}/status and carried
+ * in the `status` field of the GET /apps/{id} and GET /components/{id} responses.
+ */
+export type LifecycleStatus = 'ready' | 'notReady';
+
+/** Cached lifecycle status value for an entity (apps/components only). */
+export type EntityStatusValue = 'ready' | 'notReady' | 'unavailable' | 'unknown';
+
 /**
  * QoS profile for a topic endpoint
  */
@@ -103,6 +126,8 @@ export interface SovdEntity {
     id: string;
     /** Display name */
     name: string;
+    /** Optional human-friendly description (e.g. the host OS for a component). */
+    description?: string;
     /** Entity type (e.g., "component", "application", "signal") */
     type: string;
     /** API path for this entity */

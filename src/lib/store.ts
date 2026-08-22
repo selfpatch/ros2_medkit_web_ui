@@ -16,6 +16,7 @@ import type {
     App,
     VersionInfo,
     SovdFunction,
+    EntityStatusValue,
 } from './types';
 import { createMedkitClient, normalizeBaseUrl, type MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
 import type { SovdResourceEntityType } from './types';
@@ -47,11 +48,19 @@ import {
     getEntityLogs,
     getEntityLogsConfiguration,
     putEntityLogsConfiguration,
+    getStatus,
+    type LifecycleEntityType,
 } from './api-dispatch';
 import type { LogCollection, LogsConfiguration, LogsFetchResult, LogsQueryParams } from './log-types';
 
 const STORAGE_KEY = 'ros2_medkit_web_ui_server_url';
 const EXECUTION_POLL_INTERVAL_MS = 1000;
+
+// Lifecycle readiness is not pushed by the gateway, so a watched entity is
+// re-read on this cadence. It also bounds how long the control shows 'unknown'
+// after a transition, which is why it is well under the time a node takes to
+// come back up rather than a round number.
+const STATUS_POLL_INTERVAL_MS = 5000;
 const EXECUTION_CLEANUP_AFTER_MS = 5 * 60 * 1000; // 5 minutes
 
 export type TreeViewMode = 'logical' | 'functional';
@@ -108,6 +117,20 @@ export interface AppState {
     isLoadingFaults: boolean;
     faultStreamCleanup: (() => void) | null;
 
+    // Lifecycle status cache (apps/components only).
+    // Key is `${entityType}:${entityId}` (plural type); see entityStatusKey.
+    statusByEntity: Record<string, EntityStatusValue>;
+
+    // Lifecycle actuation support per entity, keyed like statusByEntity and
+    // derived from observed transition responses: absent = never exercised,
+    // true = a transition succeeded (2xx), false = the gateway answered 501 (no
+    // actuation provider for that entity). A provider is registered per entity,
+    // so one entity's answer says nothing about the next. Reset on (re)connect.
+    actuationByEntity: Record<string, boolean>;
+
+    // Interval driving the readiness refresh for watched entities.
+    statusPollingIntervalId: ReturnType<typeof setInterval> | null;
+
     // Actions
     connect: (url: string) => Promise<boolean>;
     disconnect: () => void;
@@ -156,6 +179,24 @@ export interface AppState {
     setAutoRefreshExecutions: (enabled: boolean) => void;
     startExecutionPolling: () => void;
     stopExecutionPolling: () => void;
+
+    // Lifecycle status action (apps/components only) - fills statusByEntity.
+    fetchEntityStatus: (entityType: LifecycleEntityType, entityId: string) => Promise<void>;
+
+    // Register interest in an entity's readiness: reads it once now and keeps it
+    // in the refresh loop until the returned unsubscribe runs. Components call
+    // this from a mount effect so the loop only covers what is on screen.
+    watchEntityStatus: (entityType: LifecycleEntityType, entityId: string) => () => void;
+
+    // Drop a cached readiness value and any read still in flight for it, so a
+    // response issued before the change cannot restore the old value.
+    invalidateEntityStatus: (entityType: LifecycleEntityType, entityId: string) => void;
+
+    startStatusPolling: () => void;
+    stopStatusPolling: () => void;
+
+    // Records whether an entity supports lifecycle actuation (see actuationByEntity).
+    setEntityActuation: (entityType: LifecycleEntityType, entityId: string, supported: boolean) => void;
 
     // Faults actions
     fetchFaults: () => Promise<void>;
@@ -734,6 +775,44 @@ export function __resetAppsRequestCache(): void {
     inFlightAppsRequest = null;
 }
 
+/**
+ * Build the `statusByEntity` cache key from an entity's plural resource type
+ * and id (e.g. `entityStatusKey('apps', 'planner') === 'apps:planner'`).
+ */
+export function entityStatusKey(entityType: string, entityId: string): string {
+    return `${entityType}:${entityId}`;
+}
+
+/**
+ * Module-level dedupe for `fetchEntityStatus`. Concurrent calls for the same
+ * entity (e.g. the control and the tree lamp both mounting) share one request.
+ * The promise is cleared on settlement so later mounts refetch fresh status.
+ */
+const inFlightStatusRequests = new Map<string, Promise<void>>();
+
+/**
+ * Entities whose readiness is currently on screen, by cache key, counted
+ * because the control and the tree lamp can watch the same entity at once.
+ * The refresh loop reads this and nothing else, so a collapsed branch stops
+ * costing requests.
+ */
+const statusWatchers = new Map<string, number>();
+
+/**
+ * Read generation per cache key. `invalidateEntityStatus` bumps it, and a
+ * response carrying an older generation is discarded: without this, a read
+ * issued before a transition (possibly shared through the dedupe map) would
+ * resolve afterwards and write the pre-transition readiness back.
+ */
+const statusEpochs = new Map<string, number>();
+
+/** Reset the status-request dedupe cache. Exposed for tests. */
+export function __resetStatusRequestCache(): void {
+    inFlightStatusRequests.clear();
+    statusWatchers.clear();
+    statusEpochs.clear();
+}
+
 export async function fetchAllAppsDeduped(client: MedkitClient): Promise<Record<string, unknown>[]> {
     if (inFlightAppsRequest) return inFlightAppsRequest;
     inFlightAppsRequest = client
@@ -865,9 +944,27 @@ export const useAppStore = create<AppState>()(
             isLoadingFaults: false,
             faultStreamCleanup: null,
 
+            // Lifecycle status cache
+            statusByEntity: {},
+
+            // Per-entity lifecycle actuation support (unknown until observed).
+            actuationByEntity: {},
+            statusPollingIntervalId: null,
+
             // Connect to ros2_medkit gateway
             connect: async (url: string) => {
-                set({ isConnecting: true, connectionError: null });
+                // Drop everything the previous session learned about lifecycle:
+                // entity ids are not unique across gateways, so a surviving
+                // `statusByEntity` entry would render one robot's readiness for
+                // another, and a surviving in-flight promise would be handed to
+                // the new session instead of a request against the new gateway.
+                __resetStatusRequestCache();
+                set({
+                    isConnecting: true,
+                    connectionError: null,
+                    actuationByEntity: {},
+                    statusByEntity: {},
+                });
 
                 try {
                     const client = createMedkitClient({ baseUrl: url, fetch: fetch.bind(globalThis) });
@@ -925,6 +1022,11 @@ export const useAppStore = create<AppState>()(
                 // Stop execution polling
                 get().stopExecutionPolling();
 
+                // See connect: lifecycle readiness is scoped to one gateway, and
+                // an in-flight request must not be handed to the next session.
+                get().stopStatusPolling();
+                __resetStatusRequestCache();
+
                 // Unsubscribe from fault stream
                 get().unsubscribeFaultStream();
 
@@ -940,6 +1042,8 @@ export const useAppStore = create<AppState>()(
                     selectedPath: null,
                     selectedEntity: null,
                     activeExecutions: new Map(),
+                    actuationByEntity: {},
+                    statusByEntity: {},
                 });
             },
 
@@ -1875,6 +1979,113 @@ export const useAppStore = create<AppState>()(
                     clearInterval(executionPollingIntervalId);
                     set({ executionPollingIntervalId: null });
                 }
+            },
+
+            // ===========================================================================
+            // LIFECYCLE STATUS ACTION (apps/components only)
+            // ===========================================================================
+
+            fetchEntityStatus: async (entityType: LifecycleEntityType, entityId: string) => {
+                const key = entityStatusKey(entityType, entityId);
+                const existing = inFlightStatusRequests.get(key);
+                if (existing) return existing;
+
+                const client = get().client;
+                if (!client) return;
+
+                const epoch = statusEpochs.get(key) ?? 0;
+
+                const request = (async () => {
+                    try {
+                        const result = await getStatus(client, entityType, entityId);
+                        let value: EntityStatusValue = 'unknown';
+                        // 501 is a gateway with no lifecycle provider; 404 is a
+                        // gateway built without the routes at all. Both mean the
+                        // same thing here, and only these two are a capability
+                        // answer - every other failure leaves the readiness
+                        // genuinely unknown rather than known to be absent.
+                        if (result.response?.status === 501 || result.response?.status === 404) {
+                            value = 'unavailable';
+                        } else if (result.data?.status === 'ready' || result.data?.status === 'notReady') {
+                            value = result.data.status;
+                        }
+                        writeStatus(value);
+                    } catch {
+                        writeStatus('unknown');
+                    } finally {
+                        // Only clear the slot if it is still this request's. A
+                        // later generation means an invalidation already dropped
+                        // it and something newer may be parked there.
+                        if ((statusEpochs.get(key) ?? 0) === epoch) inFlightStatusRequests.delete(key);
+                    }
+
+                    // Two ways a response can be obsolete by the time it lands: it
+                    // belongs to a gateway the UI has since left (entity ids
+                    // collide across gateways), or it predates a change that
+                    // invalidated the value it is carrying.
+                    function writeStatus(value: EntityStatusValue): void {
+                        if (get().client !== client) return;
+                        if ((statusEpochs.get(key) ?? 0) !== epoch) return;
+                        set((s) => ({ statusByEntity: { ...s.statusByEntity, [key]: value } }));
+                    }
+                })();
+
+                inFlightStatusRequests.set(key, request);
+                return request;
+            },
+
+            watchEntityStatus: (entityType: LifecycleEntityType, entityId: string) => {
+                const key = entityStatusKey(entityType, entityId);
+                statusWatchers.set(key, (statusWatchers.get(key) ?? 0) + 1);
+                void get().fetchEntityStatus(entityType, entityId);
+                get().startStatusPolling();
+
+                return () => {
+                    const remaining = (statusWatchers.get(key) ?? 1) - 1;
+                    if (remaining > 0) {
+                        statusWatchers.set(key, remaining);
+                    } else {
+                        statusWatchers.delete(key);
+                    }
+                };
+            },
+
+            invalidateEntityStatus: (entityType: LifecycleEntityType, entityId: string) => {
+                const key = entityStatusKey(entityType, entityId);
+                statusEpochs.set(key, (statusEpochs.get(key) ?? 0) + 1);
+                inFlightStatusRequests.delete(key);
+                set((s) => ({ statusByEntity: { ...s.statusByEntity, [key]: 'unknown' } }));
+            },
+
+            startStatusPolling: () => {
+                if (get().statusPollingIntervalId || !get().client) return;
+
+                const intervalId = setInterval(() => {
+                    if (!get().client || statusWatchers.size === 0) {
+                        get().stopStatusPolling();
+                        return;
+                    }
+                    for (const key of [...statusWatchers.keys()]) {
+                        const separator = key.indexOf(':');
+                        const entityType = key.slice(0, separator) as LifecycleEntityType;
+                        void get().fetchEntityStatus(entityType, key.slice(separator + 1));
+                    }
+                }, STATUS_POLL_INTERVAL_MS);
+
+                set({ statusPollingIntervalId: intervalId });
+            },
+
+            stopStatusPolling: () => {
+                const { statusPollingIntervalId } = get();
+                if (statusPollingIntervalId) {
+                    clearInterval(statusPollingIntervalId);
+                    set({ statusPollingIntervalId: null });
+                }
+            },
+
+            setEntityActuation: (entityType: LifecycleEntityType, entityId: string, supported: boolean) => {
+                const key = entityStatusKey(entityType, entityId);
+                set((s) => ({ actuationByEntity: { ...s.actuationByEntity, [key]: supported } }));
             },
 
             // ===========================================================================

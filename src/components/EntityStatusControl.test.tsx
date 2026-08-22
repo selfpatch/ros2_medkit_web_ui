@@ -1,0 +1,469 @@
+// Copyright 2026 bburda
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { TooltipProvider } from '@/components/ui/tooltip';
+
+// ---------------------------------------------------------------------------
+// Mocks
+//
+// Status is read from the real store slice (statusByEntity), seeded per-test.
+// Only setStatus (the transition dispatch) is mocked; the rest of api-dispatch
+// stays real so the store module loads. watchEntityStatus is seeded as a no-op
+// vi.fn() in every test so the on-mount read does not overwrite the seeded
+// status with 'unknown' against the fake client.
+// ---------------------------------------------------------------------------
+
+const mockSetStatus = vi.fn();
+
+vi.mock('@/lib/api-dispatch', async (importActual) => {
+    const actual = await importActual<typeof import('@/lib/api-dispatch')>();
+    return {
+        ...actual,
+        setStatus: (...args: unknown[]) => mockSetStatus(...args),
+    };
+});
+
+vi.mock('react-toastify', () => ({
+    toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
+}));
+
+import { toast } from 'react-toastify';
+import { useAppStore } from '@/lib/store';
+import { EntityStatusControl } from './EntityStatusControl';
+
+const fakeClient = { __fake: true } as never;
+
+/**
+ * Build an openapi-fetch style result. `ok` is derived from the status the same
+ * way `Response.ok` is, because that is the field the control decides success
+ * on - a double that omits it cannot tell a 204 from a 502.
+ */
+function ok(status: number, data: unknown = undefined) {
+    return { data, error: undefined, response: httpResponse(status) };
+}
+
+function errResult(status: number, message: string) {
+    return { data: undefined, error: { message }, response: httpResponse(status) };
+}
+
+/**
+ * A non-2xx whose body openapi-fetch could not turn into an error value:
+ * `{ error: undefined }` for 204/HEAD/`Content-Length: 0`, `''` for an empty
+ * body with no `Content-Length` (openapi-fetch 0.17.0, src/index.js:245/268).
+ */
+function emptyBodyFailure(status: number, error: unknown = undefined) {
+    return { data: undefined, error, response: httpResponse(status) };
+}
+
+function httpResponse(status: number): Response {
+    return { status, ok: status >= 200 && status < 300 } as Response;
+}
+
+/**
+ * Seed the store with a cached status and a no-op fetchEntityStatus, plus the
+ * fake client used by setStatus dispatch.
+ */
+function seedStatus(key: string, value: string) {
+    useAppStore.setState({
+        statusByEntity: { [key]: value as never },
+        watchEntityStatus: noopWatch,
+        client: fakeClient,
+    });
+}
+
+/** watchEntityStatus stand-in: registers nothing, unsubscribes to nothing. */
+const noopWatch = vi.fn(() => () => {});
+
+const renderControl = (ui: React.ReactElement) => render(<TooltipProvider>{ui}</TooltipProvider>);
+
+describe('EntityStatusControl', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockSetStatus.mockResolvedValue(ok(204));
+        useAppStore.setState({
+            statusByEntity: {},
+            watchEntityStatus: noopWatch,
+            client: fakeClient,
+            actuationByEntity: {},
+        });
+    });
+
+    afterEach(() => {
+        cleanup();
+    });
+
+    // -----------------------------------------------------------------------
+    // Migrated baseline coverage (now driven by the store slice)
+    // -----------------------------------------------------------------------
+
+    it('renders the current status badge from the cached status', async () => {
+        seedStatus('apps:motor', 'ready');
+        renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
+        expect(await screen.findByText(/^ready$/i)).toBeInTheDocument();
+    });
+
+    it('renders an action button for each lifecycle action', () => {
+        seedStatus('apps:motor', 'ready');
+        renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
+        expect(screen.getByRole('button', { name: /^start$/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^restart$/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /force restart/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^shutdown$/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /force shutdown/i })).toBeInTheDocument();
+    });
+
+    it('calls setStatus with client, entityType, entityId and action on confirmed restart', async () => {
+        const user = userEvent.setup();
+        // ready leaves Restart enabled.
+        seedStatus('components:host-1', 'ready');
+        renderControl(<EntityStatusControl entityType="components" entityId="host-1" />);
+
+        await user.click(screen.getByRole('button', { name: /^restart$/i }));
+        await user.click(await screen.findByRole('button', { name: /confirm/i }));
+
+        await waitFor(() => expect(mockSetStatus).toHaveBeenCalledTimes(1));
+        const call = mockSetStatus.mock.calls[0]!;
+        expect(call[0]).toBe(fakeClient);
+        expect(call[1]).toBe('components');
+        expect(call[2]).toBe('host-1');
+        expect(call[3]).toBe('restart');
+    });
+
+    it('drops the cached readiness after a successful confirmed action', async () => {
+        const user = userEvent.setup();
+        const invalidate = vi.fn();
+        useAppStore.setState({
+            statusByEntity: { 'apps:motor': 'ready' },
+            watchEntityStatus: noopWatch,
+            invalidateEntityStatus: invalidate,
+            client: fakeClient,
+        });
+        renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
+
+        await user.click(screen.getByRole('button', { name: /^shutdown$/i }));
+        await user.click(await screen.findByRole('button', { name: /confirm/i }));
+
+        // 202 means accepted: reading now would return the pre-transition value,
+        // so the value is dropped and the refresh loop establishes the new one.
+        await waitFor(() => expect(invalidate).toHaveBeenCalledWith('apps', 'motor'));
+    });
+
+    it('watches the entity for as long as it is shown, and stops on unmount', () => {
+        const unwatch = vi.fn();
+        const watch = vi.fn(() => unwatch);
+        useAppStore.setState({
+            statusByEntity: { 'apps:motor': 'ready' },
+            watchEntityStatus: watch,
+            client: fakeClient,
+        });
+        const { unmount } = renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
+        expect(watch).toHaveBeenCalledWith('apps', 'motor');
+        expect(unwatch).not.toHaveBeenCalled();
+
+        unmount();
+        expect(unwatch).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows a disabled "not available" state when status is unavailable (501)', async () => {
+        // The gateway 501 maps to the cached value 'unavailable' in the store.
+        seedStatus('apps:motor', 'unavailable');
+        renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
+
+        expect(await screen.findByText(/not available/i)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^start$/i })).toHaveAttribute('aria-disabled', 'true');
+        expect(screen.getByRole('button', { name: /^restart$/i })).toHaveAttribute('aria-disabled', 'true');
+        expect(screen.getByRole('button', { name: /^shutdown$/i })).toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('shows the "not available" state when the cached status is unavailable for components', async () => {
+        seedStatus('components:host-1', 'unavailable');
+        renderControl(<EntityStatusControl entityType="components" entityId="host-1" />);
+        expect(await screen.findByText(/not available/i)).toBeInTheDocument();
+    });
+
+    it('surfaces a non-501 error from setStatus inline and keeps the action enabled', async () => {
+        const user = userEvent.setup();
+        mockSetStatus.mockResolvedValue(errResult(400, 'invalid transition'));
+        // start is enabled when notReady and dispatches immediately.
+        seedStatus('apps:motor', 'notReady');
+        renderControl(<EntityStatusControl entityType="apps" entityId="motor" />);
+
+        await user.click(screen.getByRole('button', { name: /^start$/i }));
+
+        expect(await screen.findByText(/invalid transition/i)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^start$/i })).not.toHaveAttribute('aria-disabled');
+    });
+
+    // -----------------------------------------------------------------------
+    // Task 2: gating by status (disable + tooltip)
+    // -----------------------------------------------------------------------
+
+    it('disables Start with a tooltip when status is ready', async () => {
+        seedStatus('components:host1', 'ready');
+        renderControl(<EntityStatusControl entityType="components" entityId="host1" />);
+        expect(await screen.findByRole('button', { name: /^start$/i })).toHaveAttribute('aria-disabled', 'true');
+        expect(screen.getByRole('button', { name: /^restart$/i })).not.toHaveAttribute('aria-disabled');
+    });
+
+    it('disables Restart/Shutdown when status is notReady, keeps Start enabled', async () => {
+        seedStatus('apps:planner', 'notReady');
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+        expect(await screen.findByRole('button', { name: /^start/i })).not.toHaveAttribute('aria-disabled');
+        expect(screen.getByRole('button', { name: /^restart/i })).toHaveAttribute('aria-disabled', 'true');
+        expect(screen.getByRole('button', { name: /^shutdown/i })).toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('leaves Start as the only enabled action when status is notReady', async () => {
+        // Every restart and shutdown variant interrupts a running entity, so on a
+        // stopped one they are all unavailable - Force restart included.
+        seedStatus('apps:planner', 'notReady');
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+        expect(await screen.findByRole('button', { name: /^start$/i })).not.toHaveAttribute('aria-disabled');
+        for (const name of [/^restart$/i, /force restart/i, /^shutdown$/i, /force shutdown/i]) {
+            expect(screen.getByRole('button', { name })).toHaveAttribute('aria-disabled', 'true');
+        }
+    });
+
+    // -----------------------------------------------------------------------
+    // Task 3: confirmation dialog for non-Start actions
+    // -----------------------------------------------------------------------
+
+    it('Restart opens a confirm dialog and does not call setStatus until confirmed', async () => {
+        const user = userEvent.setup();
+        seedStatus('apps:planner', 'ready');
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        await user.click(screen.getByRole('button', { name: /^restart$/i }));
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+        expect(mockSetStatus).not.toHaveBeenCalled();
+
+        await user.click(screen.getByRole('button', { name: /confirm/i }));
+        await waitFor(() => expect(mockSetStatus).toHaveBeenCalledWith(fakeClient, 'apps', 'planner', 'restart'));
+    });
+
+    it('Start dispatches immediately with no dialog', async () => {
+        const user = userEvent.setup();
+        seedStatus('apps:planner', 'notReady');
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        await user.click(screen.getByRole('button', { name: /^start$/i }));
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        await waitFor(() => expect(mockSetStatus).toHaveBeenCalledWith(fakeClient, 'apps', 'planner', 'start'));
+    });
+
+    // -----------------------------------------------------------------------
+    // Task B: response-driven transition feedback (replaces the 501 no-op)
+    // -----------------------------------------------------------------------
+
+    it('501 transition warns "not implemented" and records it for that entity', async () => {
+        seedStatus('apps:planner', 'notReady');
+        useAppStore.setState({ actuationByEntity: {} });
+        mockSetStatus.mockResolvedValue(errResult(501, 'no actuation provider'));
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        await userEvent.click(screen.getByRole('button', { name: /^start/i }));
+
+        await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+        expect(toast.error).not.toHaveBeenCalled();
+        expect(useAppStore.getState().actuationByEntity['apps:planner']).toBe(false);
+    });
+
+    it('2xx transition reports success and records the entity as actuable', async () => {
+        seedStatus('apps:planner', 'notReady');
+        useAppStore.setState({ actuationByEntity: {} });
+        mockSetStatus.mockResolvedValue(ok(202));
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        await userEvent.click(screen.getByRole('button', { name: /^start/i }));
+
+        await waitFor(() => expect(toast.success).toHaveBeenCalled());
+        expect(useAppStore.getState().actuationByEntity['apps:planner']).toBe(true);
+    });
+
+    it.each([
+        ['undefined error (Content-Length: 0)', undefined],
+        ['empty-string error (empty body, no Content-Length)', ''],
+    ])('treats a 502 with an %s as a failure, not a success', async (_label, errorValue) => {
+        seedStatus('apps:planner', 'notReady');
+        useAppStore.setState({ actuationByEntity: {} });
+        mockSetStatus.mockResolvedValue(emptyBodyFailure(502, errorValue));
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        await userEvent.click(screen.getByRole('button', { name: /^start/i }));
+
+        await waitFor(() => expect(toast.error).toHaveBeenCalled());
+        expect(toast.success).not.toHaveBeenCalled();
+        // A failed transition proves nothing about actuation support.
+        expect(useAppStore.getState().actuationByEntity['apps:planner']).toBeUndefined();
+        // The gateway said nothing usable, so the status has to carry the message.
+        expect(await screen.findByRole('alert')).toHaveTextContent(/502/);
+    });
+
+    it('keeps the known readiness after a failed transition', async () => {
+        const invalidate = vi.fn();
+        useAppStore.setState({
+            statusByEntity: { 'apps:planner': 'notReady' },
+            watchEntityStatus: noopWatch,
+            invalidateEntityStatus: invalidate,
+            client: fakeClient,
+        });
+        mockSetStatus.mockResolvedValue(emptyBodyFailure(503));
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        await userEvent.click(screen.getByRole('button', { name: /^start/i }));
+
+        await waitFor(() => expect(toast.error).toHaveBeenCalled());
+        // Nothing moved, so the readiness the UI already has is still correct.
+        expect(invalidate).not.toHaveBeenCalled();
+    });
+
+    // -----------------------------------------------------------------------
+    // The control sits at a fixed position in EntityDetailPanel and AppsPanel,
+    // so selecting another entity changes entityId without remounting.
+    // -----------------------------------------------------------------------
+
+    it('does not carry a pending action over to the next selected entity', async () => {
+        const user = userEvent.setup();
+        let finish: (value: unknown) => void = () => {};
+        mockSetStatus.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+        useAppStore.setState({
+            statusByEntity: { 'apps:alpha': 'ready', 'apps:beta': 'ready' },
+            watchEntityStatus: noopWatch,
+            client: fakeClient,
+        });
+
+        const { rerender } = renderControl(<EntityStatusControl entityType="apps" entityId="alpha" />);
+        await user.click(screen.getByRole('button', { name: /^shutdown$/i }));
+        await user.click(await screen.findByRole('button', { name: /confirm/i }));
+        await waitFor(() => expect(mockSetStatus).toHaveBeenCalledTimes(1));
+        expect(screen.getByRole('button', { name: /^restart$/i })).toHaveAttribute('aria-disabled', 'true');
+
+        rerender(
+            <TooltipProvider>
+                <EntityStatusControl entityType="apps" entityId="beta" />
+            </TooltipProvider>
+        );
+
+        // beta is ready and has nothing in flight: everything but Start is live.
+        await waitFor(() =>
+            expect(screen.getByRole('button', { name: /^restart$/i })).not.toHaveAttribute('aria-disabled')
+        );
+
+        finish(errResult(500, 'alpha refused'));
+
+        // alpha's failure is still reported, but it must not land on beta's panel.
+        await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('alpha')));
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^restart$/i })).not.toHaveAttribute('aria-disabled');
+    });
+
+    // -----------------------------------------------------------------------
+    // Gating on a readiness the UI does not have
+    // -----------------------------------------------------------------------
+
+    it.each([
+        ['the first read has not landed yet', undefined],
+        ['the read failed', 'unknown'],
+    ])('offers no transition while %s', async (_label, cached) => {
+        useAppStore.setState({
+            statusByEntity: cached ? { 'apps:planner': cached as never } : {},
+            watchEntityStatus: noopWatch,
+            client: fakeClient,
+        });
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        for (const name of [/^start$/i, /^restart$/i, /force restart/i, /^shutdown$/i, /force shutdown/i]) {
+            expect(await screen.findByRole('button', { name })).toHaveAttribute('aria-disabled', 'true');
+        }
+    });
+
+    it('a 501 on one entity leaves another entity actuable', async () => {
+        const user = userEvent.setup();
+        useAppStore.setState({
+            statusByEntity: { 'apps:alpha': 'notReady', 'apps:beta': 'notReady' },
+            watchEntityStatus: noopWatch,
+            client: fakeClient,
+        });
+        mockSetStatus.mockResolvedValue(errResult(501, 'no actuation provider'));
+
+        const { rerender } = renderControl(<EntityStatusControl entityType="apps" entityId="alpha" />);
+        await user.click(screen.getByRole('button', { name: /^start$/i }));
+        await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+        expect(screen.getByRole('button', { name: /^start$/i })).toHaveAttribute('aria-disabled', 'true');
+
+        rerender(
+            <TooltipProvider>
+                <EntityStatusControl entityType="apps" entityId="beta" />
+            </TooltipProvider>
+        );
+
+        // beta may well have a provider: alpha's answer says nothing about it.
+        expect(screen.getByRole('button', { name: /^start$/i })).not.toHaveAttribute('aria-disabled');
+        expect(screen.queryByText(/not implemented for this entity/i)).not.toBeInTheDocument();
+    });
+
+    // -----------------------------------------------------------------------
+    // Unavailable actions stay reachable so their reason is announced
+    // -----------------------------------------------------------------------
+
+    it('keeps an unavailable action in the accessibility tree with its name', async () => {
+        seedStatus('components:host1', 'ready');
+        renderControl(<EntityStatusControl entityType="components" entityId="host1" />);
+
+        // getByRole ignores elements removed from the accessibility tree, and a
+        // `disabled` button is not focusable - both of which hide the reason.
+        const start = await screen.findByRole('button', { name: /^start$/i });
+        expect(start).toHaveAttribute('aria-disabled', 'true');
+        expect(start).not.toHaveAttribute('disabled');
+        start.focus();
+        expect(start).toHaveFocus();
+    });
+
+    it('rejects a click on an unavailable action', async () => {
+        const user = userEvent.setup();
+        seedStatus('components:host1', 'ready');
+        renderControl(<EntityStatusControl entityType="components" entityId="host1" />);
+
+        await user.click(screen.getByRole('button', { name: /^start$/i }));
+
+        expect(mockSetStatus).not.toHaveBeenCalled();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('describes an unavailable action when it takes focus', async () => {
+        const user = userEvent.setup();
+        seedStatus('components:host1', 'ready');
+        renderControl(<EntityStatusControl entityType="components" entityId="host1" />);
+
+        await user.tab();
+        await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(/already running/i));
+    });
+
+    // -----------------------------------------------------------------------
+    // Task C: disable + "not implemented" note when the entity answered 501
+    // -----------------------------------------------------------------------
+
+    it('disables all transition buttons and shows a note when actuation is unsupported', async () => {
+        seedStatus('apps:planner', 'notReady');
+        useAppStore.setState({ actuationByEntity: { 'apps:planner': false } });
+        renderControl(<EntityStatusControl entityType="apps" entityId="planner" />);
+
+        expect(await screen.findByRole('button', { name: /^start/i })).toHaveAttribute('aria-disabled', 'true');
+        expect(screen.getByRole('button', { name: /^restart/i })).toHaveAttribute('aria-disabled', 'true');
+        expect(screen.getByText(/not implemented for this entity/i)).toBeInTheDocument();
+    });
+});

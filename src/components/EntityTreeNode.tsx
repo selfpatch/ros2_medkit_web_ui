@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { useAppStore } from '@/lib/store';
+import { useAppStore, entityStatusKey } from '@/lib/store';
 import type { EntityTreeNode as EntityTreeNodeType, TopicNodeData, Parameter } from '@/lib/types';
 
 interface EntityTreeNodeProps {
@@ -115,6 +115,23 @@ function getEntityColor(type: string, isSelected?: boolean): string {
 }
 
 /**
+ * Tailwind classes for the readiness lamp. Colour and shape both carry the
+ * state, so the lamp still reads for someone who cannot separate green from
+ * amber: ready is a filled disc, notReady a hollow ring, and anything the UI
+ * has not established a square.
+ */
+function getLampClass(status: string | undefined): string {
+    switch (status) {
+        case 'ready':
+            return 'rounded-full bg-emerald-500';
+        case 'notReady':
+            return 'rounded-full border-2 border-amber-500 bg-transparent';
+        default:
+            return 'rounded-sm bg-muted-foreground/40';
+    }
+}
+
+/**
  * Check if node data is TopicNodeData (from topicsInfo)
  */
 function isTopicNodeData(data: unknown): data is TopicNodeData {
@@ -139,6 +156,32 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
             selectEntity: state.selectEntity,
         }))
     );
+
+    // Lifecycle readiness lamp is only meaningful for apps and components.
+    // The tree uses singular node types; the lifecycle API uses plural.
+    const isLifecycleEntity = node.type === 'app' || node.type === 'component';
+    const lifecycleType = node.type === 'app' ? 'apps' : 'components';
+    const status = useAppStore((s) =>
+        isLifecycleEntity ? s.statusByEntity[entityStatusKey(lifecycleType, node.id)] : undefined
+    );
+    const watchEntityStatus = useAppStore((s) => s.watchEntityStatus);
+
+    // This node only mounts while its parent is expanded, so watching from here
+    // is what scopes the refresh loop to the branches that are actually open -
+    // a collapsed branch stops costing requests, and an open one stops showing
+    // the readiness it had when it was opened.
+    useEffect(() => {
+        if (!isLifecycleEntity) return;
+        return watchEntityStatus(lifecycleType, node.id);
+    }, [isLifecycleEntity, lifecycleType, node.id, watchEntityStatus]);
+
+    // The name identifies the entity and the description qualifies it, so the
+    // name leads: a description is entity metadata (a component's is the host's
+    // OS, identical across every component on that host) and cannot stand in for
+    // an identifier.
+    const nodeLabel = typeof node.name === 'string' && node.name ? node.name : String(node.id || '');
+    const nodeDescription = typeof node.description === 'string' ? node.description : '';
+    const nodeTitle = nodeDescription ? `${nodeLabel} - ${nodeDescription}` : nodeLabel;
 
     const isExpanded = expandedPaths.includes(node.path);
     const isLoading = loadingPaths.includes(node.path);
@@ -221,8 +264,20 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
 
                 <Icon className={cn('w-4 h-4 shrink-0', iconColorClass)} />
 
-                <span className="text-sm truncate flex-1">
-                    {typeof node.name === 'string' ? node.name : String(node.name || node.id || '')}
+                {isLifecycleEntity && (
+                    // role="img" is what carries the label: a span with no role
+                    // and no content maps to `generic`, on which aria-label is
+                    // prohibited and dropped, leaving colour as the only channel.
+                    <span
+                        role="img"
+                        aria-label={`status: ${status ?? 'unknown'}`}
+                        className={cn('w-2 h-2 shrink-0', getLampClass(status))}
+                    />
+                )}
+
+                <span className="text-sm truncate flex-1" title={nodeTitle}>
+                    {nodeLabel}
+                    {nodeDescription && <span className="ml-1.5 text-xs text-muted-foreground">{nodeDescription}</span>}
                 </span>
 
                 {/* Topic direction indicators */}

@@ -14,6 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { EntityDetailPanel } from './EntityDetailPanel';
 
 // Mock heavy child components - we only care about the top-level routing
@@ -49,6 +50,9 @@ vi.mock('@/lib/store', () => ({
     // The breadcrumb builder resolves segment types via findNode; these tests
     // don't load a tree, so it always falls back to position-based inference.
     findNode: () => null,
+    // EntityStatusControl (rendered for component/subcomponent entities) reads
+    // the status cache keyed by entityStatusKey.
+    entityStatusKey: (entityType: string, entityId: string) => `${entityType}:${entityId}`,
 }));
 
 function setStore(overrides: Record<string, unknown>) {
@@ -63,6 +67,12 @@ function setStore(overrides: Record<string, unknown>) {
         refreshSelectedEntity: mockRefreshSelectedEntity,
         prefetchResourceCounts: mockPrefetchResourceCounts,
         fetchEntityData: mockFetchEntityData,
+        // EntityStatusControl reads these from the store; provide inert values
+        // so the rendered control mounts without touching the network.
+        client: null,
+        statusByEntity: {},
+        actuationByEntity: {},
+        watchEntityStatus: vi.fn(() => () => {}),
         ...overrides,
     };
 }
@@ -84,7 +94,13 @@ describe('EntityDetailPanel - nested entity types', () => {
             },
         });
 
-        render(<EntityDetailPanel onConnectClick={() => {}} />);
+        // App.tsx wraps the whole tree in a TooltipProvider, and the panel
+        // renders tooltips for any disabled lifecycle action.
+        render(
+            <TooltipProvider>
+                <EntityDetailPanel onConnectClick={() => {}} />
+            </TooltipProvider>
+        );
 
         // Bug repro: subcomponent should fetch resource counts using the
         // 'components' entity type (gateway routes subcomponents through
@@ -115,7 +131,13 @@ describe('EntityDetailPanel - nested entity types', () => {
             },
         });
 
-        render(<EntityDetailPanel onConnectClick={() => {}} />);
+        // App.tsx wraps the whole tree in a TooltipProvider, and the panel
+        // renders tooltips for any disabled lifecycle action.
+        render(
+            <TooltipProvider>
+                <EntityDetailPanel onConnectClick={() => {}} />
+            </TooltipProvider>
+        );
 
         // Bug repro: subarea should fetch resource counts using the 'areas'
         // entity type (gateway routes subareas through /api/v1/areas/{id}/...).

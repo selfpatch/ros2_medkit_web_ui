@@ -31,6 +31,7 @@ import { FunctionsPanel } from '@/components/FunctionsPanel';
 import { ServerInfoPanel } from '@/components/ServerInfoPanel';
 import { FaultsDashboard } from '@/components/FaultsDashboard';
 import { UpdatesDashboard } from '@/components/UpdatesDashboard';
+import { EntityStatusControl } from '@/components/EntityStatusControl';
 import { useAppStore, findNode, type AppState } from '@/lib/store';
 import type { ComponentTopic, Parameter, SovdResourceEntityType } from '@/lib/types';
 
@@ -778,6 +779,11 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                                         </div>
                                         <div>
                                             <CardTitle className="text-xl">{selectedEntity.name}</CardTitle>
+                                            {selectedEntity.description && (
+                                                <p className="text-sm text-muted-foreground">
+                                                    {selectedEntity.description}
+                                                </p>
+                                            )}
                                             <CardDescription className="flex items-center gap-2">
                                                 <Badge variant="outline">{selectedEntity.type}</Badge>
                                                 <span className="text-muted-foreground">•</span>
@@ -803,6 +809,12 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                                         </Button>
                                     </div>
                                 </div>
+                                {/* Lifecycle status control (gateway 0.6.0 lifecycle API) */}
+                                {isComponent && (
+                                    <div className="mt-4">
+                                        <EntityStatusControl entityType="components" entityId={entityId} />
+                                    </div>
+                                )}
                             </CardHeader>
 
                             {/* Tab Navigation for Components */}

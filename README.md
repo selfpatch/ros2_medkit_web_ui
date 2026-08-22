@@ -13,8 +13,9 @@ Simple, open-source web UI for browsing SOVD (Service-Oriented Vehicle Diagnosti
 ros2_medkit_web_ui is a lightweight single-page application that connects to a SOVD server and visualizes the entity hierarchy. It provides:
 
 - **Server Connection Dialog** - Enter the URL of your SOVD server (supports both `http://ip:port` and `ip:port` formats)
-- **Entity Tree Sidebar** - Browse the hierarchical structure of SOVD entities with lazy-loading
+- **Entity Tree Sidebar** - Browse the hierarchical structure of SOVD entities with lazy-loading, with a readiness lamp on app and component nodes (a green disc for ready, an amber ring for not ready, a grey square for a readiness the UI has not established). The lamp is re-read while the branch is open, so it tracks an entity that stops or comes back
 - **Entity Detail Panel** - View raw JSON details of any selected entity
+- **Entity Lifecycle Status Control** - View readiness and request lifecycle transitions (start, restart, force-restart, shutdown, force-shutdown) for apps and components, degrading gracefully on an entity with no lifecycle provider, without taking the entities that have one with it. Actions are gated by the current status (a transition the current status does not allow is marked unavailable and rejected, and stays focusable so the tooltip explaining why reaches a screen reader), and every destructive transition (all but Start) asks for confirmation before dispatch. A transition is only reported as requested when the gateway accepts it; because acceptance is not completion, the readiness is dropped and re-established by the refresh rather than read back straight away
 
 This tool is designed for developers and integrators working with SOVD-compatible systems who need a quick way to explore and debug the entity structure.
 
