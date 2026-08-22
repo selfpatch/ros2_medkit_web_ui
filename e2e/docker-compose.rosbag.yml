@@ -1,0 +1,83 @@
+# Stack for the rosbag-history specs: a gateway AND a fault manager, so a fault
+# can actually own black-box recordings. docker-compose.yml next to this file
+# runs a manifest-only gateway with no fault manager at all, which cannot
+# produce a single bag; the two scenarios are kept apart rather than merged so
+# neither has to carry the other's configuration.
+
+# Its own project: both compose files live in e2e/, so without this they share
+# the default project name "e2e" and their `gateway` services replace each other
+# instead of running side by side.
+name: e2e-rosbag
+
+services:
+    gateway:
+        # Overridable because the recording-id contract these specs assert on
+        # (ros2_medkit#620) is newer than any published tag: point this at a
+        # locally built image to run them before that lands. Once it is
+        # published, pin a digest here the way docker-compose.yml does.
+        image: ${E2E_ROSBAG_GATEWAY_IMAGE:-ghcr.io/selfpatch/ros2_medkit-jazzy:latest}
+        ports:
+            # Loopback only, and on its own port so this stack can run alongside
+            # the scripts one without either stealing the other's.
+            - '127.0.0.1:${E2E_ROSBAG_GATEWAY_PORT:-8081}:8080'
+        volumes:
+            - ./gateway/rosbag-params.yaml:/e2e/params.yaml:ro
+            - ./gateway/seed_recordings.py:/e2e/seed_recordings.py:ro
+            - e2e-bags:/e2e-bags
+        # PID 1 reaps children and forwards signals; without it bash -lc keeps
+        # PID 1 for itself and `docker compose down` waits out the whole grace
+        # period before SIGKILLing a fault manager mid-write.
+        init: true
+        # Overriding the entrypoint skips /entrypoint.sh, which is what sources
+        # ROS and exports the RMW default - both have to be restored here.
+        environment:
+            RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+        entrypoint: ['/bin/bash', '-lc']
+        # Fault manager, the seeder and the gateway in one container. Not three
+        # services sharing a network: the default DDS transport uses /dev/shm,
+        # which is per container, so the seeder's service calls would never
+        # complete even though discovery says the service is there.
+        #
+        # Sourced ONCE in the parent shell, then every process runs as a WATCHED
+        # background job: `&` binds looser than `&&`, so the earlier
+        # `source && source && fault_manager & gateway` form left the gateway in
+        # an unsourced shell ("ros2: command not found", exit 127). `wait -n`
+        # returns when the FIRST job dies, so a fault manager that cannot open
+        # its DB or a seeder that raises SystemExit takes the container down
+        # with its exit code instead of leaving a healthy-looking stack whose
+        # specs skip. The trap makes SIGTERM stop the children before the shell
+        # exits.
+        command:
+            - >
+                source /opt/ros/jazzy/setup.bash;
+                source /home/medkit/ws/install/setup.bash;
+                ros2 run ros2_medkit_fault_manager fault_manager_node
+                --ros-args --params-file /e2e/params.yaml &
+                FM=$!;
+                python3 /e2e/seed_recordings.py &
+                SEED=$!;
+                ros2 run ros2_medkit_gateway gateway_node
+                --ros-args --params-file /e2e/params.yaml &
+                GW=$!;
+                trap 'kill $FM $SEED $GW 2>/dev/null' TERM INT;
+                wait -n $FM $SEED $GW;
+                exit $?
+        depends_on:
+            init-bags:
+                condition: service_completed_successfully
+    # The gateway image runs as uid 999 and a fresh named volume is root-owned,
+    # so the fault manager could not write a bag into it. Same one-shot chown
+    # the scripts stack does for its upload volume.
+    init-bags:
+        image: ${E2E_ROSBAG_GATEWAY_IMAGE:-ghcr.io/selfpatch/ros2_medkit-jazzy:latest}
+        user: root
+        volumes:
+            - e2e-bags:/e2e-bags
+        entrypoint: ['chown', '-R', '999:999', '/e2e-bags']
+
+volumes:
+    # Holds the bags AND faults.db, and it outlives `docker compose down`.
+    # Re-seed from a clean slate with `down -v` first: on a reused volume the
+    # fault is already CONFIRMED, the first confirm captures nothing, and the
+    # suite sees three recordings instead of two.
+    e2e-bags:

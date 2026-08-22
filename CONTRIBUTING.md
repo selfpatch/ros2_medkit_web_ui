@@ -87,6 +87,43 @@ Before opening or updating a Pull Request, you **must**:
     npm run dev
     ```
 
+> **Note:** `npm run typecheck` runs `tsc --noEmit` against the root `tsconfig.json`, which has no `files` of its own and therefore checks nothing. Type errors are actually caught by `npm run build` (`tsc -b`, which builds the referenced app, node and e2e project configs). Do not trust a green `typecheck` on its own; run `build` before opening a PR.
+
+### Running the End-to-End Suite Locally
+
+The Playwright suite in `e2e/` runs the real UI against a containerised gateway instead of mocks, so it needs Docker.
+
+1. Start the gateway:
+
+    ```bash
+    docker compose -f e2e/docker-compose.yml up -d
+    ```
+
+2. Run the suite:
+
+    ```bash
+    npm run test:e2e
+    ```
+
+    Use `npm run test:e2e:ui` instead to step through the tests with the Playwright UI.
+
+3. Stop the gateway once you are done, dropping the uploads volume along with it:
+
+    ```bash
+    docker compose -f e2e/docker-compose.yml down -v
+    ```
+
+`e2e/scripts.spec.ts` uploads, runs and deletes scripts against the shared gateway container, mutating its state as it goes, so it and the other specs that touch the live gateway are pinned to a single Playwright worker (see `playwright.config.ts`). Do not attempt to parallelize these specs or run them against a gateway instance you care about keeping in a known state.
+
+If port 8080 or 5173 is already taken on your machine, override the gateway port and/or the dev server URL before starting the stack:
+
+```bash
+E2E_GATEWAY_PORT=8081 docker compose -f e2e/docker-compose.yml up -d
+E2E_GATEWAY_PORT=8081 npm run test:e2e
+```
+
+`E2E_GATEWAY_PORT` is the only variable you need for the gateway side: `e2e/global-setup.ts` derives the full gateway URL from it, and the gateway's CORS configuration allows any origin so an overridden dev server port is never rejected. Set `E2E_APP_URL` instead (e.g. `E2E_APP_URL=http://localhost:5174`) if the dev server port needs to change; `playwright.config.ts` derives the dev server's port from it. The gateway container stays bound to `127.0.0.1` regardless of the port chosen.
+
 ### Pull Request Checklist
 
 Before submitting your PR, ensure:

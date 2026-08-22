@@ -51,7 +51,6 @@ import {
     putEntityDataItem,
     deleteEntityConfiguration,
     deleteEntityConfigurations,
-    getEntityBulkData,
     getEntityLogs,
     getEntityLogsConfiguration,
     putEntityLogsConfiguration,
@@ -977,6 +976,55 @@ async function fetchEntityFromApi(
             isLoadingDetails: false,
         });
     }
+}
+
+/**
+ * Filename the server chose, out of a `Content-Disposition` header.
+ *
+ * Handles the plain `filename=` form (quoted or not) and RFC 8187's
+ * `filename*=<charset>'<language>'<pct-encoded>` - any charset and any language
+ * tag, not just `UTF-8''`. Returns null when the header is absent or names
+ * nothing, so the caller can fall back rather than saving a file called "null".
+ */
+
+/** RFC 8187 ext-value payload to a string, or null when undecodable. UTF-8 is
+ *  the wire norm; any single-byte charset (the RFC's other registered case is
+ *  ISO-8859-1) decodes byte-per-byte, which maps 1:1 onto code points. */
+function decodeExtValue(charset: string, encoded: string): string | null {
+    try {
+        if (/^utf-?8$/i.test(charset)) return decodeURIComponent(encoded);
+        return encoded.replace(/%([0-9a-f]{2})/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+    } catch {
+        return null;
+    }
+}
+
+export function filenameFromContentDisposition(header: string | null): string | null {
+    if (!header) return null;
+
+    const extended = /(?:^|;)\s*filename\*\s*=\s*([^';]+)'[^';]*'([^;\s]*)/.exec(header);
+    // Validated as a WHOLE before decoding: a partial match would silently
+    // truncate at the first bad escape ("bad%ZZ" -> "bad") instead of letting a
+    // well-formed plain `filename=` further down win. Decoded before trimming,
+    // so a value that is all `%20` is rejected as empty.
+    if (extended && /^(?:%[0-9a-fA-F]{2}|[^%])*$/.test(extended[2]!)) {
+        const name = decodeExtValue(extended[1]!, extended[2]!)?.trim();
+        if (name) return name;
+    }
+
+    // Quoted form next: semicolons and spaces stay inside the quotes, and a
+    // backslash escapes the next character. Anchored on a parameter boundary so
+    // `xfilename=` cannot match, and `filename*=` cannot reach here because a
+    // `*` sits between the name and the `=`.
+    const quoted = /(?:^|;)\s*filename\s*=\s*"((?:\\.|[^"\\])*)"/i.exec(header);
+    if (quoted) {
+        const name = quoted[1]!.replace(/\\(.)/g, '$1').trim();
+        return name ? name : null;
+    }
+
+    const plain = /(?:^|;)\s*filename\s*=\s*([^;]+)/i.exec(header);
+    const name = plain?.[1]?.trim();
+    return name ? name : null;
 }
 
 export const useAppStore = create<AppState>()(
@@ -2759,13 +2807,6 @@ export const useAppStore = create<AppState>()(
                 const { client, serverUrl } = get();
                 if (!client || !serverUrl) return null;
 
-                // Fetch file list to get filename
-                const { data } = await getEntityBulkData(client, entityType, entityId, category);
-                if (!data) return null;
-                const items = (data as unknown as { items?: Array<{ id: string; name?: string }> })?.items || [];
-                const fileDesc = items.find((item) => item.id === fileId);
-                const filename = fileDesc?.name || fileId;
-
                 // Download binary via fetch (openapi-fetch doesn't support blob responses)
                 const baseUrl = normalizeBaseUrl(serverUrl);
                 const downloadUrl = `${baseUrl}/${entityType}/${encodeURIComponent(entityId)}/bulk-data/${encodeURIComponent(category)}/${encodeURIComponent(fileId)}`;
@@ -2776,6 +2817,14 @@ export const useAppStore = create<AppState>()(
                     clearTimeout(timer);
                     if (!response.ok) return null;
                     const blob = await response.blob();
+                    // The server names the file, and it is the only party that knows
+                    // the storage format, so only it can put the right extension on
+                    // the end. The descriptor's `name` is a human label ("<id>
+                    // recording <timestamp>"), not a filename: saving under it lands
+                    // a rosbag on disk with no `.mcap`/`.db3` at all, which neither
+                    // the OS nor `ros2 bag play` can make sense of.
+                    const filename =
+                        filenameFromContentDisposition(response.headers.get('content-disposition')) ?? fileId;
                     return { blob, filename };
                 } catch {
                     clearTimeout(timer);

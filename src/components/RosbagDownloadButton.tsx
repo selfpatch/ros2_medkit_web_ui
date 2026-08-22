@@ -84,6 +84,11 @@ export function RosbagDownloadButton({ snapshot, variant = 'outline', size = 'sm
     }
 
     const label = snapshot.size_bytes ? `Download (${formatBytes(snapshot.size_bytes)})` : 'Download rosbag';
+    // A fault can hold several recordings, so the icon variant renders as N
+    // buttons with no text at all - identical to a screen reader and to keyboard
+    // navigation. Name each one after the recording it downloads so they can be
+    // told apart; snapshot.name carries the recording id.
+    const accessibleName = snapshot.name ? `${label} - ${snapshot.name}` : label;
 
     return (
         <Tooltip>
@@ -93,6 +98,7 @@ export function RosbagDownloadButton({ snapshot, variant = 'outline', size = 'sm
                     size={size}
                     onClick={handleDownload}
                     disabled={isDownloading}
+                    aria-label={accessibleName}
                     className={error ? 'border-destructive' : ''}
                 >
                     {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}

@@ -2,7 +2,6 @@ name: CI
 
 on:
     pull_request:
-        branches: [main]
     push:
         branches: [main]
 
@@ -38,6 +37,49 @@ jobs:
 
             - name: Build project
               run: npm run build
+
+    e2e:
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '22'
+                  cache: 'npm'
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Start gateway
+              run: docker compose -f e2e/docker-compose.yml up -d
+
+            - name: Install Playwright browsers
+              run: npx playwright install --with-deps chromium
+
+            - name: Run E2E tests
+              run: npm run test:e2e
+
+            - name: Upload Playwright artifacts
+              if: failure()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: playwright-report
+                  path: |
+                      playwright-report/
+                      test-results/
+
+            - name: Dump gateway logs on failure
+              if: failure()
+              run: docker compose -f e2e/docker-compose.yml logs
+
+            - name: Stop gateway
+              if: always()
+              run: docker compose -f e2e/docker-compose.yml down -v
 
     docker-build:
         runs-on: ubuntu-latest

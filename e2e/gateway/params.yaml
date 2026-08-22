@@ -1,0 +1,23 @@
+/**:
+    ros__parameters:
+        server:
+            host: '0.0.0.0'
+            port: 8080
+        cors:
+            # '*' rather than a hardcoded 'http://localhost:5173': playwright.config.ts
+            # and e2e/global-setup.ts both derive the dev server origin from
+            # E2E_APP_URL, so overriding that variable (e.g. to dodge a busy port)
+            # would otherwise leave the browser talking to an origin this gateway
+            # never allowed, failing every request with no
+            # Access-Control-Allow-Origin header and no mention of CORS anywhere
+            # in the symptom. This is a throwaway local/CI fixture with
+            # allow_credentials left at its default false, so a wildcard origin
+            # carries none of the risk it would in a real deployment.
+            allowed_origins:
+                - '*'
+        discovery:
+            mode: 'manifest_only'
+            manifest_path: '/e2e/manifest.yaml'
+        scripts:
+            scripts_dir: '/e2e-uploads'
+            allow_uploads: true
