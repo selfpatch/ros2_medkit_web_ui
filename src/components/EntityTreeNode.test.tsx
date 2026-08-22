@@ -124,8 +124,12 @@ describe('EntityTreeNode label', () => {
     });
     afterEach(() => cleanup());
 
-    it('shows the entity description as the label when present', () => {
-        useAppStore.setState({ fetchEntityStatus: vi.fn() } as never);
+    it('keeps the name visible and shows the description beside it', () => {
+        // A component's description is host metadata, so it is the same string
+        // for every component on that host: it can add to the name but must not
+        // stand in for it, or the rows stop being distinguishable without a
+        // hover that keyboard and touch users do not have.
+        useAppStore.setState({ watchEntityStatus: vi.fn(() => () => {}) } as never);
         render(
             <EntityTreeNode
                 node={
@@ -140,11 +144,12 @@ describe('EntityTreeNode label', () => {
                 depth={0}
             />
         );
+        expect(screen.getByText('a3d9')).toBeInTheDocument();
         expect(screen.getByText('Ubuntu 24.04.4 LTS on x86_64')).toBeInTheDocument();
     });
 
-    it('falls back to the name when there is no description', () => {
-        useAppStore.setState({ fetchEntityStatus: vi.fn() } as never);
+    it('shows the name alone when there is no description', () => {
+        useAppStore.setState({ watchEntityStatus: vi.fn(() => () => {}) } as never);
         render(
             <EntityTreeNode
                 node={{ id: 'talker', name: 'talker', type: 'app', path: '/x/talker' } as never}

@@ -175,6 +175,14 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
         return watchEntityStatus(lifecycleType, node.id);
     }, [isLifecycleEntity, lifecycleType, node.id, watchEntityStatus]);
 
+    // The name identifies the entity and the description qualifies it, so the
+    // name leads: a description is entity metadata (a component's is the host's
+    // OS, identical across every component on that host) and cannot stand in for
+    // an identifier.
+    const nodeLabel = typeof node.name === 'string' && node.name ? node.name : String(node.id || '');
+    const nodeDescription = typeof node.description === 'string' ? node.description : '';
+    const nodeTitle = nodeDescription ? `${nodeLabel} - ${nodeDescription}` : nodeLabel;
+
     const isExpanded = expandedPaths.includes(node.path);
     const isLoading = loadingPaths.includes(node.path);
     const isSelected = selectedPath === node.path;
@@ -267,9 +275,9 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
                     />
                 )}
 
-                <span className="text-sm truncate flex-1" title={typeof node.name === 'string' ? node.name : node.id}>
-                    {(typeof node.description === 'string' && node.description) ||
-                        (typeof node.name === 'string' ? node.name : String(node.name || node.id || ''))}
+                <span className="text-sm truncate flex-1" title={nodeTitle}>
+                    {nodeLabel}
+                    {nodeDescription && <span className="ml-1.5 text-xs text-muted-foreground">{nodeDescription}</span>}
                 </span>
 
                 {/* Topic direction indicators */}
