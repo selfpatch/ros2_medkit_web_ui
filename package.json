@@ -18,7 +18,7 @@
         "test:coverage": "vitest --coverage",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
-        "typecheck": "tsc --noEmit",
+        "typecheck": "tsc -b --emitDeclarationOnly false --noEmit",
         "prepare": "husky"
     },
     "lint-staged": {
