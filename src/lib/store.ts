@@ -2013,7 +2013,10 @@ export const useAppStore = create<AppState>()(
                     } catch {
                         writeStatus('unknown');
                     } finally {
-                        if (inFlightStatusRequests.get(key) === request) inFlightStatusRequests.delete(key);
+                        // Only clear the slot if it is still this request's. A
+                        // later generation means an invalidation already dropped
+                        // it and something newer may be parked there.
+                        if ((statusEpochs.get(key) ?? 0) === epoch) inFlightStatusRequests.delete(key);
                     }
 
                     // Two ways a response can be obsolete by the time it lands: it
