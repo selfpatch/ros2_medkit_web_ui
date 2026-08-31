@@ -233,7 +233,10 @@ describe('fetchFaults against a moving connection', () => {
                 call += 1;
                 return call === 1
                     ? new Promise((resolve) => {
-                          setTimeout(() => resolve({ data: undefined, error: { message: 'Failed to get faults' } }), 50);
+                          setTimeout(
+                              () => resolve({ data: undefined, error: { message: 'Failed to get faults' } }),
+                              50
+                          );
                       })
                     : Promise.resolve({ data: { items: [raw()] }, error: undefined });
             }),
