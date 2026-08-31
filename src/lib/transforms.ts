@@ -199,6 +199,27 @@ interface RawFaultsResponse {
     'x-medkit'?: { count?: number };
 }
 
+/** How live a fault is. Peers can answer at their own pace and disagree about one fault. */
+const FAULT_STATUS_RANK: Record<Fault['status'], number> = {
+    active: 3,
+    pending: 2,
+    healed: 1,
+    cleared: 0,
+};
+
+/**
+ * Of two records for one fault, the one that describes it now: still raised beats
+ * already gone, and at equal standing the one that has occurred more often is the
+ * later reading. Dropping the wrong one hides a fault that is still up.
+ */
+function moreCurrentRevision(a: Fault, b: Fault): Fault {
+    const byStatus = FAULT_STATUS_RANK[b.status] - FAULT_STATUS_RANK[a.status];
+    if (byStatus !== 0) return byStatus > 0 ? b : a;
+    const occurrences = (f: Fault) =>
+        typeof f.parameters?.occurrence_count === 'number' ? f.parameters.occurrence_count : 0;
+    return occurrences(b) > occurrences(a) ? b : a;
+}
+
 /**
  * Transform the raw gateway faults list response into `ListFaultsResponse`.
  */
@@ -212,14 +233,18 @@ export function transformFaultsResponse(rawData: unknown): ListFaultsResponse {
     // An aggregating gateway can reach one fault through more than one peer and list
     // it twice. A fault is identified by its code on its entity, so the repeats are
     // the same fault: one row, counted once.
-    const seen = new Set<string>();
+    const indexByKey = new Map<string, number>();
     const items: Fault[] = [];
     for (const [idx, rawItem] of rawItems.entries()) {
         const fault = transformFault(rawItem as RawFaultItem, String(idx));
         const key = faultKey(fault);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        items.push(fault);
+        const existing = indexByKey.get(key);
+        if (existing === undefined) {
+            indexByKey.set(key, items.length);
+            items.push(fault);
+            continue;
+        }
+        items[existing] = moreCurrentRevision(items[existing]!, fault);
     }
     // The gateway's own count stays authoritative (it may describe more than this
     // page), minus whatever repeats were folded away here.

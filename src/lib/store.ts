@@ -279,6 +279,8 @@ export interface AppState {
     // Faults actions
     /** `force` skips the shared in-flight refresh, for a read that must see the newest state. */
     fetchFaults: (options?: { force?: boolean }) => Promise<void>;
+    /** Applies one fault stream event to the shared list. */
+    applyFaultStreamEvent: (eventType: string, fault: Fault) => void;
     clearFault: (entityType: SovdResourceEntityType, entityId: string, faultCode: string) => Promise<boolean>;
     registerUpdate: (body: { id: string; [key: string]: unknown }, signal?: AbortSignal) => Promise<void>;
     subscribeFaultStream: () => void;
@@ -919,6 +921,13 @@ export const FAULTS_REQUEST_TIMEOUT_MS = 15000;
  * this one refresh would put as many requests on the wire as there are views.
  */
 let faultsRefreshInFlight: Promise<void> | null = null;
+
+/**
+ * Which read is the current one. A forced refresh starts while a background one is
+ * still out, and answers can come back in either order - the older one must not be
+ * the version of the list, nor the reason shown for a read that has since succeeded.
+ */
+let faultsReadSeq = 0;
 
 /** Reset the status-request dedupe cache. Exposed for tests. */
 export function __resetStatusRequestCache(): void {
@@ -2572,6 +2581,7 @@ export const useAppStore = create<AppState>()(
                     set({ isLoadingFaults: true });
                 }
 
+                const readSeq = (faultsReadSeq += 1);
                 const run = async () => {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), FAULTS_REQUEST_TIMEOUT_MS);
@@ -2585,8 +2595,9 @@ export const useAppStore = create<AppState>()(
                             signal: controller.signal,
                         });
                         // A refresh outlives the session that started it, so an answer from
-                        // the gateway we just left must not populate the next one's list.
-                        if (get().client !== client) return;
+                        // the gateway we just left must not populate the next one's list,
+                        // and neither may one a later read has already answered for.
+                        if (get().client !== client || readSeq !== faultsReadSeq) return;
                         if (faultsError) throw new Error(describeGatewayError(faultsError));
                         const result = transformFaultsResponse(faultsData);
                         // The fault stream writes this same list. If it did so while this
@@ -2612,7 +2623,7 @@ export const useAppStore = create<AppState>()(
                             set({ isLoadingFaults: false, faultsLoaded: true, faultsError: null });
                         }
                     } catch (error) {
-                        if (get().client !== client) return;
+                        if (get().client !== client || readSeq !== faultsReadSeq) return;
                         const message = error instanceof Error ? error.message : 'Unknown error';
                         console.error('[store]', error);
                         // Only a refresh the user asked for gets a toast. The page carries a
@@ -2637,6 +2648,41 @@ export const useAppStore = create<AppState>()(
                     faultsRefreshInFlight = null;
                 });
                 return faultsRefreshInFlight;
+            },
+
+            applyFaultStreamEvent: (eventType: string, fault: Fault) => {
+                const { faults } = get();
+                // Matched the way the list is keyed, entity type included: one code can be
+                // reported by an app and by the component it runs on, and they are two rows.
+                const key = faultKey(fault);
+
+                if (eventType === 'fault_cleared') {
+                    // No toast: clearFault already raises one for a clear the user asked for.
+                    const remaining = faults.filter((f) => faultKey(f) !== key);
+                    if (remaining.length !== faults.length) {
+                        set({ faults: remaining });
+                    }
+                    return;
+                }
+
+                const existingIndex = faults.findIndex((f) => faultKey(f) === key);
+                if (existingIndex >= 0) {
+                    const existing = faults[existingIndex]!;
+                    if (
+                        existing.status === fault.status &&
+                        existing.severity === fault.severity &&
+                        existing.message === fault.message &&
+                        existing.timestamp === fault.timestamp
+                    ) {
+                        return;
+                    }
+                    const updated = [...faults];
+                    updated[existingIndex] = fault;
+                    set({ faults: updated });
+                } else {
+                    set({ faults: [...faults, fault] });
+                }
+                toast.warning(`Fault: ${fault.message}`, { autoClose: 5000 });
             },
 
             clearFault: async (entityType: SovdResourceEntityType, entityId: string, faultCode: string) => {
@@ -2707,39 +2753,7 @@ export const useAppStore = create<AppState>()(
                             const faultData = faultPayload as Parameters<typeof transformFault>[0];
                             const fault = transformFault(faultData);
 
-                            if (event.event === 'fault_cleared') {
-                                // onFaultCleared - no toast, clearFault() already shows one for UI-triggered clears
-                                const { faults } = get();
-                                const newFaults = faults.filter(
-                                    (f) => !(f.code === fault.code && f.entity_id === fault.entity_id)
-                                );
-                                if (newFaults.length !== faults.length) {
-                                    set({ faults: newFaults });
-                                }
-                            } else {
-                                // fault_confirmed or default message
-                                const { faults } = get();
-                                const existingIndex = faults.findIndex(
-                                    (f) => f.code === fault.code && f.entity_id === fault.entity_id
-                                );
-                                if (existingIndex >= 0) {
-                                    const existing = faults[existingIndex]!;
-                                    if (
-                                        existing.status === fault.status &&
-                                        existing.severity === fault.severity &&
-                                        existing.message === fault.message &&
-                                        existing.timestamp === fault.timestamp
-                                    ) {
-                                        continue;
-                                    }
-                                    const newFaults = [...faults];
-                                    newFaults[existingIndex] = fault;
-                                    set({ faults: newFaults });
-                                } else {
-                                    set({ faults: [...faults, fault] });
-                                }
-                                toast.warning(`Fault: ${fault.message}`, { autoClose: 5000 });
-                            }
+                            get().applyFaultStreamEvent(event.event ?? 'fault_confirmed', fault);
                         }
                         // The stream can also end without an error - a gateway closing the
                         // response cleanly looks like this. Updates have stopped either way,

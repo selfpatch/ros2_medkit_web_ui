@@ -669,7 +669,7 @@ export function FaultsDashboard() {
                                 {counts.info} Info
                             </Badge>
                         )}
-                        {counts.total === 0 && (
+                        {counts.total === 0 && !faultsError && (
                             <Badge variant="outline" className="text-green-600 border-green-300">
                                 <CheckCircle className="w-3 h-3 mr-1" />
                                 All Clear
@@ -853,7 +853,9 @@ export function FaultsDashboard() {
  * counting whether or not the dashboard is open and without a second request.
  */
 export function FaultsCountBadge() {
-    const faults = useAppStore((state) => state.faults);
+    const { faults, faultsError } = useAppStore(
+        useShallow((state) => ({ faults: state.faults, faultsError: state.faultsError }))
+    );
 
     useFaultPolling();
 
@@ -862,6 +864,20 @@ export function FaultsCountBadge() {
         return faults.filter((f) => f.status === 'active' && (f.severity === 'critical' || f.severity === 'error'))
             .length;
     }, [faults]);
+
+    // A count nobody could check is worse than no count: it reads as "all good" from
+    // across the room while the gateway is not answering for faults at all.
+    if (faultsError) {
+        return (
+            <Badge
+                variant="outline"
+                className="text-xs ml-auto text-destructive border-destructive/50"
+                title={`Fault status unknown: ${faultsError}`}
+            >
+                ?
+            </Badge>
+        );
+    }
 
     if (count === 0) return null;
 

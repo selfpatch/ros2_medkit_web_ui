@@ -51,6 +51,19 @@ function refreshIfVisible(): void {
     }
 }
 
+/**
+ * A refresh the tab's return triggered also starts the wait again: the timer was part
+ * way through its period, and leaving it be puts a second request moments behind this one.
+ */
+function refreshAndRestartTimer(): void {
+    if (!isTabVisible()) return;
+    refreshFaults();
+    if (intervalId !== null) {
+        stopInterval();
+        syncInterval();
+    }
+}
+
 /** Starts, stops or re-paces the shared timer to match the views and the stream state. */
 function syncInterval(): void {
     const streamActive = useAppStore.getState().faultStreamCleanup !== null;
@@ -115,7 +128,7 @@ export function useFaultPolling(options: UseFaultPollingOptions = {}): void {
         // when the fault stream appears or dies, which is when events may have been missed.
         subscribers += 1;
         if (subscribers === 1) {
-            visibilityListener = refreshIfVisible;
+            visibilityListener = refreshAndRestartTimer;
             document.addEventListener('visibilitychange', visibilityListener);
         }
         refreshFaults();

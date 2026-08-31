@@ -823,6 +823,28 @@ describe('transformFaultsResponse deduplication', () => {
         expect(result.count).toBe(1);
     });
 
+    it('keeps the live revision when two peers disagree about the same fault', () => {
+        // Peers answer at their own pace: the first route can carry a fault the second
+        // shows as still active. Dropping the active one hides a live fault.
+        const result = transformFaultsResponse({
+            items: [
+                { ...jam, status: 'CLEARED' },
+                { ...jam, status: 'CONFIRMED', occurrence_count: 4 },
+            ],
+        });
+
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0]?.status).toBe('active');
+    });
+
+    it('keeps the higher occurrence count when both revisions are active', () => {
+        const result = transformFaultsResponse({
+            items: [jam, { ...jam, occurrence_count: 7 }],
+        });
+
+        expect(result.items[0]?.parameters?.occurrence_count).toBe(7);
+    });
+
     it('keeps the same code reported by two entities apart', () => {
         const result = transformFaultsResponse({
             items: [jam, { ...jam, reporting_sources: ['unload_process'] }],

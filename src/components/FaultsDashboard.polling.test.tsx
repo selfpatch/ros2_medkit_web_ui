@@ -271,6 +271,8 @@ describe('FaultsDashboard refresh behaviour', () => {
         expect(container.textContent).toContain('ListFaults service not available');
         expect(container.textContent).not.toContain('System is operating normally');
         expect(container.textContent).not.toContain('No faults detected');
+        // "All Clear" is a statement about the system, and the page cannot make it here.
+        expect(container.textContent).not.toContain('All Clear');
     });
 
     it('stops refreshing while Auto-refresh is off, badge included', async () => {
@@ -307,6 +309,38 @@ describe('FaultsDashboard refresh behaviour', () => {
         await advance(FAULT_STREAM_SAFETY_NET_MS);
 
         expect(client.GET.mock.calls.length).toBe(afterMount + 1);
+    });
+
+    it('does not let the sidebar badge report a count it could not check', async () => {
+        connect(clientReturning([RAW_FAULT]), true);
+        const { container } = await mount(<FaultsCountBadge />);
+        await act(async () => {
+            useAppStore.setState({
+                faultsError: 'Failed to get faults: ListFaults service not available',
+            } as never);
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(container.textContent).not.toBe('1');
+        expect(container.querySelector('[title]')?.getAttribute('title')).toContain('unknown');
+    });
+
+    it('does not refresh twice when the tab is restored just before a tick', async () => {
+        const client = clientReturning([RAW_FAULT]);
+        connect(client, false);
+        await mount(<FaultsDashboard />);
+
+        await advance(POLL_INTERVAL_MS - 100);
+        const beforeFocus = client.GET.mock.calls.length;
+        await act(async () => {
+            document.dispatchEvent(new Event('visibilitychange'));
+            await vi.advanceTimersByTimeAsync(0);
+        });
+        expect(client.GET.mock.calls.length).toBe(beforeFocus + 1);
+
+        await advance(200);
+
+        expect(client.GET.mock.calls.length).toBe(beforeFocus + 1);
     });
 
     it('stops polling when the last fault view unmounts', async () => {

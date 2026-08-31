@@ -251,6 +251,72 @@ describe('fetchFaults against a moving connection', () => {
         }
     });
 
+    it('lets the newest read decide, not the one that happens to finish last', async () => {
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        // One connection, two reads: the first is slow and fails, the second is the
+        // one the user asked for and succeeds.
+        let call = 0;
+        const client = {
+            GET: vi.fn(() => {
+                call += 1;
+                return call === 1
+                    ? new Promise((resolve) => {
+                          setTimeout(() => resolve({ data: undefined, error: { message: 'Failed to get faults' } }), 50);
+                      })
+                    : Promise.resolve({ data: { items: [raw()] }, error: undefined });
+            }),
+        };
+        connected(client);
+        const stale = useAppStore.getState().fetchFaults();
+
+        await useAppStore.getState().fetchFaults({ force: true });
+        expect(useAppStore.getState().faultsError).toBeNull();
+
+        await stale;
+
+        expect(useAppStore.getState().faultsError).toBeNull();
+        expect(useAppStore.getState().faults).toHaveLength(1);
+        logged.mockRestore();
+    });
+
+    it('clears a fault the stream reports under a different entity type only once', async () => {
+        connected(clientReturning([]));
+        useAppStore.setState({
+            faults: [
+                {
+                    code: 'OVERHEAT',
+                    message: 'app fault',
+                    severity: 'error',
+                    status: 'active',
+                    timestamp: '2026-08-31T10:00:00.000Z',
+                    entity_id: 'motor',
+                    entity_type: 'app',
+                },
+                {
+                    code: 'OVERHEAT',
+                    message: 'component fault',
+                    severity: 'error',
+                    status: 'active',
+                    timestamp: '2026-08-31T10:00:00.000Z',
+                    entity_id: 'motor',
+                    entity_type: 'component',
+                },
+            ],
+        } as never);
+
+        useAppStore.getState().applyFaultStreamEvent('fault_cleared', {
+            code: 'OVERHEAT',
+            message: 'component fault',
+            severity: 'error',
+            status: 'cleared',
+            timestamp: '2026-08-31T10:00:00.000Z',
+            entity_id: 'motor',
+            entity_type: 'component',
+        });
+
+        expect(useAppStore.getState().faults.map((f) => f.entity_type)).toEqual(['app']);
+    });
+
     it('lets a forced refresh through so a cleared fault is not read back from an older answer', async () => {
         const { client, release } = deferredClient();
         connected(client);
