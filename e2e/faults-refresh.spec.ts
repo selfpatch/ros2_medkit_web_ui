@@ -45,6 +45,15 @@ async function watchForSkeleton(page: Page): Promise<() => Promise<boolean>> {
         });
 }
 
+/**
+ * The dashboard reads the gateway-wide fault list. Entity pages read their own
+ * `/apps/<id>/faults`, which ends the same way, so the match has to be exact or a
+ * detour through an entity inflates the count.
+ */
+function isFaultListRequest(url: string): boolean {
+    return new URL(url).pathname === '/api/v1/faults';
+}
+
 /** Opens the dashboard and waits for the gateway's (empty) fault list to be on screen. */
 async function openDashboard(page: Page): Promise<void> {
     await page.goto('/');
@@ -69,6 +78,26 @@ test.describe('faults dashboard refresh', () => {
         await expect(page.getByText('No faults to display')).toBeVisible();
     });
 
+    test('opening the dashboard reads the fault list', async ({ page }) => {
+        await openDashboard(page);
+
+        const faultRequests: string[] = [];
+        page.on('request', (request) => {
+            if (isFaultListRequest(request.url())) {
+                faultRequests.push(request.url());
+            }
+        });
+
+        // Leave the dashboard for an entity and come back. The sidebar badge stays
+        // mounted the whole time, so the dashboard is never the session's first fault view.
+        await page.getByText('Test ECU').first().click();
+        await expect(page.getByText('No faults to display')).toBeHidden();
+        await page.getByRole('button', { name: 'Faults Dashboard' }).click();
+        await expect(page.getByText('No faults to display')).toBeVisible();
+
+        expect(faultRequests.length).toBeGreaterThan(0);
+    });
+
     test('the fallback poll asks once per interval, not once per mounted view', async ({ page }) => {
         // With no fault stream the app falls back to polling. The dashboard and the
         // sidebar badge are both on screen and read the same list. An HTTP status is
@@ -80,7 +109,7 @@ test.describe('faults dashboard refresh', () => {
 
         const faultRequests: string[] = [];
         page.on('request', (request) => {
-            if (new URL(request.url()).pathname.endsWith('/faults')) {
+            if (isFaultListRequest(request.url())) {
                 faultRequests.push(request.url());
             }
         });

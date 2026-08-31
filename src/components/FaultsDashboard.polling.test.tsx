@@ -185,6 +185,78 @@ describe('FaultsDashboard refresh behaviour', () => {
         expect(client.GET.mock.calls.length).toBe(afterMount);
     });
 
+    it('reads the list when a second view opens on top of one already mounted', async () => {
+        const client = clientReturning([RAW_FAULT]);
+        connect(client, true);
+        await mount(<FaultsCountBadge />);
+        expect(client.GET).toHaveBeenCalledTimes(1);
+
+        // The badge lives in the sidebar for the whole session, so the dashboard is
+        // always the second view. Opening it has to show the list as it is now.
+        await mount(<FaultsDashboard />);
+
+        expect(client.GET).toHaveBeenCalledTimes(2);
+    });
+
+    it('reads the list as soon as the fault stream stops delivering', async () => {
+        const client = clientReturning([RAW_FAULT]);
+        connect(client, true);
+        await mount(
+            <>
+                <FaultsCountBadge />
+                <FaultsDashboard />
+            </>
+        );
+        const whileStreaming = client.GET.mock.calls.length;
+
+        // The stream dying is the one moment the client knows it has missed events.
+        await act(async () => {
+            useAppStore.setState({ faultStreamCleanup: null } as never);
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(client.GET.mock.calls.length).toBe(whileStreaming + 1);
+    });
+
+    it('reads from the gateway it is now connected to', async () => {
+        const gatewayA = clientReturning([RAW_FAULT]);
+        connect(gatewayA, true);
+        await mount(
+            <>
+                <FaultsCountBadge />
+                <FaultsDashboard />
+            </>
+        );
+
+        // Connecting elsewhere never clears isConnected, so nothing else re-reads.
+        const gatewayB = clientReturning([]);
+        await act(async () => {
+            useAppStore.setState({ client: gatewayB } as never);
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(gatewayB.GET).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-reads the list once when a fault is cleared, not twice', async () => {
+        const client = {
+            ...clientReturning([RAW_FAULT]),
+            DELETE: vi.fn(async () => ({ data: undefined, error: undefined })),
+        };
+        connect(client, true);
+        const { container } = await mount(<FaultsDashboard />);
+        const readsBeforeClear = client.GET.mock.calls.length;
+
+        const clearButton = container.querySelector('button[title="Clear fault"]') as HTMLElement;
+        await act(async () => {
+            clearButton.click();
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(client.DELETE).toHaveBeenCalledTimes(1);
+        expect(client.GET.mock.calls.length).toBe(readsBeforeClear + 1);
+    });
+
     it('stops polling when the last fault view unmounts', async () => {
         const client = clientReturning([RAW_FAULT]);
         connect(client, false);

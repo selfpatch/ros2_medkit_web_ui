@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useAppStore } from './store';
+import { useAppStore, FAULTS_REQUEST_TIMEOUT_MS } from './store';
 import type { Fault } from './types';
 
 vi.mock('react-toastify', () => ({
@@ -81,6 +81,26 @@ beforeEach(() => {
 
 afterEach(() => {
     useAppStore.setState({ isConnected: false, client: null, faults: [] } as never);
+});
+
+describe('subscribeFaultStream', () => {
+    it('hands refreshing back to polling when the stream closes without an error', async () => {
+        const streamClient = {
+            GET: vi.fn(async () => ({ data: { items: [] }, error: undefined })),
+            streams: {
+                faults: () => ({
+                    close: vi.fn(),
+                    [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }),
+                }),
+            },
+        };
+        connected(streamClient);
+
+        useAppStore.getState().subscribeFaultStream();
+        expect(useAppStore.getState().faultStreamCleanup).not.toBeNull();
+
+        await vi.waitFor(() => expect(useAppStore.getState().faultStreamCleanup).toBeNull());
+    });
 });
 
 describe('fetchFaults change detection', () => {
@@ -151,6 +171,48 @@ describe('fetchFaults against a moving connection', () => {
         await Promise.all([first, second]);
 
         expect(client.GET).toHaveBeenCalledTimes(1);
+    });
+
+    it('is not wedged by a request that never answers', async () => {
+        const hung = { GET: vi.fn(() => new Promise(() => {})) };
+        connected(hung);
+        void useAppStore.getState().fetchFaults();
+
+        useAppStore.getState().disconnect();
+        const healthy = clientReturning([raw()]);
+        connected(healthy);
+        await useAppStore.getState().fetchFaults();
+
+        expect(healthy.GET).toHaveBeenCalledTimes(1);
+        expect(useAppStore.getState().faults).toHaveLength(1);
+    });
+
+    it('gives up on a request the gateway never answers', async () => {
+        // The abort is the behaviour under test, so its own log line is not a surprise.
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.useFakeTimers();
+        try {
+            const hung = {
+                GET: vi.fn((_path: string, init: { signal?: AbortSignal }) => {
+                    return new Promise((_resolve, reject) => {
+                        init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+                    });
+                }),
+            };
+            connected(hung);
+            const first = useAppStore.getState().fetchFaults();
+            await vi.advanceTimersByTimeAsync(FAULTS_REQUEST_TIMEOUT_MS + 100);
+            await first;
+
+            const healthy = clientReturning([raw()]);
+            useAppStore.setState({ client: healthy } as never);
+            await useAppStore.getState().fetchFaults();
+
+            expect(healthy.GET).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+            logged.mockRestore();
+        }
     });
 
     it('lets a forced refresh through so a cleared fault is not read back from an older answer', async () => {

@@ -893,6 +893,12 @@ function faultRowKey(fault: Fault): string {
 }
 
 /**
+ * How long a fault refresh may stay unanswered. A gateway that stops answering must
+ * not hold the shared refresh open for good - every later refresh waits behind it.
+ */
+export const FAULTS_REQUEST_TIMEOUT_MS = 15000;
+
+/**
  * The refresh currently on the wire, if any. Every fault view shares one list and
  * they refresh on the same events (a timer tick, a tab regaining focus), so without
  * this one refresh would put as many requests on the wire as there are views.
@@ -1140,6 +1146,12 @@ export const useAppStore = create<AppState>()(
                         isConnecting: false,
                         connectionError: null,
                         client,
+                        // Connecting elsewhere never goes through disconnect(), so without
+                        // this the previous gateway's faults stay on screen - and the clear
+                        // button on such a row would send its code to the new gateway.
+                        faults: [],
+                        isLoadingFaults: false,
+                        faultsLoaded: false,
                     });
 
                     // A reconnect must not carry executions of the previous gateway:
@@ -1208,6 +1220,9 @@ export const useAppStore = create<AppState>()(
 
                 // Unsubscribe from fault stream
                 get().unsubscribeFaultStream();
+                // Whatever is on the wire belongs to the session being left, and a refresh
+                // for the next one must not be answered by it or queue behind it.
+                faultsRefreshInFlight = null;
 
                 set({
                     serverUrl: null,
@@ -2540,6 +2555,8 @@ export const useAppStore = create<AppState>()(
                 }
 
                 const run = async () => {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), FAULTS_REQUEST_TIMEOUT_MS);
                     try {
                         const { data: faultsData, error: faultsError } = await client.GET('/faults', {
                             params: {
@@ -2547,6 +2564,7 @@ export const useAppStore = create<AppState>()(
                                 // (no param returns only active).
                                 query: { status: 'all' },
                             },
+                            signal: controller.signal,
                         });
                         // A refresh outlives the session that started it, so an answer from
                         // the gateway we just left must not populate the next one's list.
@@ -2578,6 +2596,8 @@ export const useAppStore = create<AppState>()(
                         // A failed attempt still ends the initial load: the error is reported
                         // through the toast, and the skeleton must not return on every retry.
                         set({ isLoadingFaults: false, faultsLoaded: true });
+                    } finally {
+                        clearTimeout(timeoutId);
                     }
                 };
 
@@ -2691,6 +2711,13 @@ export const useAppStore = create<AppState>()(
                                 }
                                 toast.warning(`Fault: ${fault.message}`, { autoClose: 5000 });
                             }
+                        }
+                        // The stream can also end without an error - a gateway closing the
+                        // response cleanly looks like this. Updates have stopped either way,
+                        // so refreshing has to go back to polling.
+                        if (running) {
+                            cleanup();
+                            set({ faultStreamCleanup: null });
                         }
                     } catch (error) {
                         console.error('[store] subscribeFaultStream: error in consume loop', error);

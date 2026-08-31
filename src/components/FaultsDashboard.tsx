@@ -441,9 +441,8 @@ export function FaultsDashboard() {
                 // Map the fault's entity_type to the correct resource type for the API
                 const entityGroup = mapFaultEntityTypeToResourceType(fault.entity_type);
                 // Use store's clearFault which has proper error handling with toasts
+                // clearFault refreshes the list itself once the delete succeeds.
                 await clearFault(entityGroup, fault.entity_id, fault.code);
-                // Reload faults after clearing
-                await fetchFaults();
             } finally {
                 setClearingCodes((prev) => {
                     const next = new Set(prev);
@@ -452,7 +451,7 @@ export function FaultsDashboard() {
                 });
             }
         },
-        [fetchFaults, clearFault]
+        [clearFault]
     );
 
     // Toggle fault expansion and lazy-load environment data

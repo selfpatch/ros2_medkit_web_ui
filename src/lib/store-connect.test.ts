@@ -97,4 +97,33 @@ describe('connect', () => {
         await Promise.resolve();
         expect(useAppStore.getState().scriptsSupported).toBe(true);
     });
+
+    it('leaves no faults from the previous gateway on screen', async () => {
+        const mockGet = vi.fn((path: string) => {
+            if (path === '/health') return Promise.resolve({ error: undefined });
+            return Promise.resolve({ data: undefined });
+        });
+        vi.mocked(createMedkitClient).mockReturnValue({ GET: mockGet } as unknown as MedkitClient);
+        useAppStore.setState({
+            loadRootEntities: vi.fn().mockResolvedValue(undefined),
+            subscribeFaultStream: vi.fn(),
+            faults: [
+                {
+                    code: 'PREVIOUS_GATEWAY_FAULT',
+                    message: 'raised on the robot we just left',
+                    severity: 'error',
+                    status: 'active',
+                    timestamp: '2026-08-31T10:00:00.000Z',
+                    entity_id: 'lidar_front',
+                    entity_type: 'app',
+                },
+            ],
+            faultsLoaded: true,
+        });
+
+        await useAppStore.getState().connect('http://other-gateway.local');
+
+        expect(useAppStore.getState().faults).toEqual([]);
+        expect(useAppStore.getState().faultsLoaded).toBe(false);
+    });
 });

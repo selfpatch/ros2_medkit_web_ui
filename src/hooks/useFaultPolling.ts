@@ -68,9 +68,10 @@ export interface UseFaultPollingOptions {
  */
 export function useFaultPolling(options: UseFaultPollingOptions = {}): void {
     const poll = options.poll ?? true;
-    const { isConnected, hasFaultStream } = useAppStore(
+    const { isConnected, client, hasFaultStream } = useAppStore(
         useShallow((state) => ({
             isConnected: state.isConnected,
+            client: state.client,
             hasFaultStream: state.faultStreamCleanup !== null,
         }))
     );
@@ -78,12 +79,18 @@ export function useFaultPolling(options: UseFaultPollingOptions = {}): void {
     useEffect(() => {
         if (!isConnected) return;
 
+        // Every view reads when it opens, not only the first one: the sidebar badge is
+        // mounted for the whole session, so the dashboard is always a later subscriber
+        // and would otherwise show the list as it stood when the session began. Views
+        // opening together still cost one request - the store reuses the one in flight.
+        // Re-runs when the connection is replaced (a new gateway has its own faults) and
+        // when the fault stream appears or dies, which is when events may have been missed.
         subscribers += 1;
         if (subscribers === 1) {
             visibilityListener = refreshIfVisible;
             document.addEventListener('visibilitychange', visibilityListener);
-            refreshFaults();
         }
+        refreshFaults();
 
         return () => {
             subscribers -= 1;
@@ -92,7 +99,7 @@ export function useFaultPolling(options: UseFaultPollingOptions = {}): void {
                 visibilityListener = null;
             }
         };
-    }, [isConnected]);
+    }, [isConnected, client, hasFaultStream]);
 
     useEffect(() => {
         if (!isConnected || !poll) return;
