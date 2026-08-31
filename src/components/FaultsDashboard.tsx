@@ -112,6 +112,22 @@ function formatTimestamp(timestamp: string): string {
     }
 }
 
+/** Worst first, then most recent, then by identity so equal rows never swap places. */
+const DISPLAY_SEVERITY_RANK: Record<FaultSeverity, number> = {
+    critical: 3,
+    error: 2,
+    warning: 1,
+    info: 0,
+};
+
+function compareFaultsForDisplay(a: Fault, b: Fault): number {
+    const bySeverity = DISPLAY_SEVERITY_RANK[b.severity] - DISPLAY_SEVERITY_RANK[a.severity];
+    if (bySeverity !== 0) return bySeverity;
+    const byTime = b.timestamp.localeCompare(a.timestamp);
+    if (byTime !== 0) return byTime;
+    return faultKey(a).localeCompare(faultKey(b));
+}
+
 /**
  * Single fault row component with collapsible environment data
  */
@@ -391,7 +407,6 @@ function DashboardSkeleton() {
  */
 export function FaultsDashboard() {
     const [isRefreshing, setIsRefreshing] = useState(false);
-    const [autoRefresh, setAutoRefresh] = useState(true);
     const [clearingCodes, setClearingCodes] = useState<Set<string>>(new Set());
     const [expandedFaults, setExpandedFaults] = useState<Set<string>>(new Set());
     const [faultDetails, setFaultDetails] = useState<Map<string, FaultResponse>>(new Map());
@@ -405,22 +420,33 @@ export function FaultsDashboard() {
     const [groupByEntity, setGroupByEntity] = useState(true);
 
     // Use shared faults state from store
-    const { faults, isLoadingFaults, faultsError, isConnected, fetchFaults, clearFault, getFaultWithEnvironmentData } =
-        useAppStore(
-            useShallow((state) => ({
-                faults: state.faults,
-                isLoadingFaults: state.isLoadingFaults,
-                faultsError: state.faultsError,
-                isConnected: state.isConnected,
-                fetchFaults: state.fetchFaults,
-                clearFault: state.clearFault,
-                getFaultWithEnvironmentData: state.getFaultWithEnvironmentData,
-            }))
-        );
+    const {
+        faults,
+        isLoadingFaults,
+        faultsError,
+        autoRefresh,
+        setAutoRefresh,
+        isConnected,
+        fetchFaults,
+        clearFault,
+        getFaultWithEnvironmentData,
+    } = useAppStore(
+        useShallow((state) => ({
+            faults: state.faults,
+            isLoadingFaults: state.isLoadingFaults,
+            faultsError: state.faultsError,
+            autoRefresh: state.faultsAutoRefresh,
+            setAutoRefresh: state.setFaultsAutoRefresh,
+            isConnected: state.isConnected,
+            fetchFaults: state.fetchFaults,
+            clearFault: state.clearFault,
+            getFaultWithEnvironmentData: state.getFaultWithEnvironmentData,
+        }))
+    );
 
     // Refreshes are shared with every other mounted fault view, so the gateway sees
     // one request per refresh no matter how many of them are on screen.
-    useFaultPolling({ poll: autoRefresh });
+    useFaultPolling();
 
     // Manual refresh handler
     const handleRefresh = useCallback(async () => {
@@ -502,9 +528,13 @@ export function FaultsDashboard() {
         [getFaultWithEnvironmentData]
     );
 
-    // Filter faults
+    // Filter faults, then put them in a fixed order. Rows arrive in whatever order the
+    // gateway or the stream produced them, and a row that moves while the pointer is on
+    // its way to Clear is a row that gets the wrong fault cleared.
     const filteredFaults = useMemo(() => {
-        return faults.filter((f) => severityFilters.has(f.severity) && statusFilters.has(f.status));
+        return faults
+            .filter((f) => severityFilters.has(f.severity) && statusFilters.has(f.status))
+            .sort(compareFaultsForDisplay);
     }, [faults, severityFilters, statusFilters]);
 
     // Group faults by entity
@@ -784,7 +814,13 @@ export function FaultsDashboard() {
                                 is wrong. This is not the same as a system without faults.
                             </p>
                             <p className="mt-2 font-mono text-xs text-destructive">{faultsError}</p>
-                            <Button variant="outline" size="sm" className="mt-4" onClick={handleRefresh}>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-4"
+                                onClick={handleRefresh}
+                                disabled={isRefreshing || isLoadingFaults}
+                            >
                                 <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                                 Try again
                             </Button>
@@ -868,13 +904,15 @@ export function FaultsCountBadge() {
     // A count nobody could check is worse than no count: it reads as "all good" from
     // across the room while the gateway is not answering for faults at all.
     if (faultsError) {
+        // The last known count still says more than a question mark; the marker says it
+        // was not checked. Only with nothing known at all is there no number to show.
         return (
             <Badge
                 variant="outline"
                 className="text-xs ml-auto text-destructive border-destructive/50"
-                title={`Fault status unknown: ${faultsError}`}
+                title={`This count could not be checked: ${faultsError}`}
             >
-                ?
+                {count > 0 ? count : '?'}
             </Badge>
         );
     }

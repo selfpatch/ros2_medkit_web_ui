@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useAppStore, FAULTS_REQUEST_TIMEOUT_MS } from './store';
+import { useAppStore } from './store';
 import type { Fault } from './types';
 
 vi.mock('react-toastify', () => ({
@@ -223,34 +223,6 @@ describe('fetchFaults against a moving connection', () => {
         expect(useAppStore.getState().faults).toHaveLength(1);
     });
 
-    it('gives up on a request the gateway never answers', async () => {
-        // The abort is the behaviour under test, so its own log line is not a surprise.
-        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
-        vi.useFakeTimers();
-        try {
-            const hung = {
-                GET: vi.fn((_path: string, init: { signal?: AbortSignal }) => {
-                    return new Promise((_resolve, reject) => {
-                        init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
-                    });
-                }),
-            };
-            connected(hung);
-            const first = useAppStore.getState().fetchFaults();
-            await vi.advanceTimersByTimeAsync(FAULTS_REQUEST_TIMEOUT_MS + 100);
-            await first;
-
-            const healthy = clientReturning([raw()]);
-            useAppStore.setState({ client: healthy } as never);
-            await useAppStore.getState().fetchFaults();
-
-            expect(healthy.GET).toHaveBeenCalledTimes(1);
-        } finally {
-            vi.useRealTimers();
-            logged.mockRestore();
-        }
-    });
-
     it('lets the newest read decide, not the one that happens to finish last', async () => {
         const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
         // One connection, two reads: the first is slow and fails, the second is the
@@ -276,6 +248,28 @@ describe('fetchFaults against a moving connection', () => {
 
         expect(useAppStore.getState().faultsError).toBeNull();
         expect(useAppStore.getState().faults).toHaveLength(1);
+        logged.mockRestore();
+    });
+
+    it('reports a failure the user asked for even while a later read is still out', async () => {
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        let call = 0;
+        const client = {
+            GET: vi.fn(() => {
+                call += 1;
+                // 1: the refresh the user pressed, fails. 2: a background read, never answers.
+                return call === 1
+                    ? Promise.resolve({ data: undefined, error: { message: 'Failed to get faults' } })
+                    : new Promise(() => {});
+            }),
+        };
+        connected(client);
+
+        const forced = useAppStore.getState().fetchFaults({ force: true });
+        void useAppStore.getState().fetchFaults();
+        await forced;
+
+        expect(useAppStore.getState().faultsError).toBe('Failed to get faults');
         logged.mockRestore();
     });
 
@@ -315,6 +309,42 @@ describe('fetchFaults against a moving connection', () => {
         });
 
         expect(useAppStore.getState().faults.map((f) => f.entity_type)).toEqual(['app']);
+    });
+
+    it('says the gateway went quiet when the request is aborted', async () => {
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const abandoning = {
+            GET: vi.fn(async () => {
+                // What the generated client does when its own deadline runs out.
+                throw new DOMException('The operation was aborted.', 'AbortError');
+            }),
+        };
+        connected(abandoning);
+
+        await useAppStore.getState().fetchFaults();
+
+        expect(useAppStore.getState().faultsError).toBe('The gateway did not answer in time');
+
+        // And the shared refresh is free again, so the next read is not swallowed.
+        const healthy = clientReturning([raw()]);
+        useAppStore.setState({ client: healthy } as never);
+        await useAppStore.getState().fetchFaults();
+        expect(healthy.GET).toHaveBeenCalledTimes(1);
+        logged.mockRestore();
+    });
+
+    it('re-reads the list when clearing a fault failed, so no ghost row is left', async () => {
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const client = {
+            GET: vi.fn(async () => ({ data: { items: [] }, error: undefined })),
+            DELETE: vi.fn(async () => ({ data: undefined, error: { message: 'fault already cleared' } })),
+        };
+        connected(client);
+
+        await useAppStore.getState().clearFault('apps', 'lidar_front', 'LIDAR_RANGE_INVALID');
+
+        expect(client.GET).toHaveBeenCalledTimes(1);
+        logged.mockRestore();
     });
 
     it('lets a forced refresh through so a cleared fault is not read back from an older answer', async () => {

@@ -136,6 +136,26 @@ test.describe('faults dashboard refresh', () => {
         await expect(dashboard.getByText('No faults detected')).toBeHidden();
     });
 
+    test('a gateway that cannot read faults says so, and keeps saying it', async ({ page }) => {
+        // No stubbing here. The e2e gateway runs without a fault manager, so `/faults`
+        // is a real 503 arriving five seconds late - a first load that fails slowly.
+        await page.goto('/');
+        await page.getByRole('button', { name: 'Faults Dashboard' }).click();
+
+        const dashboard = page.locator('main');
+        await expect(dashboard.getByText('Fault list unavailable')).toBeVisible({ timeout: 30_000 });
+        await expect(dashboard.getByText('ListFaults service not available')).toBeVisible();
+
+        // The skeleton belongs to the first load. Every retry after it keeps the page as
+        // it is, and nothing on the page claims the system is fine.
+        const skeletonSeen = await watchForSkeleton(page);
+        await page.waitForTimeout(11_000);
+
+        expect(await skeletonSeen()).toBe(false);
+        await expect(dashboard.getByText('Fault list unavailable')).toBeVisible();
+        await expect(dashboard.getByText('All Clear')).toBeHidden();
+    });
+
     test('the fallback poll asks once per interval, not once per mounted view', async ({ page }) => {
         // With no fault stream the app falls back to polling. The dashboard and the
         // sidebar badge are both on screen and read the same list. An HTTP status is

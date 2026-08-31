@@ -32,7 +32,6 @@ export const FAULT_STREAM_SAFETY_NET_MS = 30000;
 // fetch for all of them, so mounting a second view costs no extra request.
 let subscribers = 0;
 let pollers = 0;
-let pausers = 0;
 let intervalId: ReturnType<typeof setInterval> | null = null;
 let currentPeriod: number | null = null;
 let visibilityListener: (() => void) | null = null;
@@ -56,7 +55,7 @@ function refreshIfVisible(): void {
  * way through its period, and leaving it be puts a second request moments behind this one.
  */
 function refreshAndRestartTimer(): void {
-    if (!isTabVisible()) return;
+    if (!isTabVisible() || !useAppStore.getState().faultsAutoRefresh) return;
     refreshFaults();
     if (intervalId !== null) {
         stopInterval();
@@ -66,10 +65,11 @@ function refreshAndRestartTimer(): void {
 
 /** Starts, stops or re-paces the shared timer to match the views and the stream state. */
 function syncInterval(): void {
-    const streamActive = useAppStore.getState().faultStreamCleanup !== null;
-    // A view with refreshing switched off stops it for everyone: the list is shared, so
-    // "off" that still let another view pull new rows in would not be off at all.
-    const shouldRun = pollers > 0 && pausers === 0;
+    const { faultStreamCleanup, faultsAutoRefresh } = useAppStore.getState();
+    const streamActive = faultStreamCleanup !== null;
+    // Switched off stops it for everyone: the list is shared, so "off" that still let
+    // another view pull new rows in would not be off at all.
+    const shouldRun = pollers > 0 && faultsAutoRefresh;
     const period = streamActive ? FAULT_STREAM_SAFETY_NET_MS : FAULT_POLL_INTERVAL_MS;
 
     if (shouldRun && period !== currentPeriod) {
@@ -91,15 +91,6 @@ function stopInterval(): void {
     }
 }
 
-export interface UseFaultPollingOptions {
-    /**
-     * Whether this view wants the list to keep refreshing. `false` stops the shared timer
-     * for every view, which is what a switch labelled "Auto-refresh" promises. Reading on
-     * open, on focus and on demand still happens either way.
-     */
-    poll?: boolean;
-}
-
 /**
  * Keeps the shared fault list fresh for as long as at least one view is mounted.
  *
@@ -107,13 +98,13 @@ export interface UseFaultPollingOptions {
  * SSE fault stream is inactive - on a timer. All of it is shared: two mounted
  * views produce one request per refresh, not two.
  */
-export function useFaultPolling(options: UseFaultPollingOptions = {}): void {
-    const poll = options.poll ?? true;
-    const { isConnected, client, hasFaultStream } = useAppStore(
+export function useFaultPolling(): void {
+    const { isConnected, client, hasFaultStream, autoRefresh } = useAppStore(
         useShallow((state) => ({
             isConnected: state.isConnected,
             client: state.client,
             hasFaultStream: state.faultStreamCleanup !== null,
+            autoRefresh: state.faultsAutoRefresh,
         }))
     );
 
@@ -145,22 +136,14 @@ export function useFaultPolling(options: UseFaultPollingOptions = {}): void {
     useEffect(() => {
         if (!isConnected) return;
 
-        if (poll) {
-            pollers += 1;
-        } else {
-            pausers += 1;
-        }
+        pollers += 1;
         syncInterval();
 
         return () => {
-            if (poll) {
-                pollers -= 1;
-            } else {
-                pausers -= 1;
-            }
+            pollers -= 1;
             syncInterval();
         };
-        // hasFaultStream is not read here - syncInterval reads it from the store - but the
-        // timer must be re-evaluated when the stream appears or dies.
-    }, [isConnected, poll, hasFaultStream]);
+        // syncInterval reads the stream state and the switch from the store; these deps
+        // are what make it look again when either of them changes.
+    }, [isConnected, hasFaultStream, autoRefresh]);
 }

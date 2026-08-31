@@ -153,6 +153,13 @@ export interface AppState {
     faultsLoaded: boolean;
     /** Why the last refresh failed, so an unanswered list is not shown as a healthy empty one. */
     faultsError: string | null;
+    /**
+     * Whether the shared fault list keeps refreshing. Lives here rather than in the
+     * dashboard: it governs every view of the list, and a page the user deliberately
+     * froze must not start moving again because they navigated away and back.
+     */
+    faultsAutoRefresh: boolean;
+    setFaultsAutoRefresh: (enabled: boolean) => void;
     faultStreamCleanup: (() => void) | null;
 
     // Lifecycle status cache (apps/components only).
@@ -910,10 +917,17 @@ function describeGatewayError(error: unknown): string {
 }
 
 /**
- * How long a fault refresh may stay unanswered. A gateway that stops answering must
- * not hold the shared refresh open for good - every later refresh waits behind it.
+ * What the page says when a read fails. The generated client puts its own deadline on
+ * every request and aborts it, which arrives as a DOMException the generic branch
+ * would render as "Unknown error" - saying nothing about a gateway that went quiet.
  */
-export const FAULTS_REQUEST_TIMEOUT_MS = 15000;
+function describeReadFailure(error: unknown): string {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+        return 'The gateway did not answer in time';
+    }
+    if (error instanceof Error) return error.message;
+    return 'Unknown error';
+}
 
 /**
  * The refresh currently on the wire, if any. Every fault view shares one list and
@@ -922,12 +936,17 @@ export const FAULTS_REQUEST_TIMEOUT_MS = 15000;
  */
 let faultsRefreshInFlight: Promise<void> | null = null;
 
+/** Whose read that is. A read belongs to the connection that started it and to no other. */
+let faultsRefreshClient: unknown = null;
+
 /**
- * Which read is the current one. A forced refresh starts while a background one is
- * still out, and answers can come back in either order - the older one must not be
- * the version of the list, nor the reason shown for a read that has since succeeded.
+ * Reads are numbered so that answers coming back out of order cannot undo each other.
+ * A read applies unless a LATER one already has - which is not the same as "unless a
+ * later one has started": a refresh the user pressed must still be able to report its
+ * own failure while a background read it overtook is still on the wire.
  */
 let faultsReadSeq = 0;
+let faultsAppliedSeq = 0;
 
 /** Reset the status-request dedupe cache. Exposed for tests. */
 export function __resetStatusRequestCache(): void {
@@ -1121,6 +1140,7 @@ export const useAppStore = create<AppState>()(
             isLoadingFaults: false,
             faultsLoaded: false,
             faultsError: null,
+            faultsAutoRefresh: true,
             faultStreamCleanup: null,
 
             // Lifecycle status cache
@@ -1208,6 +1228,11 @@ export const useAppStore = create<AppState>()(
                             }
                         })
                         .finally(() => clearTimeout(capsTimeout));
+
+                    // A read left on the wire belongs to the gateway just left. Holding it
+                    // would answer for this one too: the next refresh would wait behind it
+                    // and the page would sit on an empty list nobody had asked about.
+                    faultsRefreshInFlight = null;
 
                     // Load root entities after successful connection
                     await get().loadRootEntities();
@@ -2569,7 +2594,10 @@ export const useAppStore = create<AppState>()(
                 const { client, faults: currentFaults, faultsLoaded } = get();
                 if (!client) return;
 
-                if (!options.force && faultsRefreshInFlight) {
+                // Shared only within one connection: a read left over from the gateway we
+                // just left must not stand in for this one's first read, which would leave
+                // the page on an empty list nobody had asked about.
+                if (!options.force && faultsRefreshInFlight && faultsRefreshClient === client) {
                     return faultsRefreshInFlight;
                 }
 
@@ -2583,8 +2611,6 @@ export const useAppStore = create<AppState>()(
 
                 const readSeq = (faultsReadSeq += 1);
                 const run = async () => {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), FAULTS_REQUEST_TIMEOUT_MS);
                     try {
                         const { data: faultsData, error: faultsError } = await client.GET('/faults', {
                             params: {
@@ -2592,13 +2618,13 @@ export const useAppStore = create<AppState>()(
                                 // (no param returns only active).
                                 query: { status: 'all' },
                             },
-                            signal: controller.signal,
                         });
                         // A refresh outlives the session that started it, so an answer from
                         // the gateway we just left must not populate the next one's list,
                         // and neither may one a later read has already answered for.
-                        if (get().client !== client || readSeq !== faultsReadSeq) return;
+                        if (get().client !== client || readSeq <= faultsAppliedSeq) return;
                         if (faultsError) throw new Error(describeGatewayError(faultsError));
+                        faultsAppliedSeq = readSeq;
                         const result = transformFaultsResponse(faultsData);
                         // The fault stream writes this same list. If it did so while this
                         // request was in flight, its state is the newer of the two.
@@ -2623,8 +2649,9 @@ export const useAppStore = create<AppState>()(
                             set({ isLoadingFaults: false, faultsLoaded: true, faultsError: null });
                         }
                     } catch (error) {
-                        if (get().client !== client || readSeq !== faultsReadSeq) return;
-                        const message = error instanceof Error ? error.message : 'Unknown error';
+                        if (get().client !== client || readSeq <= faultsAppliedSeq) return;
+                        faultsAppliedSeq = readSeq;
+                        const message = describeReadFailure(error);
                         console.error('[store]', error);
                         // Only a refresh the user asked for gets a toast. The page carries a
                         // failed read on its own now, and toasting every background attempt
@@ -2636,19 +2663,23 @@ export const useAppStore = create<AppState>()(
                         // come back on every retry - but it is not an empty fault list either,
                         // so the reason is kept for the page to show in its place.
                         set({ isLoadingFaults: false, faultsLoaded: true, faultsError: message });
-                    } finally {
-                        clearTimeout(timeoutId);
                     }
                 };
 
                 if (options.force) {
                     return run();
                 }
+                faultsRefreshClient = client;
                 faultsRefreshInFlight = run().finally(() => {
-                    faultsRefreshInFlight = null;
+                    if (faultsRefreshClient === client) {
+                        faultsRefreshInFlight = null;
+                        faultsRefreshClient = null;
+                    }
                 });
                 return faultsRefreshInFlight;
             },
+
+            setFaultsAutoRefresh: (enabled: boolean) => set({ faultsAutoRefresh: enabled }),
 
             applyFaultStreamEvent: (eventType: string, fault: Fault) => {
                 const { faults } = get();
@@ -2701,6 +2732,9 @@ export const useAppStore = create<AppState>()(
                     const message = error instanceof Error ? error.message : 'Unknown error';
                     console.error('[store]', error);
                     toast.error(`Failed to clear fault: ${message}`);
+                    // The delete may have failed because the fault is already gone. Re-read,
+                    // or the row stays on screen as a ghost with a button that does nothing.
+                    await fetchFaults({ force: true });
                     return false;
                 }
             },

@@ -74,6 +74,10 @@ async function mount(ui: ReactElement): Promise<RenderResult> {
 }
 
 /** Lets everything already scheduled run: timers due now, and the promises they start. */
+function renderedCodes(container: HTMLElement): (string | null)[] {
+    return Array.from(container.querySelectorAll('.font-mono.text-sm')).map((el) => el.textContent);
+}
+
 async function settle() {
     await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
@@ -87,13 +91,16 @@ async function advance(ms: number) {
     });
 }
 
-function connect(client: ReturnType<typeof clientReturning>, sseActive: boolean) {
+function connect(client: { GET: unknown }, sseActive: boolean) {
     useAppStore.setState({
         isConnected: true,
         client,
         faults: [],
         isLoadingFaults: false,
         faultsLoaded: false,
+        faultsError: null,
+        // Now a store value, so it outlives a test the way it outlives a page: reset it.
+        faultsAutoRefresh: true,
         faultStreamCleanup: sseActive ? () => {} : null,
     } as never);
 }
@@ -107,6 +114,9 @@ afterEach(() => {
     // own cleanup is registered earlier and so runs after this one), and an
     // unwrapped store write would land on them outside act.
     act(() => {
+        // disconnect, not setState: a read still on the wire is held in module state and
+        // would answer for the next test, whose own reads would then never leave.
+        useAppStore.getState().disconnect();
         useAppStore.setState({ isConnected: false, client: null, faults: [], faultStreamCleanup: null } as never);
     });
     vi.useRealTimers();
@@ -321,8 +331,9 @@ describe('FaultsDashboard refresh behaviour', () => {
             await vi.advanceTimersByTimeAsync(0);
         });
 
-        expect(container.textContent).not.toBe('1');
-        expect(container.querySelector('[title]')?.getAttribute('title')).toContain('unknown');
+        // The count it already has is worth keeping - marked as unchecked, not thrown away.
+        expect(container.textContent).toBe('1');
+        expect(container.querySelector('[title]')?.getAttribute('title')).toContain('could not be checked');
     });
 
     it('does not refresh twice when the tab is restored just before a tick', async () => {
@@ -341,6 +352,168 @@ describe('FaultsDashboard refresh behaviour', () => {
         await advance(200);
 
         expect(client.GET.mock.calls.length).toBe(beforeFocus + 1);
+    });
+
+    it('reads the new gateway even if the old one never answered', async () => {
+        const silent = { GET: vi.fn(() => new Promise(() => {})) };
+        connect(silent, true);
+        await mount(
+            <>
+                <FaultsCountBadge />
+                <FaultsDashboard />
+            </>
+        );
+
+        // Connecting elsewhere goes nowhere near disconnect(), and the read left on the
+        // wire belongs to a gateway nobody is looking at any more.
+        const gatewayB = clientReturning([RAW_FAULT]);
+        await act(async () => {
+            useAppStore.setState({
+                client: gatewayB,
+                faults: [],
+                faultsLoaded: false,
+                faultsError: null,
+            } as never);
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(gatewayB.GET).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not bring the skeleton back while the gateway keeps failing', async () => {
+        const refusing = {
+            GET: vi.fn(async () => ({
+                data: undefined,
+                error: { message: 'Failed to get faults', parameters: { details: 'ListFaults service not available' } },
+            })),
+        };
+        connect(refusing, false);
+        const { container } = await mount(<FaultsDashboard />);
+        expect(container.textContent).toContain('Fault list unavailable');
+
+        const frames = await framesDuring(container, () => advance(POLL_INTERVAL_MS * 2));
+
+        expect(frames).not.toContain('skeleton');
+    });
+
+    it('says a list on screen could not be refreshed, and keeps it', async () => {
+        let answered = false;
+        const failsAfterFirst = {
+            GET: vi.fn(async () => {
+                if (answered) {
+                    return {
+                        data: undefined,
+                        error: {
+                            message: 'Failed to get faults',
+                            parameters: { details: 'ListFaults service not available' },
+                        },
+                    };
+                }
+                answered = true;
+                return { data: { items: [RAW_FAULT] }, error: undefined };
+            }),
+        };
+        connect(failsAfterFirst, false);
+        const { container } = await mount(<FaultsDashboard />);
+        expect(container.textContent).toContain('LIDAR_RANGE_INVALID');
+
+        await advance(POLL_INTERVAL_MS);
+
+        expect(container.textContent).toContain('Last refresh failed');
+        expect(container.textContent).toContain('ListFaults service not available');
+        expect(container.textContent).toContain('LIDAR_RANGE_INVALID');
+    });
+
+    it('leaves a hidden tab alone', async () => {
+        const client = clientReturning([RAW_FAULT]);
+        connect(client, false);
+        await mount(<FaultsDashboard />);
+        const whileVisible = client.GET.mock.calls.length;
+
+        const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+        await advance(POLL_INTERVAL_MS * 3);
+        hidden.mockRestore();
+
+        expect(client.GET.mock.calls.length).toBe(whileVisible);
+    });
+
+    it('shows a question mark only when it knows nothing at all', async () => {
+        connect(clientReturning([]), true);
+        const { container } = await mount(<FaultsCountBadge />);
+        await act(async () => {
+            useAppStore.setState({ faultsError: 'Failed to get faults' } as never);
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(container.textContent).toBe('?');
+    });
+
+    it('keeps Auto-refresh off after leaving the dashboard and coming back', async () => {
+        const client = clientReturning([RAW_FAULT]);
+        connect(client, false);
+        await mount(<FaultsCountBadge />);
+        const dashboard = await mount(<FaultsDashboard />);
+
+        await act(async () => {
+            (document.getElementById('auto-refresh') as HTMLElement).click();
+            await vi.advanceTimersByTimeAsync(0);
+        });
+        const afterSwitchOff = client.GET.mock.calls.length;
+
+        // Leaving the dashboard must not quietly start refreshing again.
+        await act(async () => {
+            dashboard.unmount();
+        });
+        await advance(POLL_INTERVAL_MS * 2);
+        expect(client.GET.mock.calls.length).toBe(afterSwitchOff);
+
+        const reopened = await mount(<FaultsDashboard />);
+        expect(reopened.container.querySelector('#auto-refresh')?.getAttribute('data-state')).toBe('unchecked');
+    });
+
+    it('does not refresh a paused list when the tab comes back', async () => {
+        const client = clientReturning([RAW_FAULT]);
+        connect(client, false);
+        await mount(
+            <>
+                <FaultsCountBadge />
+                <FaultsDashboard />
+            </>
+        );
+        await act(async () => {
+            (document.getElementById('auto-refresh') as HTMLElement).click();
+            await vi.advanceTimersByTimeAsync(0);
+        });
+        const afterSwitchOff = client.GET.mock.calls.length;
+
+        await act(async () => {
+            document.dispatchEvent(new Event('visibilitychange'));
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(client.GET.mock.calls.length).toBe(afterSwitchOff);
+    });
+
+    it('puts the rows in the same order whichever way they arrived', async () => {
+        connect(clientReturning([]), true);
+        const older = { ...RAW_FAULT, fault_code: 'A_EARLIER', first_occurred: 1756636800 };
+        const newer = { ...RAW_FAULT, fault_code: 'B_LATER', first_occurred: 1756640000 };
+
+        const { container } = await mount(<FaultsDashboard />);
+        await act(async () => {
+            useAppStore.setState({ client: clientReturning([older, newer]), faultsLoaded: false } as never);
+            await useAppStore.getState().fetchFaults({ force: true });
+            await vi.advanceTimersByTimeAsync(0);
+        });
+        const arrivalOrder = renderedCodes(container);
+
+        await act(async () => {
+            useAppStore.setState({ client: clientReturning([newer, older]) } as never);
+            await useAppStore.getState().fetchFaults({ force: true });
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(renderedCodes(container)).toEqual(arrivalOrder);
     });
 
     it('stops polling when the last fault view unmounts', async () => {
