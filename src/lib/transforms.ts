@@ -32,6 +32,7 @@ import type {
     Parameter,
 } from './types';
 import { convertJsonSchemaToTopicSchema } from './schema-utils';
+import { faultKey } from './utils';
 
 // =============================================================================
 // unwrapItems
@@ -208,8 +209,23 @@ export function transformFaultsResponse(rawData: unknown): ListFaultsResponse {
     // fallback only catches nullish values, so any other truthy non-array
     // would crash `.map`.
     const rawItems = Array.isArray(data.items) ? data.items : [];
-    const items = rawItems.map((f, idx) => transformFault(f as RawFaultItem, String(idx)));
-    return { items, count: data['x-medkit']?.count ?? items.length };
+    // An aggregating gateway can reach one fault through more than one peer and list
+    // it twice. A fault is identified by its code on its entity, so the repeats are
+    // the same fault: one row, counted once.
+    const seen = new Set<string>();
+    const items: Fault[] = [];
+    for (const [idx, rawItem] of rawItems.entries()) {
+        const fault = transformFault(rawItem as RawFaultItem, String(idx));
+        const key = faultKey(fault);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push(fault);
+    }
+    // The gateway's own count stays authoritative (it may describe more than this
+    // page), minus whatever repeats were folded away here.
+    const duplicates = rawItems.length - items.length;
+    const reported = data['x-medkit']?.count ?? rawItems.length;
+    return { items, count: Math.max(items.length, reported - duplicates) };
 }
 
 // =============================================================================

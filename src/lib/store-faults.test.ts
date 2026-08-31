@@ -125,6 +125,42 @@ describe('fetchFaults change detection', () => {
     });
 });
 
+describe('fetchFaults error reporting', () => {
+    it('records why the gateway could not answer, instead of an empty list', async () => {
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const refusing = {
+            GET: vi.fn(async () => ({
+                data: undefined,
+                error: {
+                    error_code: 'service-unavailable',
+                    message: 'Failed to get faults',
+                    parameters: { details: 'ListFaults service not available' },
+                },
+            })),
+        };
+        connected(refusing);
+
+        await useAppStore.getState().fetchFaults();
+
+        expect(useAppStore.getState().faultsError).toBe('Failed to get faults: ListFaults service not available');
+        expect(useAppStore.getState().faults).toEqual([]);
+        logged.mockRestore();
+    });
+
+    it('clears the error once the gateway answers again', async () => {
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        connected({ GET: vi.fn(async () => ({ data: undefined, error: { message: 'Failed to get faults' } })) });
+        await useAppStore.getState().fetchFaults();
+        expect(useAppStore.getState().faultsError).not.toBeNull();
+
+        useAppStore.setState({ client: clientReturning([raw()]) } as never);
+        await useAppStore.getState().fetchFaults();
+
+        expect(useAppStore.getState().faultsError).toBeNull();
+        logged.mockRestore();
+    });
+});
+
 describe('fetchFaults against a moving connection', () => {
     it('ignores an answer that arrives after the session was disconnected', async () => {
         const { client, release } = deferredClient();

@@ -405,16 +405,18 @@ export function FaultsDashboard() {
     const [groupByEntity, setGroupByEntity] = useState(true);
 
     // Use shared faults state from store
-    const { faults, isLoadingFaults, isConnected, fetchFaults, clearFault, getFaultWithEnvironmentData } = useAppStore(
-        useShallow((state) => ({
-            faults: state.faults,
-            isLoadingFaults: state.isLoadingFaults,
-            isConnected: state.isConnected,
-            fetchFaults: state.fetchFaults,
-            clearFault: state.clearFault,
-            getFaultWithEnvironmentData: state.getFaultWithEnvironmentData,
-        }))
-    );
+    const { faults, isLoadingFaults, faultsError, isConnected, fetchFaults, clearFault, getFaultWithEnvironmentData } =
+        useAppStore(
+            useShallow((state) => ({
+                faults: state.faults,
+                isLoadingFaults: state.isLoadingFaults,
+                faultsError: state.faultsError,
+                isConnected: state.isConnected,
+                fetchFaults: state.fetchFaults,
+                clearFault: state.clearFault,
+                getFaultWithEnvironmentData: state.getFaultWithEnvironmentData,
+            }))
+        );
 
     // Refreshes are shared with every other mounted fault view, so the gateway sees
     // one request per refresh no matter how many of them are on screen.
@@ -606,9 +608,11 @@ export function FaultsDashboard() {
                                 Faults Dashboard
                             </CardTitle>
                             <CardDescription>
-                                {counts.total === 0
-                                    ? 'No faults detected'
-                                    : `${counts.total} fault${counts.total !== 1 ? 's' : ''} detected`}
+                                {faultsError
+                                    ? 'Fault status unknown'
+                                    : counts.total === 0
+                                      ? 'No faults detected'
+                                      : `${counts.total} fault${counts.total !== 1 ? 's' : ''} detected`}
                             </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
@@ -634,6 +638,11 @@ export function FaultsDashboard() {
                     </div>
                 </CardHeader>
                 <CardContent>
+                    {faultsError && faults.length > 0 && (
+                        <p className="mb-4 font-mono text-xs text-destructive">
+                            Last refresh failed, these faults may be out of date: {faultsError}
+                        </p>
+                    )}
                     {/* Summary badges */}
                     <div className="flex flex-wrap gap-2 mb-4">
                         {counts.critical > 0 && (
@@ -764,7 +773,25 @@ export function FaultsDashboard() {
             </Card>
 
             {/* Faults List */}
-            {filteredFaults.length === 0 ? (
+            {faultsError && faults.length === 0 ? (
+                <Card>
+                    <CardContent className="pt-6">
+                        <div className="flex flex-col items-center justify-center py-8 text-center">
+                            <AlertOctagon className="w-12 h-12 mb-2 text-destructive" />
+                            <p className="font-medium">Fault list unavailable</p>
+                            <p className="text-sm text-muted-foreground max-w-md">
+                                The gateway did not answer with a fault list, so this page cannot say whether anything
+                                is wrong. This is not the same as a system without faults.
+                            </p>
+                            <p className="mt-2 font-mono text-xs text-destructive">{faultsError}</p>
+                            <Button variant="outline" size="sm" className="mt-4" onClick={handleRefresh}>
+                                <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                                Try again
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            ) : filteredFaults.length === 0 ? (
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex flex-col items-center justify-center text-muted-foreground py-8">

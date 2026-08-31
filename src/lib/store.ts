@@ -151,6 +151,8 @@ export interface AppState {
     isLoadingFaults: boolean;
     /** True once a fault fetch has completed. An empty list is a result, not a pending load. */
     faultsLoaded: boolean;
+    /** Why the last refresh failed, so an unanswered list is not shown as a healthy empty one. */
+    faultsError: string | null;
     faultStreamCleanup: (() => void) | null;
 
     // Lifecycle status cache (apps/components only).
@@ -893,6 +895,19 @@ function faultRowKey(fault: Fault): string {
 }
 
 /**
+ * The gateway's own words for a failed read: SOVD puts the summary in `message` and
+ * the part naming the cause (a service that is not running, say) in `parameters.details`.
+ * The page shows both, rather than an empty list that would read as "no faults".
+ */
+function describeGatewayError(error: unknown): string {
+    if (!error || typeof error !== 'object') return 'Failed to load faults';
+    const { message, parameters } = error as { message?: string; parameters?: { details?: string } };
+    const summary = message || 'Failed to load faults';
+    const details = parameters?.details;
+    return details ? `${summary}: ${details}` : summary;
+}
+
+/**
  * How long a fault refresh may stay unanswered. A gateway that stops answering must
  * not hold the shared refresh open for good - every later refresh waits behind it.
  */
@@ -1096,6 +1111,7 @@ export const useAppStore = create<AppState>()(
             faults: [],
             isLoadingFaults: false,
             faultsLoaded: false,
+            faultsError: null,
             faultStreamCleanup: null,
 
             // Lifecycle status cache
@@ -1152,6 +1168,7 @@ export const useAppStore = create<AppState>()(
                         faults: [],
                         isLoadingFaults: false,
                         faultsLoaded: false,
+                        faultsError: null,
                     });
 
                     // A reconnect must not carry executions of the previous gateway:
@@ -1243,6 +1260,7 @@ export const useAppStore = create<AppState>()(
                     faults: [],
                     isLoadingFaults: false,
                     faultsLoaded: false,
+                    faultsError: null,
                 });
             },
 
@@ -2569,12 +2587,12 @@ export const useAppStore = create<AppState>()(
                         // A refresh outlives the session that started it, so an answer from
                         // the gateway we just left must not populate the next one's list.
                         if (get().client !== client) return;
-                        if (faultsError) throw new Error(faultsError.message || 'Failed to load faults');
+                        if (faultsError) throw new Error(describeGatewayError(faultsError));
                         const result = transformFaultsResponse(faultsData);
                         // The fault stream writes this same list. If it did so while this
                         // request was in flight, its state is the newer of the two.
                         if (get().faults !== currentFaults) {
-                            set({ isLoadingFaults: false, faultsLoaded: true });
+                            set({ isLoadingFaults: false, faultsLoaded: true, faultsError: null });
                             return;
                         }
                         // Skip the state update when nothing a row shows has changed, to avoid
@@ -2584,18 +2602,29 @@ export const useAppStore = create<AppState>()(
                         const newKey = result.items.map(faultRowKey).join('|');
                         const oldKey = currentFaults.map(faultRowKey).join('|');
                         if (newKey !== oldKey) {
-                            set({ faults: result.items, isLoadingFaults: false, faultsLoaded: true });
-                        } else if (isInitialLoad) {
-                            set({ isLoadingFaults: false, faultsLoaded: true });
+                            set({
+                                faults: result.items,
+                                isLoadingFaults: false,
+                                faultsLoaded: true,
+                                faultsError: null,
+                            });
+                        } else {
+                            set({ isLoadingFaults: false, faultsLoaded: true, faultsError: null });
                         }
                     } catch (error) {
                         if (get().client !== client) return;
                         const message = error instanceof Error ? error.message : 'Unknown error';
                         console.error('[store]', error);
-                        toast.error(`Failed to load faults: ${message}`);
-                        // A failed attempt still ends the initial load: the error is reported
-                        // through the toast, and the skeleton must not return on every retry.
-                        set({ isLoadingFaults: false, faultsLoaded: true });
+                        // Only a refresh the user asked for gets a toast. The page carries a
+                        // failed read on its own now, and toasting every background attempt
+                        // stacks one notification per retry on top of it.
+                        if (options.force) {
+                            toast.error(`Failed to load faults: ${message}`);
+                        }
+                        // A failed attempt still ends the initial load - the skeleton must not
+                        // come back on every retry - but it is not an empty fault list either,
+                        // so the reason is kept for the page to show in its place.
+                        set({ isLoadingFaults: false, faultsLoaded: true, faultsError: message });
                     } finally {
                         clearTimeout(timeoutId);
                     }

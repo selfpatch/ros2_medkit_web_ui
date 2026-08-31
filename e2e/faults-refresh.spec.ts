@@ -54,6 +54,18 @@ function isFaultListRequest(url: string): boolean {
     return new URL(url).pathname === '/api/v1/faults';
 }
 
+/**
+ * Serves the fault list from here rather than from the gateway. These tests are about
+ * when the page refreshes, not about what the gateway holds, and the e2e gateway runs
+ * without a fault manager - it answers `/faults` with 503 after five seconds, which
+ * would decide both what is on screen and how the ticks line up.
+ */
+async function serveEmptyFaultList(page: Page): Promise<void> {
+    await page.route('**/api/v1/faults?**', (route) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' })
+    );
+}
+
 /** Opens the dashboard and waits for the gateway's (empty) fault list to be on screen. */
 async function openDashboard(page: Page): Promise<void> {
     await page.goto('/');
@@ -67,6 +79,7 @@ const OBSERVED_WINDOW_MS = 11_000;
 
 test.describe('faults dashboard refresh', () => {
     test('a refresh of an empty fault list leaves the page as it is', async ({ page }) => {
+        await serveEmptyFaultList(page);
         await openDashboard(page);
         const skeletonSeen = await watchForSkeleton(page);
 
@@ -79,6 +92,7 @@ test.describe('faults dashboard refresh', () => {
     });
 
     test('opening the dashboard reads the fault list', async ({ page }) => {
+        await serveEmptyFaultList(page);
         await openDashboard(page);
 
         const faultRequests: string[] = [];
@@ -98,6 +112,30 @@ test.describe('faults dashboard refresh', () => {
         expect(faultRequests.length).toBeGreaterThan(0);
     });
 
+    test('says the fault list could not be read, rather than showing none', async ({ page }) => {
+        // Verbatim what the gateway answers when its fault manager is not running.
+        await page.route('**/api/v1/faults?**', (route) =>
+            route.fulfill({
+                status: 503,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    error_code: 'service-unavailable',
+                    message: 'Failed to get faults',
+                    parameters: { details: 'ListFaults service not available' },
+                }),
+            })
+        );
+
+        await page.goto('/');
+        await page.getByRole('button', { name: 'Faults Dashboard' }).click();
+
+        const dashboard = page.locator('main');
+        await expect(dashboard.getByText('Fault list unavailable')).toBeVisible({ timeout: 30_000 });
+        await expect(dashboard.getByText('ListFaults service not available')).toBeVisible();
+        await expect(dashboard.getByText('System is operating normally')).toBeHidden();
+        await expect(dashboard.getByText('No faults detected')).toBeHidden();
+    });
+
     test('the fallback poll asks once per interval, not once per mounted view', async ({ page }) => {
         // With no fault stream the app falls back to polling. The dashboard and the
         // sidebar badge are both on screen and read the same list. An HTTP status is
@@ -105,6 +143,7 @@ test.describe('faults dashboard refresh', () => {
         await page.route('**/faults/stream**', (route) =>
             route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })
         );
+        await serveEmptyFaultList(page);
         await openDashboard(page);
 
         const faultRequests: string[] = [];

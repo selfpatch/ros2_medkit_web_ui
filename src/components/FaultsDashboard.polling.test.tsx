@@ -26,6 +26,7 @@ import { FaultsDashboard, FaultsCountBadge } from './FaultsDashboard';
 import { useAppStore } from '@/lib/store';
 
 const POLL_INTERVAL_MS = 5000;
+const FAULT_STREAM_SAFETY_NET_MS = 30000;
 
 const RAW_FAULT = {
     fault_code: 'LIDAR_RANGE_INVALID',
@@ -255,6 +256,57 @@ describe('FaultsDashboard refresh behaviour', () => {
 
         expect(client.DELETE).toHaveBeenCalledTimes(1);
         expect(client.GET.mock.calls.length).toBe(readsBeforeClear + 1);
+    });
+
+    it('says the gateway could not read faults instead of reporting none', async () => {
+        connect(clientReturning([]), true);
+        const { container } = await mount(<FaultsDashboard />);
+        await act(async () => {
+            useAppStore.setState({
+                faultsError: 'Failed to get faults: ListFaults service not available',
+            } as never);
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(container.textContent).toContain('ListFaults service not available');
+        expect(container.textContent).not.toContain('System is operating normally');
+        expect(container.textContent).not.toContain('No faults detected');
+    });
+
+    it('stops refreshing while Auto-refresh is off, badge included', async () => {
+        const client = clientReturning([RAW_FAULT]);
+        connect(client, false);
+        await mount(
+            <>
+                <FaultsCountBadge />
+                <FaultsDashboard />
+            </>
+        );
+
+        const autoRefresh = document.getElementById('auto-refresh') as HTMLElement;
+        await act(async () => {
+            autoRefresh.click();
+            await vi.advanceTimersByTimeAsync(0);
+        });
+        const afterSwitchOff = client.GET.mock.calls.length;
+
+        await advance(POLL_INTERVAL_MS * 3);
+
+        expect(client.GET.mock.calls.length).toBe(afterSwitchOff);
+    });
+
+    it('still checks now and then while the stream is up, in case it delivers nothing', async () => {
+        // A gateway can hold the stream open and never send an event - an aggregator
+        // that does not fan the stream out to its peers does exactly this. The page
+        // would otherwise sit unchanged for the whole session.
+        const client = clientReturning([RAW_FAULT]);
+        connect(client, true);
+        await mount(<FaultsDashboard />);
+        const afterMount = client.GET.mock.calls.length;
+
+        await advance(FAULT_STREAM_SAFETY_NET_MS);
+
+        expect(client.GET.mock.calls.length).toBe(afterMount + 1);
     });
 
     it('stops polling when the last fault view unmounts', async () => {

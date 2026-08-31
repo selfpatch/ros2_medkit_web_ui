@@ -373,7 +373,10 @@ describe('transformFaultsResponse', () => {
     });
 
     it('falls back to items.length when x-medkit count is absent', () => {
-        const result = transformFaultsResponse({ items: [makeFaultItem(), makeFaultItem()] });
+        // Two distinct faults: repeating one item is a duplicate now, and folded away.
+        const result = transformFaultsResponse({
+            items: [makeFaultItem(), makeFaultItem({ fault_code: 'OTHER_FAULT' })],
+        });
         expect(result.count).toBe(2);
     });
 
@@ -795,5 +798,36 @@ describe('transformBulkDataDescriptor', () => {
         delete (raw as Record<string, unknown>)['created_at'];
         const result = transformBulkDataDescriptor(raw);
         expect(result.creation_date).toBe('');
+    });
+});
+
+describe('transformFaultsResponse deduplication', () => {
+    const jam = {
+        fault_code: 'PLC_JAM_INFEED',
+        description: 'Carton jam at the induction stop',
+        severity: 2,
+        severity_label: 'ERROR',
+        status: 'CONFIRMED',
+        first_occurred: 1755511233,
+        last_occurred: 1755511233,
+        occurrence_count: 1,
+        reporting_sources: ['load_process'],
+    };
+
+    it('lists a fault once when the gateway returns it twice', () => {
+        // An aggregating gateway can reach the same fault through more than one of its
+        // peers. It is one fault on one entity, so it is one row and one count.
+        const result = transformFaultsResponse({ items: [jam, jam] });
+
+        expect(result.items).toHaveLength(1);
+        expect(result.count).toBe(1);
+    });
+
+    it('keeps the same code reported by two entities apart', () => {
+        const result = transformFaultsResponse({
+            items: [jam, { ...jam, reporting_sources: ['unload_process'] }],
+        });
+
+        expect(result.items.map((f) => f.entity_id)).toEqual(['load_process', 'unload_process']);
     });
 });
