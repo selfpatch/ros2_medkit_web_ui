@@ -180,10 +180,10 @@ describe('FaultsDashboard refresh behaviour', () => {
         expect(client.GET).toHaveBeenCalledTimes(4);
     });
 
-    it('does not poll while the fault stream delivers updates', async () => {
+    it('takes its updates from the stream instead of polling for them', async () => {
         const client = clientReturning([RAW_FAULT]);
         connect(client, true);
-        await mount(
+        const { container } = await mount(
             <>
                 <FaultsCountBadge />
                 <FaultsDashboard />
@@ -191,7 +191,24 @@ describe('FaultsDashboard refresh behaviour', () => {
         );
         const afterMount = client.GET.mock.calls.length;
 
-        await advance(POLL_INTERVAL_MS * 3);
+        await act(async () => {
+            useAppStore.getState().applyFaultStreamEvent('fault_confirmed', {
+                code: 'RAISED_OVER_THE_STREAM',
+                message: 'reported without a read',
+                severity: 'error',
+                status: 'active',
+                timestamp: '2026-08-31T10:00:00.000Z',
+                entity_id: 'motor',
+                entity_type: 'app',
+            });
+            await vi.advanceTimersByTimeAsync(0);
+        });
+        // The event alone put it on screen, and it took no request to do so.
+        expect(container.textContent).toContain('RAISED_OVER_THE_STREAM');
+        expect(client.GET.mock.calls.length).toBe(afterMount);
+
+        // The 5 s poll stays off right up to the safety net.
+        await advance(FAULT_STREAM_SAFETY_NET_MS - POLL_INTERVAL_MS);
 
         expect(client.GET.mock.calls.length).toBe(afterMount);
     });
@@ -471,6 +488,37 @@ describe('FaultsDashboard refresh behaviour', () => {
         expect(reopened.container.querySelector('#auto-refresh')?.getAttribute('data-state')).toBe('unchecked');
     });
 
+    it('does not read the list again when a paused dashboard is reopened', async () => {
+        const client = clientReturning([RAW_FAULT]);
+        connect(client, true);
+        await mount(<FaultsCountBadge />);
+        const dashboard = await mount(<FaultsDashboard />);
+        await act(async () => {
+            (document.getElementById('auto-refresh') as HTMLElement).click();
+            await vi.advanceTimersByTimeAsync(0);
+        });
+        const whilePaused = client.GET.mock.calls.length;
+
+        await act(async () => {
+            dashboard.unmount();
+        });
+        await mount(<FaultsDashboard />);
+
+        // Reopening a page the user froze must not move it.
+        expect(client.GET.mock.calls.length).toBe(whilePaused);
+    });
+
+    it('still reads on mount when nothing has been loaded yet, even paused', async () => {
+        const client = clientReturning([RAW_FAULT]);
+        connect(client, true);
+        useAppStore.setState({ faultsAutoRefresh: false } as never);
+
+        await mount(<FaultsDashboard />);
+
+        // Otherwise a switch left off means an empty page for the rest of the session.
+        expect(client.GET).toHaveBeenCalledTimes(1);
+    });
+
     it('does not refresh a paused list when the tab comes back', async () => {
         const client = clientReturning([RAW_FAULT]);
         connect(client, false);
@@ -514,6 +562,40 @@ describe('FaultsDashboard refresh behaviour', () => {
         });
 
         expect(renderedCodes(container)).toEqual(arrivalOrder);
+    });
+
+    it('keeps an app and a component of the same name in separate groups', async () => {
+        connect(clientReturning([]), true);
+        const { container } = await mount(<FaultsDashboard />);
+        await act(async () => {
+            useAppStore.setState({
+                faults: [
+                    {
+                        code: 'OVERHEAT',
+                        message: 'app fault',
+                        severity: 'error',
+                        status: 'active',
+                        timestamp: '2026-08-31T10:00:00.000Z',
+                        entity_id: 'motor',
+                        entity_type: 'app',
+                    },
+                    {
+                        code: 'OVERHEAT',
+                        message: 'component fault',
+                        severity: 'error',
+                        status: 'active',
+                        timestamp: '2026-08-31T10:00:00.000Z',
+                        entity_id: 'motor',
+                        entity_type: 'component',
+                    },
+                ],
+            } as never);
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        // One name, two entities: two groups, each labelled with its own type.
+        const groupLabels = Array.from(container.querySelectorAll('.font-medium.text-sm')).map((el) => el.textContent);
+        expect(groupLabels.filter((label) => label === 'motor')).toHaveLength(2);
     });
 
     it('stops polling when the last fault view unmounts', async () => {

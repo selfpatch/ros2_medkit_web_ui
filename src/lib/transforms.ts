@@ -219,9 +219,20 @@ const FAULT_STATUS_RANK: Record<Fault['status'], number> = {
 function moreCurrentRevision(a: Fault, b: Fault): Fault {
     const byStatus = FAULT_STATUS_RANK[b.status] - FAULT_STATUS_RANK[a.status];
     if (byStatus !== 0) return byStatus > 0 ? b : a;
+
     const occurrences = (f: Fault) =>
         typeof f.parameters?.occurrence_count === 'number' ? f.parameters.occurrence_count : 0;
-    return occurrences(b) > occurrences(a) ? b : a;
+    const byOccurrences = occurrences(b) - occurrences(a);
+    if (byOccurrences !== 0) return byOccurrences > 0 ? b : a;
+
+    // Which peer saw it last. `last_occurred` is that; `timestamp` is when the fault
+    // began, which two records for one fault usually share - it decides only when no
+    // peer said when it last saw the fault, and without either the first stands.
+    const lastSeen = (f: Fault) => (typeof f.parameters?.last_occurred === 'number' ? f.parameters.last_occurred : 0);
+    const byLastSeen = lastSeen(b) - lastSeen(a);
+    if (byLastSeen !== 0) return byLastSeen > 0 ? b : a;
+
+    return b.timestamp > a.timestamp ? b : a;
 }
 
 /**

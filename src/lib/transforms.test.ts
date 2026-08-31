@@ -845,6 +845,20 @@ describe('transformFaultsResponse deduplication', () => {
         expect(result.items[0]?.parameters?.occurrence_count).toBe(7);
     });
 
+    it('keeps the more recent reading when the peers agree on everything else', () => {
+        const seenEarlier = { ...jam, last_occurred: 1755511233, occurrence_count: undefined };
+        const seenLater = {
+            ...jam,
+            last_occurred: 1755599999,
+            occurrence_count: undefined,
+            description: 'jam persists',
+        };
+
+        const result = transformFaultsResponse({ items: [seenEarlier, seenLater] });
+
+        expect(result.items[0]?.message).toBe('jam persists');
+    });
+
     it('keeps the same code reported by two entities apart', () => {
         const result = transformFaultsResponse({
             items: [jam, { ...jam, reporting_sources: ['unload_process'] }],

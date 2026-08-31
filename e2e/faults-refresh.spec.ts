@@ -137,8 +137,10 @@ test.describe('faults dashboard refresh', () => {
     });
 
     test('a gateway that cannot read faults says so, and keeps saying it', async ({ page }) => {
-        // No stubbing here. The e2e gateway runs without a fault manager, so `/faults`
-        // is a real 503 arriving five seconds late - a first load that fails slowly.
+        // No stubbing here. The e2e gateway runs without a fault manager (see
+        // docker-compose.yml), so `/faults` is a real 503 arriving five seconds late - a
+        // first load that fails slowly. Pointed at a gateway that HAS a fault manager,
+        // this test fails by design: it is about the answer that stack gives.
         await page.goto('/');
         await page.getByRole('button', { name: 'Faults Dashboard' }).click();
 

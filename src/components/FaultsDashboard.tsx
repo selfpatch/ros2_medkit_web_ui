@@ -407,6 +407,7 @@ function DashboardSkeleton() {
  */
 export function FaultsDashboard() {
     const [isRefreshing, setIsRefreshing] = useState(false);
+    // Keyed by faultKey, not by code: one code can be reported by two entities.
     const [clearingCodes, setClearingCodes] = useState<Set<string>>(new Set());
     const [expandedFaults, setExpandedFaults] = useState<Set<string>>(new Set());
     const [faultDetails, setFaultDetails] = useState<Map<string, FaultResponse>>(new Map());
@@ -468,8 +469,7 @@ export function FaultsDashboard() {
             try {
                 // Map the fault's entity_type to the correct resource type for the API
                 const entityGroup = mapFaultEntityTypeToResourceType(fault.entity_type);
-                // Use store's clearFault which has proper error handling with toasts
-                // clearFault refreshes the list itself once the delete succeeds.
+                // clearFault re-reads the list itself, whether or not the delete succeeded.
                 await clearFault(entityGroup, fault.entity_id, fault.code);
             } finally {
                 setClearingCodes((prev) => {
@@ -539,12 +539,14 @@ export function FaultsDashboard() {
 
     // Group faults by entity
     const groupedFaults = useMemo(() => {
-        const groups = new Map<string, { entityType: string; faults: Fault[] }>();
+        const groups = new Map<string, { entityId: string; entityType: string; faults: Fault[] }>();
 
         for (const fault of filteredFaults) {
-            const key = fault.entity_id;
+            // Keyed by type and id: an app and the component it runs on can share a name,
+            // and merging them puts one entity's faults under another entity's heading.
+            const key = `${fault.entity_type}/${fault.entity_id}`;
             if (!groups.has(key)) {
-                groups.set(key, { entityType: fault.entity_type, faults: [] });
+                groups.set(key, { entityId: fault.entity_id, entityType: fault.entity_type, faults: [] });
             }
             groups.get(key)!.faults.push(fault);
         }
@@ -699,7 +701,7 @@ export function FaultsDashboard() {
                                 {counts.info} Info
                             </Badge>
                         )}
-                        {counts.total === 0 && !faultsError && (
+                        {counts.total === 0 && !faultsError && filteredFaults.length === 0 && (
                             <Badge variant="outline" className="text-green-600 border-green-300">
                                 <CheckCircle className="w-3 h-3 mr-1" />
                                 All Clear
@@ -844,9 +846,9 @@ export function FaultsDashboard() {
             ) : groupByEntity ? (
                 <Card>
                     <CardContent className="pt-4 space-y-4">
-                        {groupedFaults.map(([entityId, { entityType, faults: entityFaults }]) => (
+                        {groupedFaults.map(([groupKey, { entityId, entityType, faults: entityFaults }]) => (
                             <FaultGroup
-                                key={entityId}
+                                key={groupKey}
                                 entityId={entityId}
                                 entityType={entityType}
                                 faults={entityFaults}

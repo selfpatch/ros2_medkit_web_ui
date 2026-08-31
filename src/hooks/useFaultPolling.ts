@@ -28,8 +28,9 @@ export const FAULT_POLL_INTERVAL_MS = 5000;
 export const FAULT_STREAM_SAFETY_NET_MS = 30000;
 
 // The fault list is one shared resource with several views on it (the dashboard,
-// the sidebar badge). These module-level counters keep one timer and one initial
-// fetch for all of them, so mounting a second view costs no extra request.
+// the sidebar badge). These module-level counters keep one timer for all of them, and
+// coalesce the reads that coincide, so views opening together cost one request. A view
+// opening on its own still reads: it has to show the list as it is now.
 let subscribers = 0;
 let pollers = 0;
 let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -94,9 +95,11 @@ function stopInterval(): void {
 /**
  * Keeps the shared fault list fresh for as long as at least one view is mounted.
  *
- * The list refreshes on mount, when the tab regains focus, and - only while the
- * SSE fault stream is inactive - on a timer. All of it is shared: two mounted
- * views produce one request per refresh, not two.
+ * The list refreshes when a view opens, when the tab regains focus, and on a timer:
+ * every 5 seconds without the SSE fault stream, and every 30 seconds with it, because
+ * a stream that is connected is not proof that anything comes down it. All of it is
+ * shared, so two mounted views produce one request per refresh rather than two, and
+ * the Auto-refresh switch stops the timer for all of them at once.
  */
 export function useFaultPolling(): void {
     const { isConnected, client, hasFaultStream, autoRefresh } = useAppStore(
@@ -122,7 +125,13 @@ export function useFaultPolling(): void {
             visibilityListener = refreshAndRestartTimer;
             document.addEventListener('visibilitychange', visibilityListener);
         }
-        refreshFaults();
+        // Reopening a view must not move a list the user froze. With nothing loaded yet
+        // there is nothing to preserve, and skipping would leave an empty page for the
+        // rest of the session, so that case reads regardless.
+        const { faultsAutoRefresh, faultsLoaded } = useAppStore.getState();
+        if (faultsAutoRefresh || !faultsLoaded) {
+            refreshFaults();
+        }
 
         return () => {
             subscribers -= 1;

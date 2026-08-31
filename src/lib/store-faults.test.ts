@@ -274,9 +274,10 @@ describe('fetchFaults against a moving connection', () => {
         expect(useAppStore.getState().faultsLoaded).toBe(false);
     });
 
-    it('ignores an answer that the fault stream has already overtaken', async () => {
+    it('ignores a refresh the fault stream has already overtaken', async () => {
         const { client, release } = deferredClient();
         connected(client);
+        useAppStore.setState({ faultsLoaded: true } as never);
 
         const pending = useAppStore.getState().fetchFaults();
         const fromStream: Fault = {
@@ -294,6 +295,40 @@ describe('fetchFaults against a moving connection', () => {
 
         expect(useAppStore.getState().faults.map((f) => f.code)).toEqual(['STREAM_FAULT']);
         expect(useAppStore.getState().faultsLoaded).toBe(true);
+    });
+
+    it('does not lose the faults that were there before the stream, on the first read', async () => {
+        // The stream carries what happens next, not what is already raised. Dropping the
+        // first read because an event landed during it hides every fault that predates
+        // the subscription until something reads again.
+        let call = 0;
+        const client = {
+            GET: vi.fn(() => {
+                call += 1;
+                return call === 1
+                    ? new Promise((resolve) => {
+                          setTimeout(() => resolve({ data: { items: [raw()] }, error: undefined }), 20);
+                      })
+                    : Promise.resolve({ data: { items: [raw()] }, error: undefined });
+            }),
+        };
+        connected(client);
+
+        const first = useAppStore.getState().fetchFaults();
+        useAppStore.getState().applyFaultStreamEvent('fault_confirmed', {
+            code: 'RAISED_WHILE_READING',
+            message: 'arrived over the stream',
+            severity: 'error',
+            status: 'active',
+            timestamp: '2026-08-31T10:00:00.000Z',
+            entity_id: 'lidar_front',
+            entity_type: 'app',
+        });
+        await first;
+
+        await vi.waitFor(() => {
+            expect(useAppStore.getState().faults.map((f) => f.code)).toContain('LIDAR_RANGE_INVALID');
+        });
     });
 
     it('runs one request when several views ask for a refresh at the same time', async () => {

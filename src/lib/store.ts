@@ -955,6 +955,9 @@ let faultsAppliedSeq = 0;
  */
 let faultsRecoveryAttemptedFor: string | null = null;
 
+/** Whether the first read of this connection has already been given a second chance. */
+let faultsBaselineReread = false;
+
 /** Reset the status-request dedupe cache. Exposed for tests. */
 export function __resetStatusRequestCache(): void {
     inFlightStatusRequests.clear();
@@ -1241,6 +1244,7 @@ export const useAppStore = create<AppState>()(
                     // and the page would sit on an empty list nobody had asked about.
                     faultsRefreshInFlight = null;
                     faultsRecoveryAttemptedFor = null;
+                    faultsBaselineReread = false;
                     // Same for its fault stream: it stays open until this connection gets
                     // as far as subscribing, and until then its events would be written
                     // into the list of a gateway that never reported them.
@@ -1286,6 +1290,8 @@ export const useAppStore = create<AppState>()(
                 // Whatever is on the wire belongs to the session being left, and a refresh
                 // for the next one must not be answered by it or queue behind it.
                 faultsRefreshInFlight = null;
+                faultsRecoveryAttemptedFor = null;
+                faultsBaselineReread = false;
 
                 set({
                     serverUrl: null,
@@ -2641,6 +2647,19 @@ export const useAppStore = create<AppState>()(
                         // The fault stream writes this same list. If it did so while this
                         // request was in flight, its state is the newer of the two.
                         if (get().faults !== currentFaults) {
+                            if (isInitialLoad && !faultsBaselineReread) {
+                                // Except on the first read: the stream carries what happens
+                                // next, not what was already raised, so keeping only its
+                                // event would hide every fault that predates the
+                                // subscription. Read once more instead - the gateway knows
+                                // about both - and stay unloaded until that lands. Forced,
+                                // because this read is still the one in flight; and once,
+                                // so a busy stream cannot turn it into a chain.
+                                faultsBaselineReread = true;
+                                set({ isLoadingFaults: false, faultsError: null });
+                                void get().fetchFaults({ force: true });
+                                return;
+                            }
                             set({ isLoadingFaults: false, faultsLoaded: true, faultsError: null });
                             return;
                         }
@@ -2651,6 +2670,7 @@ export const useAppStore = create<AppState>()(
                         const newKey = result.items.map(faultRowKey).join('|');
                         const oldKey = currentFaults.map(faultRowKey).join('|');
                         faultsRecoveryAttemptedFor = null;
+                        faultsBaselineReread = false;
                         if (newKey !== oldKey) {
                             set({
                                 faults: result.items,
