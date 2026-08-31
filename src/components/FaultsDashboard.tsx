@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/shallow';
 import {
     AlertTriangle,
@@ -29,13 +29,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Skeleton } from '@/components/ui/skeleton';
 import { SnapshotCard } from './SnapshotCard';
 import { useAppStore } from '@/lib/store';
+import { useFaultPolling } from '@/hooks/useFaultPolling';
 import type { Fault, FaultSeverity, FaultStatus, FaultResponse } from '@/lib/types';
 import { faultKey, mapFaultEntityTypeToResourceType } from '@/lib/utils';
-
-/**
- * Default polling interval in milliseconds
- */
-const DEFAULT_POLL_INTERVAL = 5000;
 
 /**
  * Get badge variant for fault severity
@@ -409,15 +405,7 @@ export function FaultsDashboard() {
     const [groupByEntity, setGroupByEntity] = useState(true);
 
     // Use shared faults state from store
-    const {
-        faults,
-        isLoadingFaults,
-        isConnected,
-        fetchFaults,
-        clearFault,
-        getFaultWithEnvironmentData,
-        hasFaultStream,
-    } = useAppStore(
+    const { faults, isLoadingFaults, isConnected, fetchFaults, clearFault, getFaultWithEnvironmentData } = useAppStore(
         useShallow((state) => ({
             faults: state.faults,
             isLoadingFaults: state.isLoadingFaults,
@@ -425,28 +413,12 @@ export function FaultsDashboard() {
             fetchFaults: state.fetchFaults,
             clearFault: state.clearFault,
             getFaultWithEnvironmentData: state.getFaultWithEnvironmentData,
-            hasFaultStream: state.faultStreamCleanup !== null,
         }))
     );
 
-    // Load faults on mount
-    useEffect(() => {
-        if (isConnected) {
-            fetchFaults();
-        }
-    }, [isConnected, fetchFaults]);
-
-    // Auto-refresh polling using shared store.
-    // Skip polling when SSE fault stream is active (it provides real-time updates).
-    useEffect(() => {
-        if (!autoRefresh || !isConnected || hasFaultStream) return;
-
-        const interval = setInterval(() => {
-            fetchFaults();
-        }, DEFAULT_POLL_INTERVAL);
-
-        return () => clearInterval(interval);
-    }, [autoRefresh, isConnected, hasFaultStream, fetchFaults]);
+    // Refreshes are shared with every other mounted fault view, so the gateway sees
+    // one request per refresh no matter how many of them are on screen.
+    useFaultPolling({ poll: autoRefresh });
 
     // Manual refresh handler
     const handleRefresh = useCallback(async () => {
@@ -848,52 +820,15 @@ export function FaultsDashboard() {
 }
 
 /**
- * Faults count badge for sidebar
+ * Faults count badge for sidebar.
  *
- * Uses shared faults state from useAppStore to avoid duplicate polling.
- * The main polling happens in FaultsDashboard or when faults are fetched elsewhere.
+ * Reads the shared fault list and joins the shared refresh, so the badge keeps
+ * counting whether or not the dashboard is open and without a second request.
  */
 export function FaultsCountBadge() {
-    const { faults, isConnected, fetchFaults, hasFaultStream } = useAppStore(
-        useShallow((state) => ({
-            faults: state.faults,
-            isConnected: state.isConnected,
-            fetchFaults: state.fetchFaults,
-            hasFaultStream: state.faultStreamCleanup !== null,
-        }))
-    );
+    const faults = useAppStore((state) => state.faults);
 
-    // Trigger initial fetch and set up fallback polling when connected.
-    // Skip polling when SSE fault stream is active (provides real-time updates).
-    useEffect(() => {
-        if (!isConnected) return;
-
-        // Initial fetch
-        fetchFaults();
-
-        // Only poll as fallback when SSE stream is not active
-        let interval: ReturnType<typeof setInterval> | null = null;
-        if (!hasFaultStream) {
-            interval = setInterval(() => {
-                if (!document.hidden) {
-                    fetchFaults();
-                }
-            }, DEFAULT_POLL_INTERVAL);
-        }
-
-        // Refresh when tab becomes visible
-        const handleVisibilityChange = () => {
-            if (!document.hidden) {
-                fetchFaults();
-            }
-        };
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-
-        return () => {
-            if (interval) clearInterval(interval);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
-    }, [isConnected, hasFaultStream, fetchFaults]);
+    useFaultPolling();
 
     // Count active critical/error faults
     const count = useMemo(() => {

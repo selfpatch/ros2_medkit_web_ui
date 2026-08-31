@@ -148,6 +148,8 @@ export interface AppState {
     // Faults state (diagnostic trouble codes)
     faults: Fault[];
     isLoadingFaults: boolean;
+    /** True once a fault fetch has completed. An empty list is a result, not a pending load. */
+    faultsLoaded: boolean;
     faultStreamCleanup: (() => void) | null;
 
     // Lifecycle status cache (apps/components only).
@@ -1069,6 +1071,7 @@ export const useAppStore = create<AppState>()(
             // Faults state
             faults: [],
             isLoadingFaults: false,
+            faultsLoaded: false,
             faultStreamCleanup: null,
 
             // Lifecycle status cache
@@ -1204,6 +1207,7 @@ export const useAppStore = create<AppState>()(
                     statusByEntity: {},
                     scriptsSupported: false,
                     scriptExecutions: new Map(),
+                    faultsLoaded: false,
                 });
             },
 
@@ -2500,11 +2504,13 @@ export const useAppStore = create<AppState>()(
             // ===========================================================================
 
             fetchFaults: async () => {
-                const { client, faults: currentFaults } = get();
+                const { client, faults: currentFaults, faultsLoaded } = get();
                 if (!client) return;
 
-                // Only show loading spinner on initial load, not background polls
-                const isInitialLoad = currentFaults.length === 0;
+                // Only show loading spinner before the first answer arrives. A list that
+                // came back empty is loaded, so later polls must not re-enter the loading
+                // state - that swaps the whole dashboard for its skeleton and back.
+                const isInitialLoad = !faultsLoaded;
                 if (isInitialLoad) {
                     set({ isLoadingFaults: true });
                 }
@@ -2524,15 +2530,17 @@ export const useAppStore = create<AppState>()(
                     const newKey = result.items.map((f: Fault) => `${f.code}:${f.status}:${f.severity}`).join('|');
                     const oldKey = currentFaults.map((f) => `${f.code}:${f.status}:${f.severity}`).join('|');
                     if (newKey !== oldKey) {
-                        set({ faults: result.items, isLoadingFaults: false });
+                        set({ faults: result.items, isLoadingFaults: false, faultsLoaded: true });
                     } else if (isInitialLoad) {
-                        set({ isLoadingFaults: false });
+                        set({ isLoadingFaults: false, faultsLoaded: true });
                     }
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
                     console.error('[store]', error);
                     toast.error(`Failed to load faults: ${message}`);
-                    set({ isLoadingFaults: false });
+                    // A failed attempt still ends the initial load: the error is reported
+                    // through the toast, and the skeleton must not return on every retry.
+                    set({ isLoadingFaults: false, faultsLoaded: true });
                 }
             },
 

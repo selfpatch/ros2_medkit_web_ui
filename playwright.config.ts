@@ -54,5 +54,8 @@ export default defineConfig({
         // it needs a fault manager the scripts gateway does not run. Serial for
         // the same reason as scripts-serial: one shared gateway.
         { name: 'rosbag-serial', testMatch: /rosbag-.*\.spec\.ts/, fullyParallel: false, workers: 1 },
+        // Reads the scripts gateway without changing it, but counts the requests the
+        // app makes, so it must not share a run with specs driving the same app.
+        { name: 'faults-serial', testMatch: /faults-.*\.spec\.ts/, fullyParallel: false, workers: 1 },
     ],
 });
