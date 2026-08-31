@@ -423,7 +423,8 @@ export function FaultsDashboard() {
     // Manual refresh handler
     const handleRefresh = useCallback(async () => {
         setIsRefreshing(true);
-        await fetchFaults();
+        // Forced: pressing refresh must start a read, not wait out one already running.
+        await fetchFaults({ force: true });
         setIsRefreshing(false);
     }, [fetchFaults]);
 

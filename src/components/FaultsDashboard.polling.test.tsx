@@ -20,7 +20,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, act, type RenderResult } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { FaultsDashboard, FaultsCountBadge } from './FaultsDashboard';
 import { useAppStore } from '@/lib/store';
 
@@ -61,20 +62,28 @@ async function framesDuring(container: HTMLElement, run: () => Promise<void>): P
     return frames;
 }
 
+/** Renders and lets the refresh the mount starts finish, so nothing settles outside act. */
+async function mount(ui: ReactElement): Promise<RenderResult> {
+    let result!: RenderResult;
+    await act(async () => {
+        result = render(ui);
+        await vi.advanceTimersByTimeAsync(0);
+    });
+    return result;
+}
+
+/** Lets everything already scheduled run: timers due now, and the promises they start. */
 async function settle() {
     await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(0);
     });
 }
 
+/** Moves time forward, letting each tick's request settle before the next one fires. */
 async function advance(ms: number) {
     await act(async () => {
-        vi.advanceTimersByTime(ms);
-        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(ms);
     });
-    await settle();
 }
 
 function connect(client: ReturnType<typeof clientReturning>, sseActive: boolean) {
@@ -93,15 +102,19 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    // Wrapped: this hook runs while the views are still mounted (Testing Library's
+    // own cleanup is registered earlier and so runs after this one), and an
+    // unwrapped store write would land on them outside act.
+    act(() => {
+        useAppStore.setState({ isConnected: false, client: null, faults: [], faultStreamCleanup: null } as never);
+    });
     vi.useRealTimers();
-    useAppStore.setState({ isConnected: false, client: null, faults: [], faultStreamCleanup: null } as never);
 });
 
 describe('FaultsDashboard refresh behaviour', () => {
     it('never falls back to the first-load skeleton once the empty list has loaded', async () => {
         connect(clientReturning([]), false);
-        const { container } = render(<FaultsDashboard />);
-        await settle();
+        const { container } = await mount(<FaultsDashboard />);
 
         const frames = await framesDuring(container, () => advance(POLL_INTERVAL_MS));
 
@@ -110,13 +123,12 @@ describe('FaultsDashboard refresh behaviour', () => {
 
     it('never falls back to the skeleton when the tab regains focus', async () => {
         connect(clientReturning([]), true);
-        const { container } = render(
+        const { container } = await mount(
             <>
                 <FaultsCountBadge />
                 <FaultsDashboard />
             </>
         );
-        await settle();
 
         const frames = await framesDuring(container, async () => {
             await act(async () => {
@@ -142,13 +154,12 @@ describe('FaultsDashboard refresh behaviour', () => {
     it('asks the gateway once per interval even with the badge and the dashboard mounted', async () => {
         const client = clientReturning([RAW_FAULT]);
         connect(client, false);
-        render(
+        await mount(
             <>
                 <FaultsCountBadge />
                 <FaultsDashboard />
             </>
         );
-        await settle();
         expect(client.GET).toHaveBeenCalledTimes(1);
 
         await advance(POLL_INTERVAL_MS);
@@ -161,13 +172,12 @@ describe('FaultsDashboard refresh behaviour', () => {
     it('does not poll while the fault stream delivers updates', async () => {
         const client = clientReturning([RAW_FAULT]);
         connect(client, true);
-        render(
+        await mount(
             <>
                 <FaultsCountBadge />
                 <FaultsDashboard />
             </>
         );
-        await settle();
         const afterMount = client.GET.mock.calls.length;
 
         await advance(POLL_INTERVAL_MS * 3);
@@ -178,11 +188,12 @@ describe('FaultsDashboard refresh behaviour', () => {
     it('stops polling when the last fault view unmounts', async () => {
         const client = clientReturning([RAW_FAULT]);
         connect(client, false);
-        const { unmount } = render(<FaultsDashboard />);
-        await settle();
+        const { unmount } = await mount(<FaultsDashboard />);
         const afterMount = client.GET.mock.calls.length;
 
-        unmount();
+        await act(async () => {
+            unmount();
+        });
         await advance(POLL_INTERVAL_MS * 2);
 
         expect(client.GET.mock.calls.length).toBe(afterMount);

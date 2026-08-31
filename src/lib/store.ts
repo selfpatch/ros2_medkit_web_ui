@@ -27,6 +27,7 @@ import type {
 } from './types';
 import { createMedkitClient, normalizeBaseUrl, type MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
 import type { SovdResourceEntityType } from './types';
+import { faultKey } from './utils';
 import {
     transformFaultsResponse,
     transformOperationsResponse,
@@ -274,7 +275,8 @@ export interface AppState {
     stopScriptPolling: () => void;
 
     // Faults actions
-    fetchFaults: () => Promise<void>;
+    /** `force` skips the shared in-flight refresh, for a read that must see the newest state. */
+    fetchFaults: (options?: { force?: boolean }) => Promise<void>;
     clearFault: (entityType: SovdResourceEntityType, entityId: string, faultCode: string) => Promise<boolean>;
     registerUpdate: (body: { id: string; [key: string]: unknown }, signal?: AbortSignal) => Promise<void>;
     subscribeFaultStream: () => void;
@@ -881,6 +883,22 @@ const statusWatchers = new Map<string, number>();
  */
 const statusEpochs = new Map<string, number>();
 
+/**
+ * Everything a fault row shows, so an answer that changed any of it is not mistaken
+ * for the list already on screen. The entity is part of it because one fault code
+ * can be reported by two entities and the clear action targets the one displayed.
+ */
+function faultRowKey(fault: Fault): string {
+    return `${faultKey(fault)}:${fault.status}:${fault.severity}:${fault.message}:${fault.timestamp}`;
+}
+
+/**
+ * The refresh currently on the wire, if any. Every fault view shares one list and
+ * they refresh on the same events (a timer tick, a tab regaining focus), so without
+ * this one refresh would put as many requests on the wire as there are views.
+ */
+let faultsRefreshInFlight: Promise<void> | null = null;
+
 /** Reset the status-request dedupe cache. Exposed for tests. */
 export function __resetStatusRequestCache(): void {
     inFlightStatusRequests.clear();
@@ -1207,6 +1225,8 @@ export const useAppStore = create<AppState>()(
                     statusByEntity: {},
                     scriptsSupported: false,
                     scriptExecutions: new Map(),
+                    faults: [],
+                    isLoadingFaults: false,
                     faultsLoaded: false,
                 });
             },
@@ -2503,9 +2523,13 @@ export const useAppStore = create<AppState>()(
             // FAULTS ACTIONS (Diagnostic Trouble Codes)
             // ===========================================================================
 
-            fetchFaults: async () => {
+            fetchFaults: async (options = {}) => {
                 const { client, faults: currentFaults, faultsLoaded } = get();
                 if (!client) return;
+
+                if (!options.force && faultsRefreshInFlight) {
+                    return faultsRefreshInFlight;
+                }
 
                 // Only show loading spinner before the first answer arrives. A list that
                 // came back empty is loaded, so later polls must not re-enter the loading
@@ -2515,33 +2539,55 @@ export const useAppStore = create<AppState>()(
                     set({ isLoadingFaults: true });
                 }
 
-                try {
-                    const { data: faultsData, error: faultsError } = await client.GET('/faults', {
-                        params: {
-                            // `status=all` is required to include cleared/healed faults
-                            // (no param returns only active).
-                            query: { status: 'all' },
-                        },
-                    });
-                    if (faultsError) throw new Error(faultsError.message || 'Failed to load faults');
-                    const result = transformFaultsResponse(faultsData);
-                    // Skip state update if faults haven't changed to avoid unnecessary re-renders.
-                    // Compare by serializing fault codes + statuses (cheap and covers all meaningful changes).
-                    const newKey = result.items.map((f: Fault) => `${f.code}:${f.status}:${f.severity}`).join('|');
-                    const oldKey = currentFaults.map((f) => `${f.code}:${f.status}:${f.severity}`).join('|');
-                    if (newKey !== oldKey) {
-                        set({ faults: result.items, isLoadingFaults: false, faultsLoaded: true });
-                    } else if (isInitialLoad) {
+                const run = async () => {
+                    try {
+                        const { data: faultsData, error: faultsError } = await client.GET('/faults', {
+                            params: {
+                                // `status=all` is required to include cleared/healed faults
+                                // (no param returns only active).
+                                query: { status: 'all' },
+                            },
+                        });
+                        // A refresh outlives the session that started it, so an answer from
+                        // the gateway we just left must not populate the next one's list.
+                        if (get().client !== client) return;
+                        if (faultsError) throw new Error(faultsError.message || 'Failed to load faults');
+                        const result = transformFaultsResponse(faultsData);
+                        // The fault stream writes this same list. If it did so while this
+                        // request was in flight, its state is the newer of the two.
+                        if (get().faults !== currentFaults) {
+                            set({ isLoadingFaults: false, faultsLoaded: true });
+                            return;
+                        }
+                        // Skip the state update when nothing a row shows has changed, to avoid
+                        // re-rendering the list for an identical answer. Every field the row
+                        // renders belongs in the key, including the entity: one code can be
+                        // reported by two entities, and clearing acts on the entity shown.
+                        const newKey = result.items.map(faultRowKey).join('|');
+                        const oldKey = currentFaults.map(faultRowKey).join('|');
+                        if (newKey !== oldKey) {
+                            set({ faults: result.items, isLoadingFaults: false, faultsLoaded: true });
+                        } else if (isInitialLoad) {
+                            set({ isLoadingFaults: false, faultsLoaded: true });
+                        }
+                    } catch (error) {
+                        if (get().client !== client) return;
+                        const message = error instanceof Error ? error.message : 'Unknown error';
+                        console.error('[store]', error);
+                        toast.error(`Failed to load faults: ${message}`);
+                        // A failed attempt still ends the initial load: the error is reported
+                        // through the toast, and the skeleton must not return on every retry.
                         set({ isLoadingFaults: false, faultsLoaded: true });
                     }
-                } catch (error) {
-                    const message = error instanceof Error ? error.message : 'Unknown error';
-                    console.error('[store]', error);
-                    toast.error(`Failed to load faults: ${message}`);
-                    // A failed attempt still ends the initial load: the error is reported
-                    // through the toast, and the skeleton must not return on every retry.
-                    set({ isLoadingFaults: false, faultsLoaded: true });
+                };
+
+                if (options.force) {
+                    return run();
                 }
+                faultsRefreshInFlight = run().finally(() => {
+                    faultsRefreshInFlight = null;
+                });
+                return faultsRefreshInFlight;
             },
 
             clearFault: async (entityType: SovdResourceEntityType, entityId: string, faultCode: string) => {
@@ -2552,8 +2598,9 @@ export const useAppStore = create<AppState>()(
                     const { error: clearError } = await deleteEntityFault(client, entityType, entityId, faultCode);
                     if (clearError) throw new Error(clearError.message || 'Failed to clear fault');
                     toast.success(`Fault ${faultCode} cleared`);
-                    // Refresh faults list
-                    await fetchFaults();
+                    // Forced: a refresh already on the wire was answered before the delete
+                    // and would read the fault straight back onto the screen.
+                    await fetchFaults({ force: true });
                     return true;
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
