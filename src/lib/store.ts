@@ -948,6 +948,13 @@ let faultsRefreshClient: unknown = null;
 let faultsReadSeq = 0;
 let faultsAppliedSeq = 0;
 
+/**
+ * The failure a stream event has already bought a read for. An event says the gateway
+ * answers, which is worth one attempt; if that attempt fails too, the timer is what
+ * keeps trying, so a burst of events cannot turn into a burst of failing requests.
+ */
+let faultsRecoveryAttemptedFor: string | null = null;
+
 /** Reset the status-request dedupe cache. Exposed for tests. */
 export function __resetStatusRequestCache(): void {
     inFlightStatusRequests.clear();
@@ -1233,6 +1240,11 @@ export const useAppStore = create<AppState>()(
                     // would answer for this one too: the next refresh would wait behind it
                     // and the page would sit on an empty list nobody had asked about.
                     faultsRefreshInFlight = null;
+                    faultsRecoveryAttemptedFor = null;
+                    // Same for its fault stream: it stays open until this connection gets
+                    // as far as subscribing, and until then its events would be written
+                    // into the list of a gateway that never reported them.
+                    get().unsubscribeFaultStream();
 
                     // Load root entities after successful connection
                     await get().loadRootEntities();
@@ -2638,6 +2650,7 @@ export const useAppStore = create<AppState>()(
                         // reported by two entities, and clearing acts on the entity shown.
                         const newKey = result.items.map(faultRowKey).join('|');
                         const oldKey = currentFaults.map(faultRowKey).join('|');
+                        faultsRecoveryAttemptedFor = null;
                         if (newKey !== oldKey) {
                             set({
                                 faults: result.items,
@@ -2682,6 +2695,17 @@ export const useAppStore = create<AppState>()(
             setFaultsAutoRefresh: (enabled: boolean) => set({ faultsAutoRefresh: enabled }),
 
             applyFaultStreamEvent: (eventType: string, fault: Fault) => {
+                // An event proves the gateway is answering, which a failed read of the whole
+                // list had left in doubt. It does not prove the list is complete - only a
+                // read can - so it buys a read rather than clearing the failure by itself.
+                // A list the user paused stays paused: that switch means "do not move".
+                const readAgainAfterFailure = () => {
+                    const { faultsError, faultsAutoRefresh } = get();
+                    if (!faultsError || !faultsAutoRefresh) return;
+                    if (faultsRecoveryAttemptedFor === faultsError) return;
+                    faultsRecoveryAttemptedFor = faultsError;
+                    void get().fetchFaults();
+                };
                 const { faults } = get();
                 // Matched the way the list is keyed, entity type included: one code can be
                 // reported by an app and by the component it runs on, and they are two rows.
@@ -2693,6 +2717,7 @@ export const useAppStore = create<AppState>()(
                     if (remaining.length !== faults.length) {
                         set({ faults: remaining });
                     }
+                    readAgainAfterFailure();
                     return;
                 }
 
@@ -2705,6 +2730,7 @@ export const useAppStore = create<AppState>()(
                         existing.message === fault.message &&
                         existing.timestamp === fault.timestamp
                     ) {
+                        readAgainAfterFailure();
                         return;
                     }
                     const updated = [...faults];
@@ -2714,6 +2740,7 @@ export const useAppStore = create<AppState>()(
                     set({ faults: [...faults, fault] });
                 }
                 toast.warning(`Fault: ${fault.message}`, { autoClose: 5000 });
+                readAgainAfterFailure();
             },
 
             clearFault: async (entityType: SovdResourceEntityType, entityId: string, faultCode: string) => {

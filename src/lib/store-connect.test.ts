@@ -98,6 +98,26 @@ describe('connect', () => {
         expect(useAppStore.getState().scriptsSupported).toBe(true);
     });
 
+    it('drops the previous gateway fault stream before serving the new one', async () => {
+        const mockGet = vi.fn((path: string) => {
+            if (path === '/health') return Promise.resolve({ error: undefined });
+            return Promise.resolve({ data: undefined });
+        });
+        vi.mocked(createMedkitClient).mockReturnValue({ GET: mockGet } as unknown as MedkitClient);
+        const previousStream = vi.fn();
+        useAppStore.setState({
+            loadRootEntities: vi.fn().mockResolvedValue(undefined),
+            subscribeFaultStream: vi.fn(),
+            faultStreamCleanup: previousStream,
+        });
+
+        await useAppStore.getState().connect('http://other-gateway.local');
+
+        // Otherwise the old stream keeps writing faults into the new gateway's list for as
+        // long as the connection sequence takes.
+        expect(previousStream).toHaveBeenCalledTimes(1);
+    });
+
     it('leaves no faults from the previous gateway on screen', async () => {
         const mockGet = vi.fn((path: string) => {
             if (path === '/health') return Promise.resolve({ error: undefined });

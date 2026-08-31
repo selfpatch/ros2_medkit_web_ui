@@ -136,6 +136,10 @@ export function transformFault(apiFault: RawFaultItem, syntheticIdSuffix?: strin
     const entity_id = source.split('/').pop() || 'unknown';
 
     // Use entity_type from raw data if provided, otherwise default to 'app'.
+    // Both channels that produce faults - the list endpoint and the SSE stream - come
+    // through here, and the shared list is keyed on this type. They therefore have to
+    // agree about it: a gateway that starts sending it on one channel and not the other
+    // would split one fault into two rows, each with its own clear button.
     // The gateway's fault_to_json does not currently include entity_type, but
     // faults are always reported by ROS 2 nodes which map to apps.
     const entity_type = apiFault.entity_type || 'app';

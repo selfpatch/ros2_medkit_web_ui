@@ -21,6 +21,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useAppStore } from './store';
 import type { Fault } from './types';
+import { transformFault } from './transforms';
 
 vi.mock('react-toastify', () => ({
     toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
@@ -158,6 +159,104 @@ describe('fetchFaults error reporting', () => {
 
         expect(useAppStore.getState().faultsError).toBeNull();
         logged.mockRestore();
+    });
+});
+
+describe('a fault stream event while a read has failed', () => {
+    function withFailedRead(client: unknown) {
+        connected(client);
+        useAppStore.setState({
+            faultsError: 'Failed to get faults: ListFaults service not available',
+            faultsLoaded: true,
+        } as never);
+    }
+
+    const streamed: Fault = {
+        code: 'LIDAR_RANGE_INVALID',
+        message: 'range invalid',
+        severity: 'error',
+        status: 'active',
+        timestamp: '2026-08-31T10:00:00.000Z',
+        entity_id: 'lidar_front',
+        entity_type: 'app',
+    };
+
+    it('takes the event as proof the gateway answers, and reads the list again', async () => {
+        const client = clientReturning([raw()]);
+        withFailedRead(client);
+
+        useAppStore.getState().applyFaultStreamEvent('fault_confirmed', streamed);
+        await vi.waitFor(() => expect(client.GET).toHaveBeenCalledTimes(1));
+
+        // Cleared because a read succeeded, not because an event arrived.
+        expect(useAppStore.getState().faultsError).toBeNull();
+    });
+
+    it('asks once for a burst of events, not once per event', async () => {
+        const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const refusing = {
+            GET: vi.fn(async () => ({ data: undefined, error: { message: 'Failed to get faults' } })),
+        };
+        connected(refusing);
+        // The same failure the gateway keeps giving: a burst of events under one unchanged
+        // reason buys one attempt. A different reason is a change, and buys its own.
+        useAppStore.setState({ faultsError: 'Failed to get faults', faultsLoaded: true } as never);
+
+        for (let i = 0; i < 5; i++) {
+            useAppStore.getState().applyFaultStreamEvent('fault_confirmed', { ...streamed, code: `FAULT_${i}` });
+            await Promise.resolve();
+            await Promise.resolve();
+        }
+
+        // The timer is what retries a failing gateway. An event only buys the first try.
+        expect(refusing.GET).toHaveBeenCalledTimes(1);
+        logged.mockRestore();
+    });
+
+    it('leaves a paused list alone, event or no event', async () => {
+        const client = clientReturning([raw()]);
+        withFailedRead(client);
+        useAppStore.setState({ faultsAutoRefresh: false } as never);
+
+        useAppStore.getState().applyFaultStreamEvent('fault_confirmed', streamed);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(client.GET).not.toHaveBeenCalled();
+        expect(useAppStore.getState().faultsError).not.toBeNull();
+    });
+
+    it('does not read again for an event when nothing had failed', async () => {
+        const client = clientReturning([raw()]);
+        connected(client);
+
+        useAppStore.getState().applyFaultStreamEvent('fault_confirmed', streamed);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(client.GET).not.toHaveBeenCalled();
+    });
+
+    it('keeps one fault one row when the gateway names the entity type in neither channel', () => {
+        // Both channels run through transformFault, which calls an unnamed entity type an
+        // app. The list is keyed on that type, so the two channels have to agree about it:
+        // a gateway that starts sending it in one and not the other would split one fault
+        // into two rows, each with its own clear button.
+        connected(clientReturning([]));
+        const fromList = transformFault({
+            fault_code: 'LIDAR_RANGE_INVALID',
+            description: 'range invalid',
+            severity: 2,
+            severity_label: 'ERROR',
+            status: 'CONFIRMED',
+            first_occurred: 1756636800,
+            reporting_sources: ['/lidar_front'],
+        });
+        useAppStore.setState({ faults: [fromList] } as never);
+
+        useAppStore.getState().applyFaultStreamEvent('fault_cleared', { ...fromList, status: 'cleared' });
+
+        expect(useAppStore.getState().faults).toHaveLength(0);
     });
 });
 
