@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/shallow';
 import {
     AlertTriangle,
@@ -29,13 +29,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Skeleton } from '@/components/ui/skeleton';
 import { SnapshotCard } from './SnapshotCard';
 import { useAppStore } from '@/lib/store';
+import { useFaultPolling } from '@/hooks/useFaultPolling';
 import type { Fault, FaultSeverity, FaultStatus, FaultResponse } from '@/lib/types';
 import { faultKey, mapFaultEntityTypeToResourceType } from '@/lib/utils';
-
-/**
- * Default polling interval in milliseconds
- */
-const DEFAULT_POLL_INTERVAL = 5000;
 
 /**
  * Get badge variant for fault severity
@@ -114,6 +110,22 @@ function formatTimestamp(timestamp: string): string {
     } catch {
         return timestamp;
     }
+}
+
+/** Worst first, then most recent, then by identity so equal rows never swap places. */
+const DISPLAY_SEVERITY_RANK: Record<FaultSeverity, number> = {
+    critical: 3,
+    error: 2,
+    warning: 1,
+    info: 0,
+};
+
+function compareFaultsForDisplay(a: Fault, b: Fault): number {
+    const bySeverity = DISPLAY_SEVERITY_RANK[b.severity] - DISPLAY_SEVERITY_RANK[a.severity];
+    if (bySeverity !== 0) return bySeverity;
+    const byTime = b.timestamp.localeCompare(a.timestamp);
+    if (byTime !== 0) return byTime;
+    return faultKey(a).localeCompare(faultKey(b));
 }
 
 /**
@@ -395,7 +407,7 @@ function DashboardSkeleton() {
  */
 export function FaultsDashboard() {
     const [isRefreshing, setIsRefreshing] = useState(false);
-    const [autoRefresh, setAutoRefresh] = useState(true);
+    // Keyed by faultKey, not by code: one code can be reported by two entities.
     const [clearingCodes, setClearingCodes] = useState<Set<string>>(new Set());
     const [expandedFaults, setExpandedFaults] = useState<Set<string>>(new Set());
     const [faultDetails, setFaultDetails] = useState<Map<string, FaultResponse>>(new Map());
@@ -412,46 +424,36 @@ export function FaultsDashboard() {
     const {
         faults,
         isLoadingFaults,
+        faultsError,
+        autoRefresh,
+        setAutoRefresh,
         isConnected,
         fetchFaults,
         clearFault,
         getFaultWithEnvironmentData,
-        hasFaultStream,
     } = useAppStore(
         useShallow((state) => ({
             faults: state.faults,
             isLoadingFaults: state.isLoadingFaults,
+            faultsError: state.faultsError,
+            autoRefresh: state.faultsAutoRefresh,
+            setAutoRefresh: state.setFaultsAutoRefresh,
             isConnected: state.isConnected,
             fetchFaults: state.fetchFaults,
             clearFault: state.clearFault,
             getFaultWithEnvironmentData: state.getFaultWithEnvironmentData,
-            hasFaultStream: state.faultStreamCleanup !== null,
         }))
     );
 
-    // Load faults on mount
-    useEffect(() => {
-        if (isConnected) {
-            fetchFaults();
-        }
-    }, [isConnected, fetchFaults]);
-
-    // Auto-refresh polling using shared store.
-    // Skip polling when SSE fault stream is active (it provides real-time updates).
-    useEffect(() => {
-        if (!autoRefresh || !isConnected || hasFaultStream) return;
-
-        const interval = setInterval(() => {
-            fetchFaults();
-        }, DEFAULT_POLL_INTERVAL);
-
-        return () => clearInterval(interval);
-    }, [autoRefresh, isConnected, hasFaultStream, fetchFaults]);
+    // Refreshes are shared with every other mounted fault view, so the gateway sees
+    // one request per refresh no matter how many of them are on screen.
+    useFaultPolling();
 
     // Manual refresh handler
     const handleRefresh = useCallback(async () => {
         setIsRefreshing(true);
-        await fetchFaults();
+        // Forced: pressing refresh must start a read, not wait out one already running.
+        await fetchFaults({ force: true });
         setIsRefreshing(false);
     }, [fetchFaults]);
 
@@ -467,10 +469,8 @@ export function FaultsDashboard() {
             try {
                 // Map the fault's entity_type to the correct resource type for the API
                 const entityGroup = mapFaultEntityTypeToResourceType(fault.entity_type);
-                // Use store's clearFault which has proper error handling with toasts
+                // clearFault re-reads the list itself, whether or not the delete succeeded.
                 await clearFault(entityGroup, fault.entity_id, fault.code);
-                // Reload faults after clearing
-                await fetchFaults();
             } finally {
                 setClearingCodes((prev) => {
                     const next = new Set(prev);
@@ -479,7 +479,7 @@ export function FaultsDashboard() {
                 });
             }
         },
-        [fetchFaults, clearFault]
+        [clearFault]
     );
 
     // Toggle fault expansion and lazy-load environment data
@@ -528,19 +528,25 @@ export function FaultsDashboard() {
         [getFaultWithEnvironmentData]
     );
 
-    // Filter faults
+    // Filter faults, then put them in a fixed order. Rows arrive in whatever order the
+    // gateway or the stream produced them, and a row that moves while the pointer is on
+    // its way to Clear is a row that gets the wrong fault cleared.
     const filteredFaults = useMemo(() => {
-        return faults.filter((f) => severityFilters.has(f.severity) && statusFilters.has(f.status));
+        return faults
+            .filter((f) => severityFilters.has(f.severity) && statusFilters.has(f.status))
+            .sort(compareFaultsForDisplay);
     }, [faults, severityFilters, statusFilters]);
 
     // Group faults by entity
     const groupedFaults = useMemo(() => {
-        const groups = new Map<string, { entityType: string; faults: Fault[] }>();
+        const groups = new Map<string, { entityId: string; entityType: string; faults: Fault[] }>();
 
         for (const fault of filteredFaults) {
-            const key = fault.entity_id;
+            // Keyed by type and id: an app and the component it runs on can share a name,
+            // and merging them puts one entity's faults under another entity's heading.
+            const key = `${fault.entity_type}/${fault.entity_id}`;
             if (!groups.has(key)) {
-                groups.set(key, { entityType: fault.entity_type, faults: [] });
+                groups.set(key, { entityId: fault.entity_id, entityType: fault.entity_type, faults: [] });
             }
             groups.get(key)!.faults.push(fault);
         }
@@ -634,9 +640,11 @@ export function FaultsDashboard() {
                                 Faults Dashboard
                             </CardTitle>
                             <CardDescription>
-                                {counts.total === 0
-                                    ? 'No faults detected'
-                                    : `${counts.total} fault${counts.total !== 1 ? 's' : ''} detected`}
+                                {faultsError
+                                    ? 'Fault status unknown'
+                                    : counts.total === 0
+                                      ? 'No faults detected'
+                                      : `${counts.total} fault${counts.total !== 1 ? 's' : ''} detected`}
                             </CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
@@ -662,6 +670,11 @@ export function FaultsDashboard() {
                     </div>
                 </CardHeader>
                 <CardContent>
+                    {faultsError && faults.length > 0 && (
+                        <p className="mb-4 font-mono text-xs text-destructive">
+                            Last refresh failed, these faults may be out of date: {faultsError}
+                        </p>
+                    )}
                     {/* Summary badges */}
                     <div className="flex flex-wrap gap-2 mb-4">
                         {counts.critical > 0 && (
@@ -688,7 +701,7 @@ export function FaultsDashboard() {
                                 {counts.info} Info
                             </Badge>
                         )}
-                        {counts.total === 0 && (
+                        {counts.total === 0 && !faultsError && filteredFaults.length === 0 && (
                             <Badge variant="outline" className="text-green-600 border-green-300">
                                 <CheckCircle className="w-3 h-3 mr-1" />
                                 All Clear
@@ -792,7 +805,31 @@ export function FaultsDashboard() {
             </Card>
 
             {/* Faults List */}
-            {filteredFaults.length === 0 ? (
+            {faultsError && faults.length === 0 ? (
+                <Card>
+                    <CardContent className="pt-6">
+                        <div className="flex flex-col items-center justify-center py-8 text-center">
+                            <AlertOctagon className="w-12 h-12 mb-2 text-destructive" />
+                            <p className="font-medium">Fault list unavailable</p>
+                            <p className="text-sm text-muted-foreground max-w-md">
+                                The gateway did not answer with a fault list, so this page cannot say whether anything
+                                is wrong. This is not the same as a system without faults.
+                            </p>
+                            <p className="mt-2 font-mono text-xs text-destructive">{faultsError}</p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-4"
+                                onClick={handleRefresh}
+                                disabled={isRefreshing || isLoadingFaults}
+                            >
+                                <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                                Try again
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            ) : filteredFaults.length === 0 ? (
                 <Card>
                     <CardContent className="pt-6">
                         <div className="flex flex-col items-center justify-center text-muted-foreground py-8">
@@ -809,9 +846,9 @@ export function FaultsDashboard() {
             ) : groupByEntity ? (
                 <Card>
                     <CardContent className="pt-4 space-y-4">
-                        {groupedFaults.map(([entityId, { entityType, faults: entityFaults }]) => (
+                        {groupedFaults.map(([groupKey, { entityId, entityType, faults: entityFaults }]) => (
                             <FaultGroup
-                                key={entityId}
+                                key={groupKey}
                                 entityId={entityId}
                                 entityType={entityType}
                                 faults={entityFaults}
@@ -848,58 +885,39 @@ export function FaultsDashboard() {
 }
 
 /**
- * Faults count badge for sidebar
+ * Faults count badge for sidebar.
  *
- * Uses shared faults state from useAppStore to avoid duplicate polling.
- * The main polling happens in FaultsDashboard or when faults are fetched elsewhere.
+ * Reads the shared fault list and joins the shared refresh, so the badge keeps
+ * counting whether or not the dashboard is open and without a second request.
  */
 export function FaultsCountBadge() {
-    const { faults, isConnected, fetchFaults, hasFaultStream } = useAppStore(
-        useShallow((state) => ({
-            faults: state.faults,
-            isConnected: state.isConnected,
-            fetchFaults: state.fetchFaults,
-            hasFaultStream: state.faultStreamCleanup !== null,
-        }))
+    const { faults, faultsError } = useAppStore(
+        useShallow((state) => ({ faults: state.faults, faultsError: state.faultsError }))
     );
 
-    // Trigger initial fetch and set up fallback polling when connected.
-    // Skip polling when SSE fault stream is active (provides real-time updates).
-    useEffect(() => {
-        if (!isConnected) return;
-
-        // Initial fetch
-        fetchFaults();
-
-        // Only poll as fallback when SSE stream is not active
-        let interval: ReturnType<typeof setInterval> | null = null;
-        if (!hasFaultStream) {
-            interval = setInterval(() => {
-                if (!document.hidden) {
-                    fetchFaults();
-                }
-            }, DEFAULT_POLL_INTERVAL);
-        }
-
-        // Refresh when tab becomes visible
-        const handleVisibilityChange = () => {
-            if (!document.hidden) {
-                fetchFaults();
-            }
-        };
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-
-        return () => {
-            if (interval) clearInterval(interval);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
-    }, [isConnected, hasFaultStream, fetchFaults]);
+    useFaultPolling();
 
     // Count active critical/error faults
     const count = useMemo(() => {
         return faults.filter((f) => f.status === 'active' && (f.severity === 'critical' || f.severity === 'error'))
             .length;
     }, [faults]);
+
+    // A count nobody could check is worse than no count: it reads as "all good" from
+    // across the room while the gateway is not answering for faults at all.
+    if (faultsError) {
+        // The last known count still says more than a question mark; the marker says it
+        // was not checked. Only with nothing known at all is there no number to show.
+        return (
+            <Badge
+                variant="outline"
+                className="text-xs ml-auto text-destructive border-destructive/50"
+                title={`This count could not be checked: ${faultsError}`}
+            >
+                {count > 0 ? count : '?'}
+            </Badge>
+        );
+    }
 
     if (count === 0) return null;
 

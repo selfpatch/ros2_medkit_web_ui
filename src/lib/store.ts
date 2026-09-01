@@ -27,6 +27,7 @@ import type {
 } from './types';
 import { createMedkitClient, normalizeBaseUrl, type MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
 import type { SovdResourceEntityType } from './types';
+import { faultKey } from './utils';
 import {
     transformFaultsResponse,
     transformOperationsResponse,
@@ -148,6 +149,17 @@ export interface AppState {
     // Faults state (diagnostic trouble codes)
     faults: Fault[];
     isLoadingFaults: boolean;
+    /** True once a fault fetch has completed. An empty list is a result, not a pending load. */
+    faultsLoaded: boolean;
+    /** Why the last refresh failed, so an unanswered list is not shown as a healthy empty one. */
+    faultsError: string | null;
+    /**
+     * Whether the shared fault list keeps refreshing. Lives here rather than in the
+     * dashboard: it governs every view of the list, and a page the user deliberately
+     * froze must not start moving again because they navigated away and back.
+     */
+    faultsAutoRefresh: boolean;
+    setFaultsAutoRefresh: (enabled: boolean) => void;
     faultStreamCleanup: (() => void) | null;
 
     // Lifecycle status cache (apps/components only).
@@ -272,7 +284,10 @@ export interface AppState {
     stopScriptPolling: () => void;
 
     // Faults actions
-    fetchFaults: () => Promise<void>;
+    /** `force` skips the shared in-flight refresh, for a read that must see the newest state. */
+    fetchFaults: (options?: { force?: boolean }) => Promise<void>;
+    /** Applies one fault stream event to the shared list. */
+    applyFaultStreamEvent: (eventType: string, fault: Fault) => void;
     clearFault: (entityType: SovdResourceEntityType, entityId: string, faultCode: string) => Promise<boolean>;
     registerUpdate: (body: { id: string; [key: string]: unknown }, signal?: AbortSignal) => Promise<void>;
     subscribeFaultStream: () => void;
@@ -879,6 +894,70 @@ const statusWatchers = new Map<string, number>();
  */
 const statusEpochs = new Map<string, number>();
 
+/**
+ * Everything a fault row shows, so an answer that changed any of it is not mistaken
+ * for the list already on screen. The entity is part of it because one fault code
+ * can be reported by two entities and the clear action targets the one displayed.
+ */
+function faultRowKey(fault: Fault): string {
+    return `${faultKey(fault)}:${fault.status}:${fault.severity}:${fault.message}:${fault.timestamp}`;
+}
+
+/**
+ * The gateway's own words for a failed read: SOVD puts the summary in `message` and
+ * the part naming the cause (a service that is not running, say) in `parameters.details`.
+ * The page shows both, rather than an empty list that would read as "no faults".
+ */
+function describeGatewayError(error: unknown): string {
+    if (!error || typeof error !== 'object') return 'Failed to load faults';
+    const { message, parameters } = error as { message?: string; parameters?: { details?: string } };
+    const summary = message || 'Failed to load faults';
+    const details = parameters?.details;
+    return details ? `${summary}: ${details}` : summary;
+}
+
+/**
+ * What the page says when a read fails. The generated client puts its own deadline on
+ * every request and aborts it, which arrives as a DOMException the generic branch
+ * would render as "Unknown error" - saying nothing about a gateway that went quiet.
+ */
+function describeReadFailure(error: unknown): string {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+        return 'The gateway did not answer in time';
+    }
+    if (error instanceof Error) return error.message;
+    return 'Unknown error';
+}
+
+/**
+ * The refresh currently on the wire, if any. Every fault view shares one list and
+ * they refresh on the same events (a timer tick, a tab regaining focus), so without
+ * this one refresh would put as many requests on the wire as there are views.
+ */
+let faultsRefreshInFlight: Promise<void> | null = null;
+
+/** Whose read that is. A read belongs to the connection that started it and to no other. */
+let faultsRefreshClient: unknown = null;
+
+/**
+ * Reads are numbered so that answers coming back out of order cannot undo each other.
+ * A read applies unless a LATER one already has - which is not the same as "unless a
+ * later one has started": a refresh the user pressed must still be able to report its
+ * own failure while a background read it overtook is still on the wire.
+ */
+let faultsReadSeq = 0;
+let faultsAppliedSeq = 0;
+
+/**
+ * The failure a stream event has already bought a read for. An event says the gateway
+ * answers, which is worth one attempt; if that attempt fails too, the timer is what
+ * keeps trying, so a burst of events cannot turn into a burst of failing requests.
+ */
+let faultsRecoveryAttemptedFor: string | null = null;
+
+/** Whether the first read of this connection has already been given a second chance. */
+let faultsBaselineReread = false;
+
 /** Reset the status-request dedupe cache. Exposed for tests. */
 export function __resetStatusRequestCache(): void {
     inFlightStatusRequests.clear();
@@ -1069,6 +1148,9 @@ export const useAppStore = create<AppState>()(
             // Faults state
             faults: [],
             isLoadingFaults: false,
+            faultsLoaded: false,
+            faultsError: null,
+            faultsAutoRefresh: true,
             faultStreamCleanup: null,
 
             // Lifecycle status cache
@@ -1119,6 +1201,13 @@ export const useAppStore = create<AppState>()(
                         isConnecting: false,
                         connectionError: null,
                         client,
+                        // Connecting elsewhere never goes through disconnect(), so without
+                        // this the previous gateway's faults stay on screen - and the clear
+                        // button on such a row would send its code to the new gateway.
+                        faults: [],
+                        isLoadingFaults: false,
+                        faultsLoaded: false,
+                        faultsError: null,
                     });
 
                     // A reconnect must not carry executions of the previous gateway:
@@ -1149,6 +1238,17 @@ export const useAppStore = create<AppState>()(
                             }
                         })
                         .finally(() => clearTimeout(capsTimeout));
+
+                    // A read left on the wire belongs to the gateway just left. Holding it
+                    // would answer for this one too: the next refresh would wait behind it
+                    // and the page would sit on an empty list nobody had asked about.
+                    faultsRefreshInFlight = null;
+                    faultsRecoveryAttemptedFor = null;
+                    faultsBaselineReread = false;
+                    // Same for its fault stream: it stays open until this connection gets
+                    // as far as subscribing, and until then its events would be written
+                    // into the list of a gateway that never reported them.
+                    get().unsubscribeFaultStream();
 
                     // Load root entities after successful connection
                     await get().loadRootEntities();
@@ -1187,6 +1287,11 @@ export const useAppStore = create<AppState>()(
 
                 // Unsubscribe from fault stream
                 get().unsubscribeFaultStream();
+                // Whatever is on the wire belongs to the session being left, and a refresh
+                // for the next one must not be answered by it or queue behind it.
+                faultsRefreshInFlight = null;
+                faultsRecoveryAttemptedFor = null;
+                faultsBaselineReread = false;
 
                 set({
                     serverUrl: null,
@@ -1204,6 +1309,10 @@ export const useAppStore = create<AppState>()(
                     statusByEntity: {},
                     scriptsSupported: false,
                     scriptExecutions: new Map(),
+                    faults: [],
+                    isLoadingFaults: false,
+                    faultsLoaded: false,
+                    faultsError: null,
                 });
             },
 
@@ -2499,41 +2608,159 @@ export const useAppStore = create<AppState>()(
             // FAULTS ACTIONS (Diagnostic Trouble Codes)
             // ===========================================================================
 
-            fetchFaults: async () => {
-                const { client, faults: currentFaults } = get();
+            fetchFaults: async (options = {}) => {
+                const { client, faults: currentFaults, faultsLoaded } = get();
                 if (!client) return;
 
-                // Only show loading spinner on initial load, not background polls
-                const isInitialLoad = currentFaults.length === 0;
+                // Shared only within one connection: a read left over from the gateway we
+                // just left must not stand in for this one's first read, which would leave
+                // the page on an empty list nobody had asked about.
+                if (!options.force && faultsRefreshInFlight && faultsRefreshClient === client) {
+                    return faultsRefreshInFlight;
+                }
+
+                // Only show loading spinner before the first answer arrives. A list that
+                // came back empty is loaded, so later polls must not re-enter the loading
+                // state - that swaps the whole dashboard for its skeleton and back.
+                const isInitialLoad = !faultsLoaded;
                 if (isInitialLoad) {
                     set({ isLoadingFaults: true });
                 }
 
-                try {
-                    const { data: faultsData, error: faultsError } = await client.GET('/faults', {
-                        params: {
-                            // `status=all` is required to include cleared/healed faults
-                            // (no param returns only active).
-                            query: { status: 'all' },
-                        },
-                    });
-                    if (faultsError) throw new Error(faultsError.message || 'Failed to load faults');
-                    const result = transformFaultsResponse(faultsData);
-                    // Skip state update if faults haven't changed to avoid unnecessary re-renders.
-                    // Compare by serializing fault codes + statuses (cheap and covers all meaningful changes).
-                    const newKey = result.items.map((f: Fault) => `${f.code}:${f.status}:${f.severity}`).join('|');
-                    const oldKey = currentFaults.map((f) => `${f.code}:${f.status}:${f.severity}`).join('|');
-                    if (newKey !== oldKey) {
-                        set({ faults: result.items, isLoadingFaults: false });
-                    } else if (isInitialLoad) {
-                        set({ isLoadingFaults: false });
+                const readSeq = (faultsReadSeq += 1);
+                const run = async () => {
+                    try {
+                        const { data: faultsData, error: faultsError } = await client.GET('/faults', {
+                            params: {
+                                // `status=all` is required to include cleared/healed faults
+                                // (no param returns only active).
+                                query: { status: 'all' },
+                            },
+                        });
+                        // A refresh outlives the session that started it, so an answer from
+                        // the gateway we just left must not populate the next one's list,
+                        // and neither may one a later read has already answered for.
+                        if (get().client !== client || readSeq <= faultsAppliedSeq) return;
+                        if (faultsError) throw new Error(describeGatewayError(faultsError));
+                        faultsAppliedSeq = readSeq;
+                        const result = transformFaultsResponse(faultsData);
+                        // The fault stream writes this same list. If it did so while this
+                        // request was in flight, its state is the newer of the two.
+                        if (get().faults !== currentFaults) {
+                            if (isInitialLoad && !faultsBaselineReread) {
+                                // Except on the first read: the stream carries what happens
+                                // next, not what was already raised, so keeping only its
+                                // event would hide every fault that predates the
+                                // subscription. Read once more instead - the gateway knows
+                                // about both - and stay unloaded until that lands. Forced,
+                                // because this read is still the one in flight; and once,
+                                // so a busy stream cannot turn it into a chain.
+                                faultsBaselineReread = true;
+                                set({ isLoadingFaults: false, faultsError: null });
+                                void get().fetchFaults({ force: true });
+                                return;
+                            }
+                            set({ isLoadingFaults: false, faultsLoaded: true, faultsError: null });
+                            return;
+                        }
+                        // Skip the state update when nothing a row shows has changed, to avoid
+                        // re-rendering the list for an identical answer. Every field the row
+                        // renders belongs in the key, including the entity: one code can be
+                        // reported by two entities, and clearing acts on the entity shown.
+                        const newKey = result.items.map(faultRowKey).join('|');
+                        const oldKey = currentFaults.map(faultRowKey).join('|');
+                        faultsRecoveryAttemptedFor = null;
+                        faultsBaselineReread = false;
+                        if (newKey !== oldKey) {
+                            set({
+                                faults: result.items,
+                                isLoadingFaults: false,
+                                faultsLoaded: true,
+                                faultsError: null,
+                            });
+                        } else {
+                            set({ isLoadingFaults: false, faultsLoaded: true, faultsError: null });
+                        }
+                    } catch (error) {
+                        if (get().client !== client || readSeq <= faultsAppliedSeq) return;
+                        faultsAppliedSeq = readSeq;
+                        const message = describeReadFailure(error);
+                        console.error('[store]', error);
+                        // Only a refresh the user asked for gets a toast. The page carries a
+                        // failed read on its own now, and toasting every background attempt
+                        // stacks one notification per retry on top of it.
+                        if (options.force) {
+                            toast.error(`Failed to load faults: ${message}`);
+                        }
+                        // A failed attempt still ends the initial load - the skeleton must not
+                        // come back on every retry - but it is not an empty fault list either,
+                        // so the reason is kept for the page to show in its place.
+                        set({ isLoadingFaults: false, faultsLoaded: true, faultsError: message });
                     }
-                } catch (error) {
-                    const message = error instanceof Error ? error.message : 'Unknown error';
-                    console.error('[store]', error);
-                    toast.error(`Failed to load faults: ${message}`);
-                    set({ isLoadingFaults: false });
+                };
+
+                if (options.force) {
+                    return run();
                 }
+                faultsRefreshClient = client;
+                faultsRefreshInFlight = run().finally(() => {
+                    if (faultsRefreshClient === client) {
+                        faultsRefreshInFlight = null;
+                        faultsRefreshClient = null;
+                    }
+                });
+                return faultsRefreshInFlight;
+            },
+
+            setFaultsAutoRefresh: (enabled: boolean) => set({ faultsAutoRefresh: enabled }),
+
+            applyFaultStreamEvent: (eventType: string, fault: Fault) => {
+                // An event proves the gateway is answering, which a failed read of the whole
+                // list had left in doubt. It does not prove the list is complete - only a
+                // read can - so it buys a read rather than clearing the failure by itself.
+                // A list the user paused stays paused: that switch means "do not move".
+                const readAgainAfterFailure = () => {
+                    const { faultsError, faultsAutoRefresh } = get();
+                    if (!faultsError || !faultsAutoRefresh) return;
+                    if (faultsRecoveryAttemptedFor === faultsError) return;
+                    faultsRecoveryAttemptedFor = faultsError;
+                    void get().fetchFaults();
+                };
+                const { faults } = get();
+                // Matched the way the list is keyed, entity type included: one code can be
+                // reported by an app and by the component it runs on, and they are two rows.
+                const key = faultKey(fault);
+
+                if (eventType === 'fault_cleared') {
+                    // No toast: clearFault already raises one for a clear the user asked for.
+                    const remaining = faults.filter((f) => faultKey(f) !== key);
+                    if (remaining.length !== faults.length) {
+                        set({ faults: remaining });
+                    }
+                    readAgainAfterFailure();
+                    return;
+                }
+
+                const existingIndex = faults.findIndex((f) => faultKey(f) === key);
+                if (existingIndex >= 0) {
+                    const existing = faults[existingIndex]!;
+                    if (
+                        existing.status === fault.status &&
+                        existing.severity === fault.severity &&
+                        existing.message === fault.message &&
+                        existing.timestamp === fault.timestamp
+                    ) {
+                        readAgainAfterFailure();
+                        return;
+                    }
+                    const updated = [...faults];
+                    updated[existingIndex] = fault;
+                    set({ faults: updated });
+                } else {
+                    set({ faults: [...faults, fault] });
+                }
+                toast.warning(`Fault: ${fault.message}`, { autoClose: 5000 });
+                readAgainAfterFailure();
             },
 
             clearFault: async (entityType: SovdResourceEntityType, entityId: string, faultCode: string) => {
@@ -2544,13 +2771,17 @@ export const useAppStore = create<AppState>()(
                     const { error: clearError } = await deleteEntityFault(client, entityType, entityId, faultCode);
                     if (clearError) throw new Error(clearError.message || 'Failed to clear fault');
                     toast.success(`Fault ${faultCode} cleared`);
-                    // Refresh faults list
-                    await fetchFaults();
+                    // Forced: a refresh already on the wire was answered before the delete
+                    // and would read the fault straight back onto the screen.
+                    await fetchFaults({ force: true });
                     return true;
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
                     console.error('[store]', error);
                     toast.error(`Failed to clear fault: ${message}`);
+                    // The delete may have failed because the fault is already gone. Re-read,
+                    // or the row stays on screen as a ghost with a button that does nothing.
+                    await fetchFaults({ force: true });
                     return false;
                 }
             },
@@ -2603,39 +2834,14 @@ export const useAppStore = create<AppState>()(
                             const faultData = faultPayload as Parameters<typeof transformFault>[0];
                             const fault = transformFault(faultData);
 
-                            if (event.event === 'fault_cleared') {
-                                // onFaultCleared - no toast, clearFault() already shows one for UI-triggered clears
-                                const { faults } = get();
-                                const newFaults = faults.filter(
-                                    (f) => !(f.code === fault.code && f.entity_id === fault.entity_id)
-                                );
-                                if (newFaults.length !== faults.length) {
-                                    set({ faults: newFaults });
-                                }
-                            } else {
-                                // fault_confirmed or default message
-                                const { faults } = get();
-                                const existingIndex = faults.findIndex(
-                                    (f) => f.code === fault.code && f.entity_id === fault.entity_id
-                                );
-                                if (existingIndex >= 0) {
-                                    const existing = faults[existingIndex]!;
-                                    if (
-                                        existing.status === fault.status &&
-                                        existing.severity === fault.severity &&
-                                        existing.message === fault.message &&
-                                        existing.timestamp === fault.timestamp
-                                    ) {
-                                        continue;
-                                    }
-                                    const newFaults = [...faults];
-                                    newFaults[existingIndex] = fault;
-                                    set({ faults: newFaults });
-                                } else {
-                                    set({ faults: [...faults, fault] });
-                                }
-                                toast.warning(`Fault: ${fault.message}`, { autoClose: 5000 });
-                            }
+                            get().applyFaultStreamEvent(event.event ?? 'fault_confirmed', fault);
+                        }
+                        // The stream can also end without an error - a gateway closing the
+                        // response cleanly looks like this. Updates have stopped either way,
+                        // so refreshing has to go back to polling.
+                        if (running) {
+                            cleanup();
+                            set({ faultStreamCleanup: null });
                         }
                     } catch (error) {
                         console.error('[store] subscribeFaultStream: error in consume loop', error);

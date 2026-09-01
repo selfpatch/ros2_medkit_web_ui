@@ -32,6 +32,7 @@ import type {
     Parameter,
 } from './types';
 import { convertJsonSchemaToTopicSchema } from './schema-utils';
+import { faultKey } from './utils';
 
 // =============================================================================
 // unwrapItems
@@ -135,6 +136,10 @@ export function transformFault(apiFault: RawFaultItem, syntheticIdSuffix?: strin
     const entity_id = source.split('/').pop() || 'unknown';
 
     // Use entity_type from raw data if provided, otherwise default to 'app'.
+    // Both channels that produce faults - the list endpoint and the SSE stream - come
+    // through here, and the shared list is keyed on this type. They therefore have to
+    // agree about it: a gateway that starts sending it on one channel and not the other
+    // would split one fault into two rows, each with its own clear button.
     // The gateway's fault_to_json does not currently include entity_type, but
     // faults are always reported by ROS 2 nodes which map to apps.
     const entity_type = apiFault.entity_type || 'app';
@@ -198,6 +203,38 @@ interface RawFaultsResponse {
     'x-medkit'?: { count?: number };
 }
 
+/** How live a fault is. Peers can answer at their own pace and disagree about one fault. */
+const FAULT_STATUS_RANK: Record<Fault['status'], number> = {
+    active: 3,
+    pending: 2,
+    healed: 1,
+    cleared: 0,
+};
+
+/**
+ * Of two records for one fault, the one that describes it now: still raised beats
+ * already gone, and at equal standing the one that has occurred more often is the
+ * later reading. Dropping the wrong one hides a fault that is still up.
+ */
+function moreCurrentRevision(a: Fault, b: Fault): Fault {
+    const byStatus = FAULT_STATUS_RANK[b.status] - FAULT_STATUS_RANK[a.status];
+    if (byStatus !== 0) return byStatus > 0 ? b : a;
+
+    const occurrences = (f: Fault) =>
+        typeof f.parameters?.occurrence_count === 'number' ? f.parameters.occurrence_count : 0;
+    const byOccurrences = occurrences(b) - occurrences(a);
+    if (byOccurrences !== 0) return byOccurrences > 0 ? b : a;
+
+    // Which peer saw it last. `last_occurred` is that; `timestamp` is when the fault
+    // began, which two records for one fault usually share - it decides only when no
+    // peer said when it last saw the fault, and without either the first stands.
+    const lastSeen = (f: Fault) => (typeof f.parameters?.last_occurred === 'number' ? f.parameters.last_occurred : 0);
+    const byLastSeen = lastSeen(b) - lastSeen(a);
+    if (byLastSeen !== 0) return byLastSeen > 0 ? b : a;
+
+    return b.timestamp > a.timestamp ? b : a;
+}
+
 /**
  * Transform the raw gateway faults list response into `ListFaultsResponse`.
  */
@@ -208,8 +245,27 @@ export function transformFaultsResponse(rawData: unknown): ListFaultsResponse {
     // fallback only catches nullish values, so any other truthy non-array
     // would crash `.map`.
     const rawItems = Array.isArray(data.items) ? data.items : [];
-    const items = rawItems.map((f, idx) => transformFault(f as RawFaultItem, String(idx)));
-    return { items, count: data['x-medkit']?.count ?? items.length };
+    // An aggregating gateway can reach one fault through more than one peer and list
+    // it twice. A fault is identified by its code on its entity, so the repeats are
+    // the same fault: one row, counted once.
+    const indexByKey = new Map<string, number>();
+    const items: Fault[] = [];
+    for (const [idx, rawItem] of rawItems.entries()) {
+        const fault = transformFault(rawItem as RawFaultItem, String(idx));
+        const key = faultKey(fault);
+        const existing = indexByKey.get(key);
+        if (existing === undefined) {
+            indexByKey.set(key, items.length);
+            items.push(fault);
+            continue;
+        }
+        items[existing] = moreCurrentRevision(items[existing]!, fault);
+    }
+    // The gateway's own count stays authoritative (it may describe more than this
+    // page), minus whatever repeats were folded away here.
+    const duplicates = rawItems.length - items.length;
+    const reported = data['x-medkit']?.count ?? rawItems.length;
+    return { items, count: Math.max(items.length, reported - duplicates) };
 }
 
 // =============================================================================
