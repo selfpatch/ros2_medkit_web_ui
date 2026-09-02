@@ -5,8 +5,8 @@ services:
     # chowns the volume before the gateway starts; it reuses the pinned
     # gateway image (which already has chown) instead of pulling another one.
     init-uploads:
-        # ghcr.io/selfpatch/ros2_medkit-jazzy:sha-7939c94
-        image: ghcr.io/selfpatch/ros2_medkit-jazzy@sha256:565db07e1e972b31684bf864fbaad7e8a70aacabf2ef0cd4510fdbd8e3281831
+        # ghcr.io/selfpatch/ros2_medkit-jazzy, gateway 0.7.0
+        image: ghcr.io/selfpatch/ros2_medkit-jazzy@sha256:a63d5936515dedf7de8fde393088969ca8078eaada850324c353a772d1ac46c2
         user: root
         volumes:
             - e2e-uploads:/e2e-uploads
@@ -14,10 +14,12 @@ services:
     gateway:
         # Pinned on purpose: :latest is overwritten on every push to the gateway
         # main branch, which would let unrelated changes turn this repo CI red.
-        # Pinned by digest, not by the sha-7939c94 tag alone: tags on this
-        # registry are mutable and a re-run of the publishing workflow on the
-        # same commit would move one. ghcr.io/selfpatch/ros2_medkit-jazzy:sha-7939c94
-        image: ghcr.io/selfpatch/ros2_medkit-jazzy@sha256:565db07e1e972b31684bf864fbaad7e8a70aacabf2ef0cd4510fdbd8e3281831
+        # Pinned by digest rather than by a tag: tags on this registry are
+        # mutable and a re-run of the publishing workflow on the same commit
+        # would move one. This digest is gateway 0.7.0, the release whose
+        # script request bodies the app is written against - an older image
+        # leaves those specs passing without exercising the contract.
+        image: ghcr.io/selfpatch/ros2_medkit-jazzy@sha256:a63d5936515dedf7de8fde393088969ca8078eaada850324c353a772d1ac46c2
         ports:
             # Bound to loopback only, on purpose: this gateway has uploads enabled
             # and executes uploaded shell scripts without authentication.
