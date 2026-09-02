@@ -21,7 +21,7 @@
  * typed path based on the entity type string.
  */
 
-import type { MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
+import type { MedkitClient, paths } from '@selfpatch/ros2-medkit-client-ts';
 import type { SovdResourceEntityType, LifecycleAction, ScriptEntityType, StartScriptExecutionRequest } from './types';
 import type { LogsQueryParams, LogsConfiguration } from './log-types';
 
@@ -730,13 +730,19 @@ export function getEntityScript(
     }
 }
 
+/** The upload body both script paths declare: a required `file` part plus optional `metadata`. */
+type ScriptUploadBody = NonNullable<
+    paths['/apps/{app_id}/scripts']['post']['requestBody']
+>['content']['multipart/form-data'];
+
 /**
  * Multipart upload.
  *
- * The spec declares the body as `{type: object, additionalProperties: true}`, so
- * the generated type is `{ [key: string]: unknown }` and FormData (a DOM interface)
- * is not assignable to it. bodySerializer returns the FormData unchanged so fetch
- * sets Content-Type with the multipart boundary itself - the gateway rejects the
+ * FormData is a DOM interface, so it is never assignable to the generated body
+ * object however the spec describes it - hence the cast, which names the real
+ * body type so a change to the declared parts is a type error here rather than
+ * a runtime 400. bodySerializer returns the FormData unchanged so fetch sets
+ * Content-Type with the multipart boundary itself - the gateway rejects the
  * request without it.
  */
 export function uploadEntityScript(
@@ -745,7 +751,7 @@ export function uploadEntityScript(
     entityId: string,
     form: FormData
 ) {
-    const body = form as unknown as Record<string, unknown>;
+    const body = form as unknown as ScriptUploadBody;
     const bodySerializer = (value: unknown) => value as FormData;
     switch (entityType) {
         case 'apps':
@@ -784,9 +790,8 @@ export function deleteEntityScript(
 /**
  * Start an execution.
  *
- * The spec declares this request body as a bare `type: object`, so the generated
- * type is `Record<string, never>` and any real body fails the type check. The cast
- * keeps the runtime payload correct; removing it requires a spec fix in the gateway.
+ * StartScriptExecutionRequest mirrors the generated ScriptExecutionRequest, so the
+ * body passes straight through and a divergence between the two shows up here.
  */
 export function startScriptExecution(
     client: MedkitClient,
@@ -795,7 +800,7 @@ export function startScriptExecution(
     scriptId: string,
     request: StartScriptExecutionRequest
 ) {
-    const body = request as unknown as Record<string, never>;
+    const body = request;
     switch (entityType) {
         case 'apps':
             return client.POST('/apps/{app_id}/scripts/{script_id}/executions', {
