@@ -11,11 +11,11 @@ name: e2e-rosbag
 
 services:
     gateway:
-        # Overridable because the recording-id contract these specs assert on
-        # (ros2_medkit#620) is newer than any published tag: point this at a
-        # locally built image to run them before that lands. Once it is
-        # published, pin a digest here the way docker-compose.yml does.
-        image: ${E2E_ROSBAG_GATEWAY_IMAGE:-ghcr.io/selfpatch/ros2_medkit-jazzy:latest}
+        # The same gateway 0.7.0 digest docker-compose.yml pins, for the same
+        # reason: registry tags are mutable, so a tag would let an unrelated
+        # gateway change decide what these specs run against. Overridable so a
+        # locally built gateway can be dropped in ahead of a release.
+        image: ${E2E_ROSBAG_GATEWAY_IMAGE:-ghcr.io/selfpatch/ros2_medkit-jazzy@sha256:c706a4c16a4f4f2963690f776e93a70ac4afebbc52a0774a4edb984369a0dbd8}
         ports:
             # Loopback only, and on its own port so this stack can run alongside
             # the scripts one without either stealing the other's.
@@ -47,21 +47,25 @@ services:
         # with its exit code instead of leaving a healthy-looking stack whose
         # specs skip. The trap makes SIGTERM stop the children before the shell
         # exits.
+        #
+        # The `$$` are not a typo: Compose interpolates `$VAR` in this string
+        # before the container ever sees it, so a single `$` would hand bash an
+        # empty word and leave `kill` with no operands.
         command:
             - >
                 source /opt/ros/jazzy/setup.bash;
                 source /home/medkit/ws/install/setup.bash;
                 ros2 run ros2_medkit_fault_manager fault_manager_node
                 --ros-args --params-file /e2e/params.yaml &
-                FM=$!;
+                FM=$$!;
                 python3 /e2e/seed_recordings.py &
-                SEED=$!;
+                SEED=$$!;
                 ros2 run ros2_medkit_gateway gateway_node
                 --ros-args --params-file /e2e/params.yaml &
-                GW=$!;
-                trap 'kill $FM $SEED $GW 2>/dev/null' TERM INT;
-                wait -n $FM $SEED $GW;
-                exit $?
+                GW=$$!;
+                trap 'kill $$FM $$SEED $$GW 2>/dev/null' TERM INT;
+                wait -n $$FM $$SEED $$GW;
+                exit $$?
         depends_on:
             init-bags:
                 condition: service_completed_successfully
@@ -69,7 +73,7 @@ services:
     # so the fault manager could not write a bag into it. Same one-shot chown
     # the scripts stack does for its upload volume.
     init-bags:
-        image: ${E2E_ROSBAG_GATEWAY_IMAGE:-ghcr.io/selfpatch/ros2_medkit-jazzy:latest}
+        image: ${E2E_ROSBAG_GATEWAY_IMAGE:-ghcr.io/selfpatch/ros2_medkit-jazzy@sha256:c706a4c16a4f4f2963690f776e93a70ac4afebbc52a0774a4edb984369a0dbd8}
         user: root
         volumes:
             - e2e-bags:/e2e-bags
@@ -78,6 +82,8 @@ services:
 volumes:
     # Holds the bags AND faults.db, and it outlives `docker compose down`.
     # Re-seed from a clean slate with `down -v` first: on a reused volume the
-    # fault is already CONFIRMED, the first confirm captures nothing, and the
-    # suite sees three recordings instead of two.
+    # fault is already CONFIRMED and the first confirm captures nothing, so the
+    # recording count drifts from what a fresh seed produces. The specs assert
+    # against the count they read back, so this is hygiene rather than a
+    # correctness gate, but it keeps a run comparable with CI.
     e2e-bags:

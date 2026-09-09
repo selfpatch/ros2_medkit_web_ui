@@ -40,7 +40,7 @@ jobs:
 
     e2e:
         runs-on: ubuntu-latest
-        timeout-minutes: 20
+        timeout-minutes: 30
 
         steps:
             - name: Checkout repository
@@ -58,8 +58,18 @@ jobs:
             - name: Start gateway
               run: docker compose -f e2e/docker-compose.yml up -d
 
+            # A second stack, on its own port: the rosbag specs need a fault
+            # manager to own the recordings, which the scripts stack does not run.
+            - name: Start rosbag gateway
+              run: docker compose -f e2e/docker-compose.rosbag.yml up -d
+
             - name: Install Playwright browsers
               run: npx playwright install --with-deps chromium
+
+            # The rosbag specs skip themselves when the fixture is not there, so
+            # without this the job stays green whether or not they ever ran.
+            - name: Wait for the rosbag fixture
+              run: ./e2e/wait-for-rosbag-fixture.sh
 
             - name: Run E2E tests
               run: npm run test:e2e
@@ -77,9 +87,20 @@ jobs:
               if: failure()
               run: docker compose -f e2e/docker-compose.yml logs
 
+            - name: Dump rosbag gateway logs on failure
+              if: failure()
+              run: docker compose -f e2e/docker-compose.rosbag.yml logs
+
             - name: Stop gateway
               if: always()
               run: docker compose -f e2e/docker-compose.yml down -v
+
+            # -v matters here: the volume holds faults.db as well as the bags, so
+            # a reused one starts with the fault already confirmed and seeds a
+            # different number of recordings than a clean run.
+            - name: Stop rosbag gateway
+              if: always()
+              run: docker compose -f e2e/docker-compose.rosbag.yml down -v
 
     docker-build:
         runs-on: ubuntu-latest
