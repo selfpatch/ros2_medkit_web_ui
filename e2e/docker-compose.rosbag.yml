@@ -11,11 +11,11 @@ name: e2e-rosbag
 
 services:
     gateway:
-        # Overridable because the recording-id contract these specs assert on
-        # (ros2_medkit#620) is newer than any published tag: point this at a
-        # locally built image to run them before that lands. Once it is
-        # published, pin a digest here the way docker-compose.yml does.
-        image: ${E2E_ROSBAG_GATEWAY_IMAGE:-ghcr.io/selfpatch/ros2_medkit-jazzy:latest}
+        # The same gateway 0.7.0 digest docker-compose.yml pins, for the same
+        # reason: registry tags are mutable, so a tag would let an unrelated
+        # gateway change decide what these specs run against. Overridable so a
+        # locally built gateway can be dropped in ahead of a release.
+        image: ${E2E_ROSBAG_GATEWAY_IMAGE:-ghcr.io/selfpatch/ros2_medkit-jazzy@sha256:c706a4c16a4f4f2963690f776e93a70ac4afebbc52a0774a4edb984369a0dbd8}
         ports:
             # Loopback only, and on its own port so this stack can run alongside
             # the scripts one without either stealing the other's.
@@ -69,7 +69,7 @@ services:
     # so the fault manager could not write a bag into it. Same one-shot chown
     # the scripts stack does for its upload volume.
     init-bags:
-        image: ${E2E_ROSBAG_GATEWAY_IMAGE:-ghcr.io/selfpatch/ros2_medkit-jazzy:latest}
+        image: ${E2E_ROSBAG_GATEWAY_IMAGE:-ghcr.io/selfpatch/ros2_medkit-jazzy@sha256:c706a4c16a4f4f2963690f776e93a70ac4afebbc52a0774a4edb984369a0dbd8}
         user: root
         volumes:
             - e2e-bags:/e2e-bags
