@@ -47,21 +47,25 @@ services:
         # with its exit code instead of leaving a healthy-looking stack whose
         # specs skip. The trap makes SIGTERM stop the children before the shell
         # exits.
+        #
+        # The `$$` are not a typo: Compose interpolates `$VAR` in this string
+        # before the container ever sees it, so a single `$` would hand bash an
+        # empty word and leave `kill` with no operands.
         command:
             - >
                 source /opt/ros/jazzy/setup.bash;
                 source /home/medkit/ws/install/setup.bash;
                 ros2 run ros2_medkit_fault_manager fault_manager_node
                 --ros-args --params-file /e2e/params.yaml &
-                FM=$!;
+                FM=$$!;
                 python3 /e2e/seed_recordings.py &
-                SEED=$!;
+                SEED=$$!;
                 ros2 run ros2_medkit_gateway gateway_node
                 --ros-args --params-file /e2e/params.yaml &
-                GW=$!;
-                trap 'kill $FM $SEED $GW 2>/dev/null' TERM INT;
-                wait -n $FM $SEED $GW;
-                exit $?
+                GW=$$!;
+                trap 'kill $$FM $$SEED $$GW 2>/dev/null' TERM INT;
+                wait -n $$FM $$SEED $$GW;
+                exit $$?
         depends_on:
             init-bags:
                 condition: service_completed_successfully
@@ -78,6 +82,8 @@ services:
 volumes:
     # Holds the bags AND faults.db, and it outlives `docker compose down`.
     # Re-seed from a clean slate with `down -v` first: on a reused volume the
-    # fault is already CONFIRMED, the first confirm captures nothing, and the
-    # suite sees three recordings instead of two.
+    # fault is already CONFIRMED and the first confirm captures nothing, so the
+    # recording count drifts from what a fresh seed produces. The specs assert
+    # against the count they read back, so this is hygiene rather than a
+    # correctness gate, but it keeps a run comparable with CI.
     e2e-bags:
