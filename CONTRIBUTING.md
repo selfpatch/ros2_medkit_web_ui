@@ -93,10 +93,20 @@ Before opening or updating a Pull Request, you **must**:
 
 The Playwright suite in `e2e/` runs the real UI against a containerised gateway instead of mocks, so it needs Docker.
 
-1. Start the gateway:
+1. Start both gateways. The scripts stack serves most of the suite; the rosbag
+   specs need the second one, which also runs a fault manager so a fault can own
+   black-box recordings. Skip it and those three specs skip themselves:
 
     ```bash
     docker compose -f e2e/docker-compose.yml up -d
+    docker compose -f e2e/docker-compose.rosbag.yml up -d
+    ```
+
+    The rosbag stack seeds its fixture in the background. Wait for it before
+    running the suite, the way CI does:
+
+    ```bash
+    ./e2e/wait-for-rosbag-fixture.sh
     ```
 
 2. Run the suite:
@@ -107,10 +117,14 @@ The Playwright suite in `e2e/` runs the real UI against a containerised gateway 
 
     Use `npm run test:e2e:ui` instead to step through the tests with the Playwright UI.
 
-3. Stop the gateway once you are done, dropping the uploads volume along with it:
+3. Stop both gateways once you are done, dropping their volumes along with them.
+   The rosbag volume holds `faults.db` as well as the bags, so a reused one
+   starts with the fault already confirmed and seeds a different number of
+   recordings than a clean run:
 
     ```bash
     docker compose -f e2e/docker-compose.yml down -v
+    docker compose -f e2e/docker-compose.rosbag.yml down -v
     ```
 
 `e2e/scripts.spec.ts` uploads, runs and deletes scripts against the shared gateway container, mutating its state as it goes, so it and the other specs that touch the live gateway are pinned to a single Playwright worker (see `playwright.config.ts`). Do not attempt to parallelize these specs or run them against a gateway instance you care about keeping in a known state.
@@ -118,11 +132,22 @@ The Playwright suite in `e2e/` runs the real UI against a containerised gateway 
 If port 8080 or 5173 is already taken on your machine, override the gateway port and/or the dev server URL before starting the stack:
 
 ```bash
-E2E_GATEWAY_PORT=8081 docker compose -f e2e/docker-compose.yml up -d
-E2E_GATEWAY_PORT=8081 npm run test:e2e
+E2E_GATEWAY_PORT=8090 docker compose -f e2e/docker-compose.yml up -d
+E2E_GATEWAY_PORT=8090 npm run test:e2e
 ```
 
-`E2E_GATEWAY_PORT` is the only variable you need for the gateway side: `e2e/global-setup.ts` derives the full gateway URL from it, and the gateway's CORS configuration allows any origin so an overridden dev server port is never rejected. Set `E2E_APP_URL` instead (e.g. `E2E_APP_URL=http://localhost:5174`) if the dev server port needs to change; `playwright.config.ts` derives the dev server's port from it. The gateway container stays bound to `127.0.0.1` regardless of the port chosen.
+Do not reach for 8081 here: that is the rosbag stack's own default, so the two
+gateways would fight over it, and with the rosbag stack down the rosbag specs
+would point at the scripts gateway, find no seeded fault and skip for a reason
+that has nothing to do with the code.
+
+`E2E_GATEWAY_PORT` is the only variable the scripts stack needs: `e2e/global-setup.ts` derives the full gateway URL from it, and the gateway's CORS configuration allows any origin so an overridden dev server port is never rejected. Set `E2E_APP_URL` instead (e.g. `E2E_APP_URL=http://localhost:5174`) if the dev server port needs to change; `playwright.config.ts` derives the dev server's port from it. The gateway container stays bound to `127.0.0.1` regardless of the port chosen.
+
+The rosbag stack has its own set, all optional: `E2E_ROSBAG_GATEWAY_PORT`
+(default 8081), `E2E_ROSBAG_GATEWAY_URL`, `E2E_ROSBAG_FAULT_CODE`, and
+`E2E_ROSBAG_FIXTURE_TIMEOUT` for the wait script. `E2E_ROSBAG_GATEWAY_IMAGE`
+points the stack at a locally built gateway instead of the pinned release, which
+is how you run these specs against a gateway change before it ships.
 
 ### Pull Request Checklist
 
