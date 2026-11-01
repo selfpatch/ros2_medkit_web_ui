@@ -25,6 +25,17 @@ const GATEWAY_PORT = process.env.E2E_DATA_GATEWAY_PORT ?? '8082';
 const GATEWAY_URL = process.env.E2E_DATA_GATEWAY_URL ?? `http://localhost:${GATEWAY_PORT}/api/v1`;
 const STORAGE_KEY = 'ros2_medkit_web_ui_server_url';
 const APP_ID = 'e2e_data_source';
+const COUNTER_READ = /\/apps\/e2e_data_source\/data\/.+counter$/;
+const COMPONENT_READ = /\/components\/[^/]+$/;
+// The store applies an answer right after the response arrives; this leaves time to render it.
+const SETTLE_MS = 500;
+
+/** The counter value the gateway serves now. */
+async function gatewayCounter(): Promise<number | undefined> {
+    const res = await fetch(`${GATEWAY_URL}/apps/${APP_ID}/data/${encodeURIComponent('/e2e/counter')}`);
+    const body = (await res.json()) as { data?: { data?: number } };
+    return body.data?.data;
+}
 
 /** Waits until the gateway has a sample for the counter, so a failure below is about the UI. */
 async function waitForCounterSample(): Promise<void> {
@@ -57,13 +68,34 @@ test.beforeEach(async ({ page }) => {
     );
 });
 
+/** The tree row of the host component, whose id is the container hostname. */
+function componentRow(page: Page) {
+    return page.getByRole('treeitem').filter({ hasText: 'component' }).first();
+}
+
+/** The Refresh buttons of the selected entity; the tree has its own "Refresh entities". */
+function refreshButtons(page: Page) {
+    return page.getByRole('button', { name: 'Refresh', exact: true });
+}
+
+/** Opens the data source app from the tree. */
+async function openApp(page: Page): Promise<void> {
+    await page.goto('/', { waitUntil: 'load' });
+    await componentRow(page).getByRole('button', { name: 'Expand' }).click();
+    await page.getByRole('treeitem', { name: new RegExp(APP_ID) }).click();
+    await expect(page.getByText('Node Information')).toBeVisible();
+}
+
+/** Opens the host component, the entity view that has a Refresh button. */
+async function openComponent(page: Page): Promise<void> {
+    await page.goto('/', { waitUntil: 'load' });
+    await componentRow(page).click();
+    await expect(refreshButtons(page)).toHaveCount(1);
+}
+
 /** Opens a data item of the data source app the way a user does: tree, app, Data tab, row. */
 async function openDataItem(page: Page, topic: string): Promise<void> {
-    await page.goto('/', { waitUntil: 'load' });
-    // The host component's id is the container hostname, so expand by role.
-    const component = page.getByRole('treeitem').filter({ hasText: 'component' }).first();
-    await component.getByRole('button', { name: 'Expand' }).click();
-    await page.getByRole('treeitem', { name: new RegExp(APP_ID) }).click();
+    await openApp(page);
     await page.getByRole('button', { name: /^Data\b/ }).click();
     await page.getByText(topic, { exact: true }).click();
     await expect(page.getByText('Data diagnostics and access')).toBeVisible();
@@ -115,18 +147,85 @@ test('says a topic without a sample has no data, without printing an empty objec
 test('Refresh reads the item again and shows the new value', async ({ page }) => {
     await openDataItem(page, '/e2e/counter');
     const before = (await shownValue(page)) as { data: number };
+    // Refresh can only show a newer counter once the gateway serves one.
+    await expect.poll(gatewayCounter).toBeGreaterThan(before.data);
 
     const reads: string[] = [];
     page.on('request', (request) => {
-        if (request.method() === 'GET' && /\/apps\/e2e_data_source\/data\/.+counter$/.test(request.url())) {
-            reads.push(request.url());
-        }
+        if (request.method() === 'GET' && COUNTER_READ.test(request.url())) reads.push(request.url());
     });
     // The data panel's own Refresh comes after the one in the page header.
-    await page.getByRole('button', { name: 'Refresh' }).last().click();
+    await refreshButtons(page).last().click();
 
     await expect.poll(() => reads.length).toBeGreaterThan(0);
     await expect
         .poll(async () => ((await shownValue(page)) as { data: number } | null)?.data)
         .toBeGreaterThan(before.data);
+});
+
+test('Refresh of a data item says when the gateway answers with an error', async ({ page }) => {
+    await openDataItem(page, '/e2e/counter');
+    await page.route(COUNTER_READ, (route) =>
+        route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({ error_code: 'service-unavailable', message: 'Sampling failed' }),
+        })
+    );
+
+    await refreshButtons(page).last().click();
+
+    await expect(page.getByText('Failed to refresh data: Sampling failed')).toBeVisible();
+});
+
+test('Refresh of a data item that answers after the user moved on keeps the new selection', async ({ page }) => {
+    await openDataItem(page, '/e2e/counter');
+    // Holds the read back so the user can select something else before it answers.
+    await page.route(COUNTER_READ, async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        await route.continue();
+    });
+    const answered = page.waitForResponse(COUNTER_READ);
+
+    await refreshButtons(page).last().click();
+    await page.getByRole('treeitem', { name: new RegExp(APP_ID) }).click();
+    await expect(page.getByText('Node Information')).toBeVisible();
+    await answered;
+    await page.waitForTimeout(SETTLE_MS);
+
+    await expect(page.getByText('Data diagnostics and access')).toHaveCount(0);
+    await expect(page.getByText('Node Information')).toBeVisible();
+});
+
+test('Refresh of a component says when the gateway answers with an error', async ({ page }) => {
+    await openComponent(page);
+    await page.route(COMPONENT_READ, (route) =>
+        route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({ error_code: 'service-unavailable', message: 'Discovery is busy' }),
+        })
+    );
+
+    await refreshButtons(page).click();
+
+    await expect(page.getByText('Failed to refresh data: Discovery is busy')).toBeVisible();
+});
+
+test('Refresh of a component that answers after the user moved on keeps the new selection', async ({ page }) => {
+    await openComponent(page);
+    await page.route(COMPONENT_READ, async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        await route.continue();
+    });
+    const answered = page.waitForResponse(COMPONENT_READ);
+
+    await refreshButtons(page).click();
+    // Selecting the component expanded it, so its apps are listed.
+    await page.getByRole('treeitem', { name: new RegExp(APP_ID) }).click();
+    await expect(page.getByText('Node Information')).toBeVisible();
+    await answered;
+    await page.waitForTimeout(SETTLE_MS);
+
+    await expect(page.getByText('Node Information')).toBeVisible();
 });

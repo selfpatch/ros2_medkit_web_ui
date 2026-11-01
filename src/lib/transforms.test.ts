@@ -610,6 +610,13 @@ describe('transformDataResponse', () => {
             expect(result[0]?.data).toBeNull();
         });
 
+        it('reads a scalar zero from data on a single-item read', () => {
+            const raw = { id: 'outputObjectCount', data: 0, 'x-medkit': { data_type: 'int32' } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.status).toBe('data');
+            expect(result[0]?.data).toBe(0);
+        });
+
         it('uses x-medkit.type as type label when ros2.type is absent', () => {
             const raw = {
                 id: 'payload',
@@ -674,6 +681,42 @@ describe('transformDataResponse', () => {
             const raw = { id: 'x', name: 'x', 'x-medkit': { access: 'execute' } };
             const result = transformDataResponse({ items: [raw] });
             expect(result[0]?.access).toBeUndefined();
+        });
+    });
+
+    describe('sample timestamp', () => {
+        const NOW = new Date('2026-11-01T10:00:00.000Z');
+
+        beforeEach(() => {
+            vi.useFakeTimers();
+            vi.setSystemTime(NOW);
+        });
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('converts an ISO 8601 x-medkit.timestamp to nanoseconds', () => {
+            const raw = { id: 'x', data: 1, 'x-medkit': { timestamp: '2026-11-01T12:19:44.555Z' } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.timestamp).toBe(Date.parse('2026-11-01T12:19:44.555Z') * 1_000_000);
+        });
+
+        it('keeps a nanosecond x-medkit.timestamp', () => {
+            const ns = Date.parse('2026-11-01T12:19:44.555Z') * 1_000_000;
+            const raw = { id: 'x', data: 1, 'x-medkit': { timestamp: ns } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.timestamp).toBe(ns);
+        });
+
+        it.each([
+            ['missing', undefined],
+            ['not a date', 'yesterday'],
+            ['zero', 0],
+        ])('uses the current time in nanoseconds when the stamp is %s', (_label, timestamp) => {
+            const raw = { id: 'x', data: 1, 'x-medkit': { timestamp } };
+            const result = transformDataResponse({ items: [raw] });
+            expect(result[0]?.timestamp).toBe(NOW.getTime() * 1_000_000);
         });
     });
 });
