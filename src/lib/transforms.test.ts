@@ -21,6 +21,8 @@ import {
     transformDataResponse,
     transformConfigurationsResponse,
     transformBulkDataDescriptor,
+    indexAppsByNode,
+    findAppByNode,
     type RawFaultItem,
 } from './transforms';
 
@@ -54,6 +56,75 @@ describe('unwrapItems', () => {
     it('returns empty array when items is undefined', () => {
         const wrapped = { items: undefined };
         expect(unwrapItems<string>(wrapped)).toEqual([]);
+    });
+});
+
+// =============================================================================
+// Apps by ROS 2 node
+// =============================================================================
+
+/** As a manifest gateway lists them: the ids are not the node names. */
+const MANIFEST_APPS = indexAppsByNode([
+    { id: 'lane-navigator', 'x-medkit': { ros2: { node: '/lane_navigator' }, component_id: 'amr-07' } },
+    { id: 'anomaly-detector', 'x-medkit': { ros2: { node: '/bridge/anomaly_detector' } } },
+]);
+
+describe('indexAppsByNode', () => {
+    it('indexes each app by the node it runs as', () => {
+        expect(MANIFEST_APPS.get('/lane_navigator')).toBe('lane-navigator');
+        expect(MANIFEST_APPS.get('/bridge/anomaly_detector')).toBe('anomaly-detector');
+    });
+
+    it('leaves out an app whose node is not running', () => {
+        // The gateway drops the binding while the node is down.
+        const index = indexAppsByNode([
+            { id: 'turtlebot3-node', 'x-medkit': { is_online: false, source: 'manifest' } },
+            { id: 'gazebo' },
+        ]);
+
+        expect(index.size).toBe(0);
+    });
+
+    it('ignores an item without a usable id or node', () => {
+        const index = indexAppsByNode([
+            { 'x-medkit': { ros2: { node: '/no_id' } } },
+            { id: 'empty-node', 'x-medkit': { ros2: { node: '' } } },
+            { id: 'odd-node', 'x-medkit': { ros2: { node: 42 } } },
+        ]);
+
+        expect(index.size).toBe(0);
+    });
+});
+
+describe('findAppByNode', () => {
+    it('finds the app running as the source node', () => {
+        expect(findAppByNode('/lane_navigator', MANIFEST_APPS)).toBe('lane-navigator');
+    });
+
+    it('finds the app whose node a source sits under', () => {
+        expect(findAppByNode('/bridge/anomaly_detector/goal_status', MANIFEST_APPS)).toBe('anomaly-detector');
+    });
+
+    it('prefers the deepest node a source sits under', () => {
+        // Under both `/bridge` and `/bridge/anomaly_detector`: the nearer node reported it,
+        // whichever of the two the gateway happens to list first.
+        const nested = indexAppsByNode([
+            { id: 'bridge', 'x-medkit': { ros2: { node: '/bridge' } } },
+            { id: 'anomaly-detector', 'x-medkit': { ros2: { node: '/bridge/anomaly_detector' } } },
+        ]);
+
+        expect(findAppByNode('/bridge/anomaly_detector/goal_status', nested)).toBe('anomaly-detector');
+        expect(findAppByNode('/bridge/other_monitor', nested)).toBe('bridge');
+    });
+
+    it('does not take a node that only shares the start of the name', () => {
+        expect(findAppByNode('/lane_navigator_2', MANIFEST_APPS)).toBeUndefined();
+    });
+
+    it('finds nothing for an unknown source, an empty one, or without an index', () => {
+        expect(findAppByNode('/powertrain/engine_monitor', MANIFEST_APPS)).toBeUndefined();
+        expect(findAppByNode('', MANIFEST_APPS)).toBeUndefined();
+        expect(findAppByNode('/lane_navigator')).toBeUndefined();
     });
 });
 
@@ -181,6 +252,37 @@ describe('transformFault', () => {
         it('uses "unknown" when reporting_sources is missing', () => {
             const result = transformFault(makeFaultInput({ reporting_sources: undefined }));
             expect(result.entity_id).toBe('unknown');
+        });
+    });
+
+    describe('entity_id from the apps the gateway lists', () => {
+        it('takes the app running as the reporting node', () => {
+            const result = transformFault(
+                makeFaultInput({ reporting_sources: ['/lane_navigator'] }),
+                undefined,
+                MANIFEST_APPS
+            );
+            expect(result.entity_id).toBe('lane-navigator');
+            expect(result.entity_type).toBe('app');
+        });
+
+        it('takes the app whose node the source sits under', () => {
+            const result = transformFault(
+                makeFaultInput({ reporting_sources: ['/bridge/anomaly_detector/goal_status'] }),
+                undefined,
+                MANIFEST_APPS
+            );
+            expect(result.entity_id).toBe('anomaly-detector');
+        });
+
+        it('falls back to the last segment for a source no app owns', () => {
+            // A gateway that names apps after their nodes, or a node it does not list.
+            const result = transformFault(
+                makeFaultInput({ reporting_sources: ['/ns/my_node_name'] }),
+                undefined,
+                MANIFEST_APPS
+            );
+            expect(result.entity_id).toBe('my_node_name');
         });
     });
 
@@ -908,5 +1010,21 @@ describe('transformFaultsResponse deduplication', () => {
         });
 
         expect(result.items.map((f) => f.entity_id)).toEqual(['load_process', 'unload_process']);
+    });
+
+    it('places each fault on its app and folds the sources of one app into one row', () => {
+        const result = transformFaultsResponse(
+            {
+                items: [
+                    { ...jam, reporting_sources: ['/lane_navigator'] },
+                    { ...jam, reporting_sources: ['/bridge/anomaly_detector'] },
+                    { ...jam, reporting_sources: ['/bridge/anomaly_detector/goal_status'] },
+                ],
+            },
+            MANIFEST_APPS
+        );
+
+        expect(result.items.map((f) => f.entity_id)).toEqual(['lane-navigator', 'anomaly-detector']);
+        expect(result.count).toBe(2);
     });
 });

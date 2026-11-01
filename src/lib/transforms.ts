@@ -53,6 +53,48 @@ export function unwrapItems<T>(response: unknown): T[] {
 }
 
 // =============================================================================
+// Apps by ROS 2 node
+// =============================================================================
+
+/**
+ * Index apps by the ROS 2 node each runs as (`x-medkit.ros2.node`), to place faults:
+ * a fault names the node that reported it, not the app. A gateway that takes its apps
+ * from a manifest names them apart from their nodes (`/lane_navigator` runs as app
+ * `lane-navigator`), and asking for a fault under the node's name is a 404.
+ * An app whose node is not running carries no binding and is left out.
+ */
+export function indexAppsByNode(apps: readonly Record<string, unknown>[]): Map<string, string> {
+    const index = new Map<string, string>();
+    for (const app of apps) {
+        const xMedkit = app['x-medkit'] as { ros2?: { node?: unknown } } | undefined;
+        const node = xMedkit?.ros2?.node;
+        if (typeof app.id === 'string' && typeof node === 'string' && node) {
+            index.set(node, app.id);
+        }
+    }
+    return index;
+}
+
+/**
+ * The app a fault source belongs to: the app running as that node, else the app whose
+ * node the source sits under (a node can report under a name of its own, such as
+ * `/bridge/anomaly_detector/goal_status`), the deepest such node winning.
+ * `undefined` when no known app owns the source.
+ */
+export function findAppByNode(source: string, appsByNode?: ReadonlyMap<string, string>): string | undefined {
+    if (!appsByNode || !source) return undefined;
+    const exact = appsByNode.get(source);
+    if (exact !== undefined) return exact;
+    let owner: { node: string; app: string } | undefined;
+    for (const [node, app] of appsByNode) {
+        if (source.startsWith(`${node}/`) && (!owner || node.length > owner.node.length)) {
+            owner = { node, app };
+        }
+    }
+    return owner?.app;
+}
+
+// =============================================================================
 // transformFault
 // =============================================================================
 
@@ -93,9 +135,16 @@ export interface RawFaultItem {
  *   - `severity` (number) + `severity_label` → `severity` (string)
  *   - `status` (CONFIRMED / PREFAILED / ...) → `status` (active / pending / cleared / healed)
  *   - `first_occurred` (unix seconds) → `timestamp` (ISO 8601)
- *   - `reporting_sources[0]` last path segment → `entity_id`
+ *   - `reporting_sources[0]` → `entity_id`, the app that source belongs to
+ *
+ * `appsByNode` (from `indexAppsByNode`) places the source; a source it does not
+ * know falls back to its last path segment.
  */
-export function transformFault(apiFault: RawFaultItem, syntheticIdSuffix?: string): Fault {
+export function transformFault(
+    apiFault: RawFaultItem,
+    syntheticIdSuffix?: string,
+    appsByNode?: ReadonlyMap<string, string>
+): Fault {
     // Map severity number/label to FaultSeverity.
     // Label check takes priority over numeric value; critical is checked first.
     let severity: FaultSeverity = 'info';
@@ -131,9 +180,11 @@ export function transformFault(apiFault: RawFaultItem, syntheticIdSuffix?: strin
 
     // Extract entity info from reporting_sources.
     // reporting_sources contains ROS 2 node paths like "/bridge/diagnostic_bridge".
-    // We take the last segment as entity_id (preserving underscores - they match SOVD IDs).
+    // The app running as that node is the entity, as the gateway itself names it.
+    // A source no known app owns falls back to its last segment (preserving
+    // underscores), which is the app id on gateways that name apps after their nodes.
     const source = apiFault.reporting_sources?.[0] || '';
-    const entity_id = source.split('/').pop() || 'unknown';
+    const entity_id = findAppByNode(source, appsByNode) ?? (source.split('/').pop() || 'unknown');
 
     // Use entity_type from raw data if provided, otherwise default to 'app'.
     // Both channels that produce faults - the list endpoint and the SSE stream - come
@@ -237,8 +288,12 @@ function moreCurrentRevision(a: Fault, b: Fault): Fault {
 
 /**
  * Transform the raw gateway faults list response into `ListFaultsResponse`.
+ * `appsByNode` places each fault on its app, as in `transformFault`.
  */
-export function transformFaultsResponse(rawData: unknown): ListFaultsResponse {
+export function transformFaultsResponse(
+    rawData: unknown,
+    appsByNode?: ReadonlyMap<string, string>
+): ListFaultsResponse {
     if (!rawData || typeof rawData !== 'object') return { items: [], count: 0 };
     const data = rawData as RawFaultsResponse;
     // Guard against non-array `items` (e.g. `{}` or a string) - the `|| []`
@@ -251,7 +306,7 @@ export function transformFaultsResponse(rawData: unknown): ListFaultsResponse {
     const indexByKey = new Map<string, number>();
     const items: Fault[] = [];
     for (const [idx, rawItem] of rawItems.entries()) {
-        const fault = transformFault(rawItem as RawFaultItem, String(idx));
+        const fault = transformFault(rawItem as RawFaultItem, String(idx), appsByNode);
         const key = faultKey(fault);
         const existing = indexByKey.get(key);
         if (existing === undefined) {

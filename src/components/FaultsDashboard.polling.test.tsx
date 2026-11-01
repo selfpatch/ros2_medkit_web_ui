@@ -49,6 +49,14 @@ function clientReturning(items: unknown[]) {
     };
 }
 
+/**
+ * Reads of the fault list. The store also reads `GET /apps`, once, to learn which app
+ * each fault's node runs as; that read is left out.
+ */
+function faultReads(client: { GET: { mock: { calls: unknown[][] } } }): number {
+    return client.GET.mock.calls.filter((args) => args[0] !== '/apps').length;
+}
+
 /** Records every DOM state the user could have seen while `run` executed. */
 async function framesDuring(container: HTMLElement, run: () => Promise<void>): Promise<string[]> {
     const frames: string[] = [];
@@ -171,13 +179,13 @@ describe('FaultsDashboard refresh behaviour', () => {
                 <FaultsDashboard />
             </>
         );
-        expect(client.GET).toHaveBeenCalledTimes(1);
+        expect(faultReads(client)).toBe(1);
 
         await advance(POLL_INTERVAL_MS);
-        expect(client.GET).toHaveBeenCalledTimes(2);
+        expect(faultReads(client)).toBe(2);
 
         await advance(POLL_INTERVAL_MS * 2);
-        expect(client.GET).toHaveBeenCalledTimes(4);
+        expect(faultReads(client)).toBe(4);
     });
 
     it('takes its updates from the stream instead of polling for them', async () => {
@@ -217,13 +225,13 @@ describe('FaultsDashboard refresh behaviour', () => {
         const client = clientReturning([RAW_FAULT]);
         connect(client, true);
         await mount(<FaultsCountBadge />);
-        expect(client.GET).toHaveBeenCalledTimes(1);
+        expect(faultReads(client)).toBe(1);
 
         // The badge lives in the sidebar for the whole session, so the dashboard is
         // always the second view. Opening it has to show the list as it is now.
         await mount(<FaultsDashboard />);
 
-        expect(client.GET).toHaveBeenCalledTimes(2);
+        expect(faultReads(client)).toBe(2);
     });
 
     it('reads the list as soon as the fault stream stops delivering', async () => {
@@ -263,7 +271,7 @@ describe('FaultsDashboard refresh behaviour', () => {
             await vi.advanceTimersByTimeAsync(0);
         });
 
-        expect(gatewayB.GET).toHaveBeenCalledTimes(1);
+        expect(faultReads(gatewayB)).toBe(1);
     });
 
     it('re-reads the list once when a fault is cleared, not twice', async () => {
@@ -394,7 +402,7 @@ describe('FaultsDashboard refresh behaviour', () => {
             await vi.advanceTimersByTimeAsync(0);
         });
 
-        expect(gatewayB.GET).toHaveBeenCalledTimes(1);
+        expect(faultReads(gatewayB)).toBe(1);
     });
 
     it('does not bring the skeleton back while the gateway keeps failing', async () => {
@@ -516,7 +524,7 @@ describe('FaultsDashboard refresh behaviour', () => {
         await mount(<FaultsDashboard />);
 
         // Otherwise a switch left off means an empty page for the rest of the session.
-        expect(client.GET).toHaveBeenCalledTimes(1);
+        expect(faultReads(client)).toBe(1);
     });
 
     it('does not refresh a paused list when the tab comes back', async () => {
