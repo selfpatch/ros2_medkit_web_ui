@@ -4,20 +4,23 @@ import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
 
 const buttonVariants = cva(
-    'inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50',
+    'inline-flex items-center justify-center rounded-lg text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50',
     {
         variants: {
             variant: {
-                default: 'bg-primary text-primary-foreground hover:bg-primary/90',
-                destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
-                outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
-                secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-                ghost: 'hover:bg-accent hover:text-accent-foreground',
-                link: 'text-primary underline-offset-4 hover:underline',
+                // The one main action of a view: acid with graphite text
+                default: 'bg-acid text-graphite hover:bg-acid-strong',
+                destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive-strong',
+                // A view's other actions: white on a hairline that darkens when pointed at
+                outline:
+                    'border border-graphite/12 bg-white text-foreground shadow-[0_1px_1px_rgb(18_20_19/0.04)] hover:border-graphite/30',
+                secondary: 'bg-secondary text-secondary-foreground hover:bg-graphite/10',
+                ghost: 'text-foreground hover:bg-graphite/6',
+                link: 'text-link underline-offset-4 hover:underline',
             },
             size: {
                 default: 'h-10 px-4 py-2',
-                sm: 'h-9 px-3',
+                sm: 'h-9 px-3.5 text-[13px]',
                 lg: 'h-11 px-8',
                 icon: 'h-10 w-10',
             },

@@ -152,7 +152,7 @@ export function UpdateCard({ entry, baseUrl, busy, onAction }: UpdateCardProps) 
     const isFailed = status?.status === 'failed';
 
     return (
-        <Card className={isFailed ? 'border-red-300 dark:border-red-800' : undefined}>
+        <Card className={isFailed ? 'border-red-300' : undefined}>
             <CardHeader className="py-3 px-4">
                 <div className="flex items-center justify-between gap-2">
                     <CardTitle className="text-sm font-medium flex items-center gap-2 min-w-0">
@@ -216,7 +216,7 @@ export function UpdateCard({ entry, baseUrl, busy, onAction }: UpdateCardProps) 
                         )}
 
                         {status.error && (
-                            <div className="flex items-start gap-2 text-sm text-red-600 dark:text-red-400">
+                            <div className="flex items-start gap-2 text-sm text-red-600">
                                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                                 <span>{status.error}</span>
                             </div>

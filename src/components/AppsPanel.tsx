@@ -1,8 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/shallow';
-import { AlertTriangle, Box, ChevronRight, Cpu, Database, FileCode, Network, Settings, Zap } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Box, ChevronRight, Cpu, Database, FileCode, Network } from 'lucide-react';
 import { DataValuePreview } from '@/components/DataValuePreview';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/lib/store';
@@ -14,6 +12,8 @@ import {
     type ResourceTabId,
 } from '@/components/ResourceTabs';
 import { EntityStatusControl } from '@/components/EntityStatusControl';
+import { ResourceTabBar } from '@/components/ResourceTabBar';
+import { RowGrid } from '@/components/RowGrid';
 import type { ComponentTopic, Operation, Fault } from '@/lib/types';
 
 type AppTab = 'overview' | ResourceTabId;
@@ -28,7 +28,6 @@ const BASE_APP_TABS: TabConfig[] = [{ id: 'overview', label: 'Overview', icon: C
 
 interface AppsPanelProps {
     appId: string;
-    appName?: string;
     fqn?: string;
     nodeName?: string;
     namespace?: string;
@@ -46,7 +45,7 @@ interface AppsPanelProps {
  * - Configurations (parameters)
  * - Faults (diagnostic trouble codes)
  */
-export function AppsPanel({ appId, appName, fqn, nodeName, namespace, componentId, path, onNavigate }: AppsPanelProps) {
+export function AppsPanel({ appId, fqn, nodeName, namespace, componentId, path, onNavigate }: AppsPanelProps) {
     const [activeTab, setActiveTab] = useState<AppTab>('overview');
     const [topics, setTopics] = useState<ComponentTopic[]>([]);
     const [operations, setOperations] = useState<Operation[]>([]);
@@ -117,224 +116,121 @@ export function AppsPanel({ appId, appName, fqn, nodeName, namespace, componentI
 
     return (
         <div className="space-y-6">
-            {/* App Header */}
-            <Card>
-                <CardHeader>
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900">
-                            <Cpu className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                            <CardTitle className="text-lg truncate">{appName || nodeName || appId}</CardTitle>
-                            <CardDescription className="flex items-center gap-2 flex-wrap">
-                                <Badge variant="outline" className="text-emerald-600 border-emerald-300">
-                                    app
-                                </Badge>
-                                {componentId && (
-                                    <>
-                                        <span className="text-muted-foreground">•</span>
-                                        <Button
-                                            variant="link"
-                                            className="h-auto p-0 text-xs text-muted-foreground hover:text-primary"
-                                            onClick={() => {
-                                                const areaSegment =
-                                                    namespace && namespace.trim().length > 0
-                                                        ? namespace.split('/').filter(Boolean)[0] || 'root'
-                                                        : 'root';
-                                                handleResourceClick(`/${areaSegment}/${componentId}`);
-                                            }}
-                                        >
-                                            <Box className="w-3 h-3 mr-1" />
-                                            {componentId}
-                                        </Button>
-                                    </>
-                                )}
-                            </CardDescription>
-                        </div>
-                    </div>
-
-                    {/* Lifecycle status control (gateway 0.6.0 lifecycle API) */}
-                    <div className="mt-4">
-                        <EntityStatusControl entityType="apps" entityId={appId} />
-                    </div>
-                </CardHeader>
-
-                {/* Tab Navigation */}
-                <div className="px-6 pb-4">
-                    <div className="flex gap-1 p-1 bg-muted rounded-lg overflow-x-auto">
-                        {appTabs.map((tab) => {
-                            const TabIcon = tab.icon;
-                            const isActive = activeTab === tab.id;
-                            let count = 0;
-                            if (tab.id === 'data') count = topics.length;
-                            if (tab.id === 'operations') count = operations.length;
-                            if (tab.id === 'configurations') count = configurations.get(appId)?.length || 0;
-                            if (tab.id === 'faults') count = activeFaults.length;
-
-                            return (
-                                <button
-                                    key={tab.id}
-                                    onClick={() => setActiveTab(tab.id)}
-                                    className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-                                        isActive
-                                            ? 'bg-background text-foreground shadow-sm'
-                                            : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
-                                    }`}
-                                >
-                                    <TabIcon className="w-4 h-4" />
-                                    {tab.label}
-                                    {count > 0 && (
-                                        <Badge
-                                            variant={isActive ? 'default' : 'secondary'}
-                                            className={`ml-1 h-5 px-1.5 ${tab.id === 'faults' && count > 0 ? 'bg-red-500 text-white' : ''}`}
-                                        >
-                                            {count}
-                                        </Badge>
-                                    )}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            </Card>
+            {/* What the app belongs to, its lifecycle (gateway 0.6.0 lifecycle API) and its tabs. Its
+                name is the view's heading, in the toolbar. */}
+            <div className="space-y-4">
+                {/* Its component, unless the breadcrumb already leads through it */}
+                {componentId && !path.split('/').includes(componentId) && (
+                    <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        Part of
+                        <Button
+                            variant="link"
+                            className="h-auto p-0 text-sm"
+                            onClick={() => {
+                                const areaSegment =
+                                    namespace && namespace.trim().length > 0
+                                        ? namespace.split('/').filter(Boolean)[0] || 'root'
+                                        : 'root';
+                                handleResourceClick(`/${areaSegment}/${componentId}`);
+                            }}
+                        >
+                            <Box className="w-3.5 h-3.5 mr-1" />
+                            {componentId}
+                        </Button>
+                    </p>
+                )}
+                <EntityStatusControl entityType="apps" entityId={appId} />
+                <ResourceTabBar
+                    tabs={appTabs}
+                    activeTab={activeTab}
+                    onTabChange={setActiveTab}
+                    counts={{
+                        data: topics.length,
+                        operations: operations.length,
+                        configurations: configurations.get(appId)?.length || 0,
+                        faults: activeFaults.length,
+                    }}
+                    alarmTab="faults"
+                />
+            </div>
 
             {/* Tab Content */}
+            {/* The node's facts. How much it holds is on the tabs above. */}
             {activeTab === 'overview' && (
-                <Card>
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-base">Node Information</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="p-3 rounded-lg bg-muted/50">
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <FileCode className="w-4 h-4" />
-                                    <span>Node Name</span>
-                                </div>
-                                <p className="font-mono text-sm mt-1">{nodeName || appId}</p>
+                <section className="space-y-2">
+                    <h3 className="font-sans text-[13px] font-semibold tracking-normal text-foreground">
+                        Node Information
+                    </h3>
+                    <RowGrid as="dl">
+                        {[
+                            { label: 'Node Name', icon: FileCode, value: nodeName || appId },
+                            { label: 'Namespace', icon: Network, value: namespace || '/' },
+                            {
+                                label: 'Fully Qualified Name',
+                                icon: Cpu,
+                                value: fqn || `${namespace || '/'}${nodeName || appId}`,
+                            },
+                        ].map(({ label, icon: Icon, value }) => (
+                            <div key={label} className="min-w-0 bg-white px-4 py-2.5">
+                                <dt className="flex items-center gap-1.5 text-xs text-faint">
+                                    <Icon className="size-3.5" aria-hidden />
+                                    {label}
+                                </dt>
+                                <dd className="mt-0.5 truncate font-mono text-[13px] text-foreground" title={value}>
+                                    {value}
+                                </dd>
                             </div>
-                            <div className="p-3 rounded-lg bg-muted/50">
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <Network className="w-4 h-4" />
-                                    <span>Namespace</span>
-                                </div>
-                                <p className="font-mono text-sm mt-1">{namespace || '/'}</p>
-                            </div>
-                            <div className="p-3 rounded-lg bg-muted/50 md:col-span-2">
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <Cpu className="w-4 h-4" />
-                                    <span>Fully Qualified Name</span>
-                                </div>
-                                <p className="font-mono text-sm mt-1">
-                                    {fqn || `${namespace || '/'}${nodeName || appId}`}
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* Resource Summary */}
-                        <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-                            <button
-                                onClick={() => setActiveTab('data')}
-                                className="p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left"
-                            >
-                                <Database className="w-4 h-4 text-blue-500 mb-1" />
-                                <div className="text-2xl font-semibold">{topics.length}</div>
-                                <div className="text-xs text-muted-foreground">Topics</div>
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('operations')}
-                                className="p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left"
-                            >
-                                <Zap className="w-4 h-4 text-amber-500 mb-1" />
-                                <div className="text-2xl font-semibold">{operations.length}</div>
-                                <div className="text-xs text-muted-foreground">Operations</div>
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('configurations')}
-                                className="p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left"
-                            >
-                                <Settings className="w-4 h-4 text-purple-500 mb-1" />
-                                <div className="text-2xl font-semibold">{configurations.get(appId)?.length || 0}</div>
-                                <div className="text-xs text-muted-foreground">Parameters</div>
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('faults')}
-                                className="p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left"
-                            >
-                                <AlertTriangle
-                                    className={`w-4 h-4 mb-1 ${activeFaults.length > 0 ? 'text-red-500' : 'text-muted-foreground'}`}
-                                />
-                                <div
-                                    className={`text-2xl font-semibold ${activeFaults.length > 0 ? 'text-red-500' : ''}`}
-                                >
-                                    {activeFaults.length}
-                                </div>
-                                <div className="text-xs text-muted-foreground">Active Faults</div>
-                            </button>
-                        </div>
-                    </CardContent>
-                </Card>
+                        ))}
+                    </RowGrid>
+                </section>
             )}
 
-            {activeTab === 'data' && (
-                <Card>
-                    <CardHeader className="pb-3">
-                        <CardTitle className="text-base flex items-center gap-2">
-                            <Database className="w-4 h-4 text-blue-500" />
-                            Topics
-                        </CardTitle>
-                        <CardDescription>
-                            {publishTopics.length + subscribeTopics.length > 0
-                                ? `${publishTopics.length} published, ${subscribeTopics.length} subscribed`
-                                : `${topics.length} data items`}
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {topics.length === 0 ? (
-                            <div className="text-center text-muted-foreground py-4">
-                                No topics available for this app.
-                            </div>
-                        ) : (
-                            <div className="space-y-2">
-                                {topics.map((topic, idx) => {
-                                    const cleanName = topic.topic.startsWith('/') ? topic.topic.slice(1) : topic.topic;
-                                    const encodedName = encodeURIComponent(cleanName);
-                                    const topicPath = `${path}/data/${encodedName}`;
-
-                                    return (
-                                        <div
-                                            key={topic.uniqueKey || `${topic.topic}-${idx}`}
-                                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 cursor-pointer group"
-                                            onClick={() => handleResourceClick(topicPath)}
-                                        >
-                                            {(topic.isPublisher || topic.isSubscriber) && (
-                                                <Badge
-                                                    variant={topic.isPublisher ? 'default' : 'secondary'}
-                                                    className={
-                                                        topic.isPublisher
-                                                            ? 'bg-green-500/10 text-green-600 border-green-300'
-                                                            : 'bg-blue-500/10 text-blue-600 border-blue-300'
-                                                    }
-                                                >
-                                                    {topic.isPublisher ? 'pub' : 'sub'}
-                                                </Badge>
-                                            )}
-                                            <span className="font-mono text-sm truncate flex-1">{topic.topic}</span>
-                                            <DataValuePreview topic={topic} />
-                                            {topic.type && (
-                                                <span className="text-xs text-muted-foreground truncate max-w-[200px]">
-                                                    {topic.type}
-                                                </span>
-                                            )}
-                                            <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100" />
-                                        </div>
-                                    );
-                                })}
-                            </div>
+            {/* One row per topic, with its last value: one column, so the values have room */}
+            {activeTab === 'data' &&
+                (topics.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-muted-foreground">No topics available for this app.</p>
+                ) : (
+                    <section className="space-y-2">
+                        {publishTopics.length + subscribeTopics.length > 0 && (
+                            <p className="text-xs text-faint">
+                                {publishTopics.length} published, {subscribeTopics.length} subscribed
+                            </p>
                         )}
-                    </CardContent>
-                </Card>
-            )}
+                        <RowGrid columns={1}>
+                            {topics.map((topic, idx) => {
+                                const cleanName = topic.topic.startsWith('/') ? topic.topic.slice(1) : topic.topic;
+                                const topicPath = `${path}/data/${encodeURIComponent(cleanName)}`;
+                                return (
+                                    <button
+                                        key={topic.uniqueKey || `${topic.topic}-${idx}`}
+                                        type="button"
+                                        onClick={() => handleResourceClick(topicPath)}
+                                        className="group flex min-w-0 items-center gap-3 bg-white px-4 py-2.5 text-left outline-none transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                                    >
+                                        {(topic.isPublisher || topic.isSubscriber) && (
+                                            <span className="w-8 shrink-0 rounded-md bg-canvas py-0.5 text-center text-[11px] font-medium text-muted-foreground">
+                                                {topic.isPublisher ? 'pub' : 'sub'}
+                                            </span>
+                                        )}
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block truncate font-mono text-[13px] text-foreground">
+                                                {topic.topic}
+                                            </span>
+                                            {topic.type && (
+                                                <span className="block truncate text-xs text-faint">{topic.type}</span>
+                                            )}
+                                        </span>
+                                        <DataValuePreview topic={topic} />
+                                        <ChevronRight
+                                            className="size-4 shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100"
+                                            aria-hidden
+                                        />
+                                    </button>
+                                );
+                            })}
+                        </RowGrid>
+                    </section>
+                ))}
 
             {/* Operations / Configurations / Faults / Logs delegated to the shared helper */}
             {activeTab !== 'overview' &&

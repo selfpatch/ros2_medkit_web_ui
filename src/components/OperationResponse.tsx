@@ -19,14 +19,14 @@ function getStatusConfig(status: ExecutionStatus): {
     switch (status) {
         case 'succeeded':
         case 'completed':
-            return { icon: CheckCircle, color: 'text-green-500', variant: 'default' };
+            return { icon: CheckCircle, color: 'text-state-ok', variant: 'default' };
         case 'running':
         case 'pending':
-            return { icon: Loader2, color: 'text-blue-500', variant: 'secondary' };
+            return { icon: Loader2, color: 'text-state-healed-text', variant: 'secondary' };
         case 'failed':
             return { icon: XCircle, color: 'text-destructive', variant: 'destructive' };
         case 'canceled':
-            return { icon: Clock, color: 'text-yellow-500', variant: 'outline' };
+            return { icon: Clock, color: 'text-state-warn', variant: 'outline' };
         default:
             return { icon: Clock, color: 'text-muted-foreground', variant: 'secondary' };
     }
@@ -63,7 +63,7 @@ function extractResult(response: CreateExecutionResponse): unknown {
  */
 function getStatusBorderClass(status: ExecutionStatus): string {
     if (status === 'succeeded' || status === 'completed') {
-        return 'border-green-500/30 bg-green-500/5';
+        return 'border-state-ok/30 bg-state-fixed-bg/40';
     }
     if (status === 'failed') {
         return 'border-destructive/30 bg-destructive/5';

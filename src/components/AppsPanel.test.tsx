@@ -50,7 +50,7 @@ function renderAppsPanel(overrides: Partial<typeof mockState> = {}) {
     // tooltip for any lifecycle action the current status does not allow.
     return render(
         <TooltipProvider>
-            <AppsPanel appId="talker" appName="Talker" path="/server/ecu/talker" />
+            <AppsPanel appId="talker" path="/server/ecu/talker" />
         </TooltipProvider>
     );
 }

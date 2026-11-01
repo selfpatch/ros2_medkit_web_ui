@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Loader2, Send, Code, FormInput } from 'lucide-react';
+import { SegmentedSwitch } from '@/components/SegmentedSwitch';
 import { toast } from 'react-toastify';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -209,26 +210,14 @@ export function TopicPublishForm({
             {/* View mode toggle - only show if we have schema */}
             {hasSchema ? (
                 <div className="flex items-center gap-2">
-                    <Button
-                        type="button"
-                        variant={viewMode === 'form' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setViewMode('form')}
-                        className="h-7"
-                    >
-                        <FormInput className="h-3 w-3 mr-1" />
-                        Form
-                    </Button>
-                    <Button
-                        type="button"
-                        variant={viewMode === 'json' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setViewMode('json')}
-                        className="h-7"
-                    >
-                        <Code className="h-3 w-3 mr-1" />
-                        JSON
-                    </Button>
+                    <SegmentedSwitch
+                        options={[
+                            { value: 'form', label: 'Form', icon: FormInput },
+                            { value: 'json', label: 'JSON', icon: Code },
+                        ]}
+                        value={viewMode}
+                        onChange={setViewMode}
+                    />
                     {topic.type && <span className="text-xs text-muted-foreground ml-auto">{topic.type}</span>}
                 </div>
             ) : (

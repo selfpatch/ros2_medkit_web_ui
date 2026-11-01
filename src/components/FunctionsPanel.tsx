@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { DataValuePreview } from '@/components/DataValuePreview';
 import { useAppStore } from '@/lib/store';
+import { ResourceTabBar } from '@/components/ResourceTabBar';
 import {
     RESOURCE_TABS,
     renderResourceTabContent,
@@ -38,7 +39,6 @@ const FUNCTION_TABS: TabConfig[] = [
 
 interface FunctionsPanelProps {
     functionId: string;
-    functionName?: string;
     description?: string;
     path: string;
     onNavigate?: (path: string) => void;
@@ -52,7 +52,7 @@ interface FunctionsPanelProps {
  * - Data (aggregated from all hosts)
  * - Operations (aggregated from all hosts)
  */
-export function FunctionsPanel({ functionId, functionName, description, path, onNavigate }: FunctionsPanelProps) {
+export function FunctionsPanel({ functionId, description, path, onNavigate }: FunctionsPanelProps) {
     const [activeTab, setActiveTab] = useState<FunctionTab>('overview');
     const [hosts, setHosts] = useState<FunctionHost[]>([]);
     const [topics, setTopics] = useState<ComponentTopic[]>([]);
@@ -118,64 +118,19 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
 
     return (
         <div className="space-y-6">
-            {/* Function Header */}
-            <Card>
-                <CardHeader>
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-violet-100 dark:bg-violet-900">
-                            <GitBranch className="w-5 h-5 text-violet-600 dark:text-violet-400" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                            <CardTitle className="text-lg truncate">{functionName || functionId}</CardTitle>
-                            <CardDescription className="flex items-center gap-2">
-                                <Badge variant="outline" className="text-violet-600 border-violet-300">
-                                    function
-                                </Badge>
-                                <span className="text-muted-foreground">•</span>
-                                <span className="font-mono text-xs">{path}</span>
-                            </CardDescription>
-                        </div>
-                    </div>
-                </CardHeader>
-
-                {/* Tab Navigation */}
-                <div className="px-6 pb-4">
-                    <div className="flex gap-1 p-1 bg-muted rounded-lg overflow-x-auto">
-                        {FUNCTION_TABS.map((tab) => {
-                            const TabIcon = tab.icon;
-                            const isActive = activeTab === tab.id;
-                            let count = 0;
-                            if (tab.id === 'hosts') count = hosts.length;
-                            if (tab.id === 'data') count = topics.length;
-                            if (tab.id === 'operations') count = operations.length;
-                            if (tab.id === 'faults') count = faults.length;
-
-                            return (
-                                <button
-                                    key={tab.id}
-                                    onClick={() => setActiveTab(tab.id)}
-                                    className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-                                        isActive
-                                            ? 'bg-background text-foreground shadow-sm'
-                                            : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
-                                    }`}
-                                >
-                                    <TabIcon className="w-4 h-4" />
-                                    {tab.label}
-                                    {count > 0 && (
-                                        <Badge
-                                            variant={isActive ? 'default' : 'secondary'}
-                                            className={`ml-1 h-5 px-1.5 ${tab.id === 'faults' && count > 0 ? 'bg-red-500 text-white' : ''}`}
-                                        >
-                                            {count}
-                                        </Badge>
-                                    )}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            </Card>
+            {/* Its name is the view's heading, in the toolbar */}
+            <ResourceTabBar
+                tabs={FUNCTION_TABS}
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+                counts={{
+                    hosts: hosts.length,
+                    data: topics.length,
+                    operations: operations.length,
+                    faults: faults.length,
+                }}
+                alarmTab="faults"
+            />
 
             {/* Tab Content */}
             {activeTab === 'overview' && (
@@ -222,7 +177,7 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                             </button>
                             <button
                                 onClick={() => setActiveTab('faults')}
-                                className={`p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left ${faults.length > 0 ? 'border-red-300 bg-red-50 dark:bg-red-950/30' : ''}`}
+                                className={`p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left ${faults.length > 0 ? 'border-red-300 bg-red-50' : ''}`}
                             >
                                 <AlertTriangle
                                     className={`w-4 h-4 mb-1 ${faults.length > 0 ? 'text-red-500' : 'text-muted-foreground'}`}
@@ -265,8 +220,8 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                                         className="flex items-center gap-3 p-3 rounded-lg border hover:bg-accent/30 cursor-pointer group"
                                         onClick={() => handleResourceClick(`/apps/${host.id}`)}
                                     >
-                                        <div className="p-1.5 rounded bg-emerald-100 dark:bg-emerald-900">
-                                            <Cpu className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                                        <div className="p-1.5 rounded bg-emerald-100">
+                                            <Cpu className="w-4 h-4 text-emerald-600" />
                                         </div>
                                         <span className="font-medium text-sm truncate flex-1">{host.name}</span>
                                         <span className="font-mono text-xs text-muted-foreground">{host.id}</span>

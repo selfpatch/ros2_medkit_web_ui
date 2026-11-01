@@ -15,7 +15,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Activity, AlertCircle, Loader2, Play, Power, RotateCw, Zap } from 'lucide-react';
 import { toast } from 'react-toastify';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -235,82 +234,89 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
 
     const confirmLabel = confirmAction ? (ACTIONS.find((a) => a.action === confirmAction)?.label ?? confirmAction) : '';
 
-    const statusBadge = (() => {
-        if (status === 'ready') {
-            return (
-                <Badge variant="outline" className="text-emerald-600 border-emerald-300">
-                    ready
-                </Badge>
-            );
-        }
-        if (status === 'notReady') {
-            return (
-                <Badge variant="outline" className="text-amber-600 border-amber-300">
-                    notReady
-                </Badge>
-            );
-        }
-        return <Badge variant="secondary">unknown</Badge>;
-    })();
+    // The readiness as a chip with a dot, as the selfpatch platform shows a robot's state
+    const statusBadge = (
+        <span className="inline-flex h-7 items-center gap-1.5 rounded-full bg-canvas px-2.5 text-[12.5px] font-medium text-body">
+            <span
+                aria-hidden
+                className={cn(
+                    'size-2 shrink-0 rounded-full',
+                    status === 'ready'
+                        ? 'bg-state-ok'
+                        : status === 'notReady'
+                          ? 'bg-state-warn'
+                          : 'bg-white shadow-[inset_0_0_0_1.5px_var(--color-state-off)]'
+                )}
+            />
+            {status === 'ready' ? 'ready' : status === 'notReady' ? 'notReady' : 'unknown'}
+        </span>
+    );
 
     return (
         <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2 flex-wrap">
-                <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <Activity className="w-4 h-4" />
-                    Lifecycle
-                </span>
-                {statusBadge}
-                {notAvailable && (
-                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <AlertCircle className="w-3.5 h-3.5" />
-                        not available
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div className="flex items-center gap-2">
+                    <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <Activity className="w-4 h-4" />
+                        Lifecycle
                     </span>
-                )}
-            </div>
+                    {statusBadge}
+                    {notAvailable && (
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            not available
+                        </span>
+                    )}
+                </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
-                {ACTIONS.map(({ action, label, icon: Icon, variant }) => {
-                    const isPending = pendingAction === action;
-                    const unavailable = isDisabled(action);
-                    const tip = unavailable ? tooltipFor(action) : '';
-                    // aria-disabled rather than disabled: a disabled button leaves
-                    // the accessibility tree and the tab order, so the reason it
-                    // cannot be used becomes unreachable by keyboard. Marked this
-                    // way the button keeps its name, announces as unavailable, and
-                    // focusing it opens the tooltip that says why. The handler
-                    // rejects the action, which the attribute alone does not.
-                    const button = (
-                        <Button
-                            key={action}
-                            variant={variant}
-                            size="sm"
-                            aria-disabled={unavailable || undefined}
-                            className={cn(unavailable && 'opacity-50 cursor-not-allowed')}
-                            onClick={() => {
-                                if (unavailable) return;
-                                handleClick(action);
-                            }}
-                        >
-                            {isPending ? (
-                                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-                            ) : (
-                                <Icon className="w-4 h-4 mr-1.5" />
-                            )}
-                            {label}
-                        </Button>
-                    );
-
-                    if (tip) {
-                        return (
-                            <Tooltip key={action}>
-                                <TooltipTrigger asChild>{button}</TooltipTrigger>
-                                <TooltipContent>{tip}</TooltipContent>
-                            </Tooltip>
+                <div className="flex flex-wrap items-center gap-1">
+                    {ACTIONS.map(({ action, label, icon: Icon, variant }) => {
+                        const isPending = pendingAction === action;
+                        const unavailable = isDisabled(action);
+                        const tip = unavailable ? tooltipFor(action) : '';
+                        // aria-disabled rather than disabled: a disabled button leaves
+                        // the accessibility tree and the tab order, so the reason it
+                        // cannot be used becomes unreachable by keyboard. Marked this
+                        // way the button keeps its name, announces as unavailable, and
+                        // focusing it opens the tooltip that says why. The handler
+                        // rejects the action, which the attribute alone does not.
+                        const button = (
+                            <Button
+                                key={action}
+                                variant="outline"
+                                size="sm"
+                                aria-disabled={unavailable || undefined}
+                                className={cn(
+                                    'h-8 px-2.5',
+                                    // A destructive transition reads in red; its confirmation is the solid red button
+                                    variant === 'destructive' && 'text-destructive hover:border-destructive/40',
+                                    unavailable && 'opacity-50 cursor-not-allowed'
+                                )}
+                                onClick={() => {
+                                    if (unavailable) return;
+                                    handleClick(action);
+                                }}
+                            >
+                                {isPending ? (
+                                    <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                                ) : (
+                                    <Icon className="w-4 h-4 mr-1.5" />
+                                )}
+                                {label}
+                            </Button>
                         );
-                    }
-                    return button;
-                })}
+
+                        if (tip) {
+                            return (
+                                <Tooltip key={action}>
+                                    <TooltipTrigger asChild>{button}</TooltipTrigger>
+                                    <TooltipContent>{tip}</TooltipContent>
+                                </Tooltip>
+                            );
+                        }
+                        return button;
+                    })}
+                </div>
             </div>
 
             {actuationUnsupported && (

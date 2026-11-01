@@ -4,6 +4,7 @@ import { Layers, Box, ChevronRight, MapPin, Database } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '@/lib/store';
+import { ResourceTabBar } from '@/components/ResourceTabBar';
 import { EntityResourceTabs } from '@/components/EntityResourceTabs';
 import type { EntityTreeNode } from '@/lib/types';
 
@@ -23,7 +24,6 @@ const AREA_TABS: TabConfig[] = [
 
 interface AreasPanelProps {
     areaId: string;
-    areaName?: string;
     path: string;
 }
 
@@ -37,7 +37,7 @@ interface AreasPanelProps {
  * Note: Areas don't have direct data/operations/configurations/faults.
  * Those resources belong to components and apps within the area.
  */
-export function AreasPanel({ areaId, areaName, path }: AreasPanelProps) {
+export function AreasPanel({ areaId, path }: AreasPanelProps) {
     const [activeTab, setActiveTab] = useState<AreaTab>('overview');
 
     const { rootEntities, selectEntity, expandedPaths, toggleExpanded } = useAppStore(
@@ -85,57 +85,13 @@ export function AreasPanel({ areaId, areaName, path }: AreasPanelProps) {
 
     return (
         <div className="space-y-6">
-            {/* Area Header */}
-            <Card>
-                <CardHeader>
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-cyan-100 dark:bg-cyan-900">
-                            <Layers className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
-                        </div>
-                        <div>
-                            <CardTitle className="text-lg">{areaName || areaId}</CardTitle>
-                            <CardDescription className="flex items-center gap-2">
-                                <Badge variant="outline" className="text-cyan-600 border-cyan-300">
-                                    area
-                                </Badge>
-                                <span className="text-muted-foreground">•</span>
-                                <span className="font-mono text-xs">{path}</span>
-                            </CardDescription>
-                        </div>
-                    </div>
-                </CardHeader>
-
-                {/* Tab Navigation */}
-                <div className="px-6 pb-4">
-                    <div className="flex gap-1 p-1 bg-muted rounded-lg overflow-x-auto">
-                        {AREA_TABS.map((tab) => {
-                            const TabIcon = tab.icon;
-                            const isActive = activeTab === tab.id;
-                            const count = tab.id === 'components' ? components.length : 0;
-
-                            return (
-                                <button
-                                    key={tab.id}
-                                    onClick={() => setActiveTab(tab.id)}
-                                    className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-                                        isActive
-                                            ? 'bg-background text-foreground shadow-sm'
-                                            : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
-                                    }`}
-                                >
-                                    <TabIcon className="w-4 h-4" />
-                                    {tab.label}
-                                    {count > 0 && (
-                                        <Badge variant={isActive ? 'default' : 'secondary'} className="ml-1 h-5 px-1.5">
-                                            {count}
-                                        </Badge>
-                                    )}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            </Card>
+            {/* Its name is the view's heading, in the toolbar */}
+            <ResourceTabBar
+                tabs={AREA_TABS}
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+                counts={{ components: components.length }}
+            />
 
             {/* Tab Content */}
             {activeTab === 'overview' && (
@@ -206,8 +162,8 @@ export function AreasPanel({ areaId, areaName, path }: AreasPanelProps) {
                                         className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/30 cursor-pointer group transition-colors"
                                         onClick={() => handleComponentClick(component.path)}
                                     >
-                                        <div className="p-1.5 rounded bg-indigo-100 dark:bg-indigo-900">
-                                            <Box className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                                        <div className="p-1.5 rounded bg-indigo-100">
+                                            <Box className="w-4 h-4 text-indigo-600" />
                                         </div>
                                         <div className="min-w-0 flex-1">
                                             <div className="font-medium truncate text-sm">{component.name}</div>
