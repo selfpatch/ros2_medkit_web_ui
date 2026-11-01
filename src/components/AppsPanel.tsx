@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/shallow';
 import { AlertTriangle, Box, ChevronRight, Cpu, Database, FileCode, Network, Settings, Zap } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { DataValuePreview } from '@/components/DataValuePreview';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/lib/store';
 import {
@@ -283,7 +284,9 @@ export function AppsPanel({ appId, appName, fqn, nodeName, namespace, componentI
                             Topics
                         </CardTitle>
                         <CardDescription>
-                            {publishTopics.length} published, {subscribeTopics.length} subscribed
+                            {publishTopics.length + subscribeTopics.length > 0
+                                ? `${publishTopics.length} published, ${subscribeTopics.length} subscribed`
+                                : `${topics.length} data items`}
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -304,17 +307,20 @@ export function AppsPanel({ appId, appName, fqn, nodeName, namespace, componentI
                                             className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 cursor-pointer group"
                                             onClick={() => handleResourceClick(topicPath)}
                                         >
-                                            <Badge
-                                                variant={topic.isPublisher ? 'default' : 'secondary'}
-                                                className={
-                                                    topic.isPublisher
-                                                        ? 'bg-green-500/10 text-green-600 border-green-300'
-                                                        : 'bg-blue-500/10 text-blue-600 border-blue-300'
-                                                }
-                                            >
-                                                {topic.isPublisher ? 'pub' : 'sub'}
-                                            </Badge>
+                                            {(topic.isPublisher || topic.isSubscriber) && (
+                                                <Badge
+                                                    variant={topic.isPublisher ? 'default' : 'secondary'}
+                                                    className={
+                                                        topic.isPublisher
+                                                            ? 'bg-green-500/10 text-green-600 border-green-300'
+                                                            : 'bg-blue-500/10 text-blue-600 border-blue-300'
+                                                    }
+                                                >
+                                                    {topic.isPublisher ? 'pub' : 'sub'}
+                                                </Badge>
+                                            )}
                                             <span className="font-mono text-sm truncate flex-1">{topic.topic}</span>
+                                            <DataValuePreview topic={topic} />
                                             {topic.type && (
                                                 <span className="text-xs text-muted-foreground truncate max-w-[200px]">
                                                     {topic.type}

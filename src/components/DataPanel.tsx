@@ -81,18 +81,30 @@ function ConnectionStatus({ topic }: { topic: ComponentTopic }) {
     const pubCount = topic.publisher_count ?? topic.publishers?.length ?? 0;
     const subCount = topic.subscriber_count ?? topic.subscribers?.length ?? 0;
     const hasData = topic.status === 'data' && topic.data !== null && topic.data !== undefined;
+    // Non-ROS 2 gateways report no publishers or subscribers for a data item.
+    const reportsEndpoints =
+        topic.publisher_count !== undefined ||
+        topic.subscriber_count !== undefined ||
+        topic.publishers !== undefined ||
+        topic.subscribers !== undefined;
 
     const qosCheck = checkQosCompatibility(topic.publishers || [], topic.subscribers || []);
 
     const statusIcon = hasData ? (
         <CheckCircle2 className="w-4 h-4 text-green-500" />
-    ) : pubCount > 0 ? (
+    ) : reportsEndpoints && pubCount > 0 ? (
         <AlertTriangle className="w-4 h-4 text-amber-500" />
     ) : (
         <XCircle className="w-4 h-4 text-muted-foreground" />
     );
 
-    const statusText = hasData ? 'Active' : pubCount > 0 ? 'Waiting for data' : 'No publishers';
+    const statusText = hasData
+        ? 'Active'
+        : !reportsEndpoints
+          ? 'No data'
+          : pubCount > 0
+            ? 'Waiting for data'
+            : 'No publishers';
 
     return (
         <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
@@ -101,18 +113,20 @@ function ConnectionStatus({ topic }: { topic: ComponentTopic }) {
                     {statusIcon}
                     <span className="text-sm font-medium">{statusText}</span>
                 </div>
-                <div className="flex items-center gap-4 text-sm">
-                    <span className="flex items-center gap-1">
-                        <Badge variant="outline" className="text-xs">
-                            {pubCount} pub
-                        </Badge>
-                    </span>
-                    <span className="flex items-center gap-1">
-                        <Badge variant="outline" className="text-xs">
-                            {subCount} sub
-                        </Badge>
-                    </span>
-                </div>
+                {reportsEndpoints && (
+                    <div className="flex items-center gap-4 text-sm">
+                        <span className="flex items-center gap-1">
+                            <Badge variant="outline" className="text-xs">
+                                {pubCount} pub
+                            </Badge>
+                        </span>
+                        <span className="flex items-center gap-1">
+                            <Badge variant="outline" className="text-xs">
+                                {subCount} sub
+                            </Badge>
+                        </span>
+                    </div>
+                )}
             </div>
 
             {/* QoS Warning */}
@@ -262,7 +276,7 @@ export function DataPanel({
                 <QosDetails publishers={topic.publishers} subscribers={topic.subscribers} />
 
                 {/* Last Received Value */}
-                <div className="space-y-2">
+                <div className="space-y-2" role="region" aria-label="Last received value">
                     <div className="flex items-center justify-between">
                         <span className="text-sm font-medium">Last Received Value</span>
                         {hasData && (

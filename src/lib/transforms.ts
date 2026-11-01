@@ -376,9 +376,17 @@ interface RawDataItem {
     id: string;
     name?: string;
     category?: string;
-    /** Current value inlined by the gateway when available. */
+    /** Current value inlined in a list item, when the gateway has one. */
     value?: unknown;
+    /** Current value of a single-item read. */
+    data?: unknown;
     'x-medkit'?: {
+        /** 'metadata_only' when the gateway has no sample. `data` is then a placeholder. */
+        status?: string;
+        /** Sample time: nanoseconds (ROS 2) or an ISO 8601 string. */
+        timestamp?: number | string;
+        publisher_count?: number;
+        subscriber_count?: number;
         /** Middleware identifier (e.g. 'ros2'); consumers treat any other value as non-ROS 2. */
         middleware?: string;
         /** Access mode ('read' | 'write' | 'readwrite'). */
@@ -392,12 +400,23 @@ interface RawDataItem {
     };
 }
 
+/** Sample time in nanoseconds: the gateway's stamp when it sends one, else now. */
+function sampleTimestampNs(raw: unknown): number {
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
+    if (typeof raw === 'string') {
+        const ms = Date.parse(raw);
+        if (Number.isFinite(ms)) return ms * 1_000_000;
+    }
+    // Above Number.MAX_SAFE_INTEGER, so the last digits round. Display needs only milliseconds.
+    return Date.now() * 1_000_000;
+}
+
 /**
- * Transform the raw data list response into `ComponentTopic[]`.
+ * Transform a data list response, or one single-item read wrapped as `{ items: [item] }`,
+ * into `ComponentTopic[]`.
  *
  * Extracts topic metadata (type, direction, schema) from the `x-medkit` extension.
- * When the gateway inlines a `value`, the resulting topic is marked as `status:
- * 'data'` so that non-streaming middlewares render their current value immediately.
+ * A list item carries its value in `value`, a single-item read in `data`.
  */
 export function transformDataResponse(rawData: unknown): ComponentTopic[] {
     if (!rawData || typeof rawData !== 'object') return [];
@@ -414,16 +433,19 @@ export function transformDataResponse(rawData: unknown): ComponentTopic[] {
         // ROS 2 type was published. This keeps precedence consistent with
         // `direction` above.
         const typeLabel = xm?.ros2?.type ?? xm?.type;
-        const hasValue = item.value !== undefined;
+        const value = item.value !== undefined ? item.value : item.data;
+        const hasValue = value !== undefined && xm?.status !== 'metadata_only';
         const rawAccess = typeof xm?.access === 'string' ? xm.access.toLowerCase() : undefined;
         const access: 'read' | 'write' | 'readwrite' | undefined =
             rawAccess === 'read' || rawAccess === 'write' || rawAccess === 'readwrite' ? rawAccess : undefined;
         return {
             topic: topicName,
-            timestamp: Date.now(),
-            data: hasValue ? item.value : null,
+            timestamp: sampleTimestampNs(xm?.timestamp),
+            data: hasValue ? value : null,
             status: hasValue ? ('data' as const) : ('metadata_only' as const),
             type: typeLabel,
+            publisher_count: typeof xm?.publisher_count === 'number' ? xm.publisher_count : undefined,
+            subscriber_count: typeof xm?.subscriber_count === 'number' ? xm.subscriber_count : undefined,
             type_info: convertedSchema
                 ? {
                       schema: convertedSchema,
