@@ -1,0 +1,38 @@
+# Stack for the data-values specs: a gateway with runtime discovery and a node
+# that publishes data items, so the UI reads real values.
+
+# Its own project, so its `gateway` service does not replace the one of the
+# scripts or rosbag stack.
+name: e2e-data
+
+services:
+    gateway:
+        # The gateway digest docker-compose.yml pins.
+        image: ${E2E_DATA_GATEWAY_IMAGE:-ghcr.io/selfpatch/ros2_medkit-jazzy@sha256:c706a4c16a4f4f2963690f776e93a70ac4afebbc52a0774a4edb984369a0dbd8}
+        ports:
+            # Loopback only, on its own port so it runs next to the other stacks.
+            - '127.0.0.1:${E2E_DATA_GATEWAY_PORT:-8082}:8080'
+        volumes:
+            - ./gateway/data-params.yaml:/e2e/params.yaml:ro
+            - ./gateway/data_source.py:/e2e/data_source.py:ro
+        init: true
+        # The entrypoint override skips /entrypoint.sh, which sources ROS and
+        # sets the RMW default.
+        environment:
+            RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+        entrypoint: ['/bin/bash', '-lc']
+        # One container: the default DDS transport uses /dev/shm, which is per
+        # container. `wait -n` stops the container when either process dies.
+        # `$$` keeps Compose from interpolating the shell variables.
+        command:
+            - >
+                source /opt/ros/jazzy/setup.bash;
+                source /home/medkit/ws/install/setup.bash;
+                python3 /e2e/data_source.py &
+                SRC=$$!;
+                ros2 run ros2_medkit_gateway gateway_node
+                --ros-args --params-file /e2e/params.yaml &
+                GW=$$!;
+                trap 'kill $$SRC $$GW 2>/dev/null' TERM INT;
+                wait -n $$SRC $$GW;
+                exit $$?

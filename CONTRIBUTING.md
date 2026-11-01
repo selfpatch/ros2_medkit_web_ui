@@ -93,13 +93,16 @@ Before opening or updating a Pull Request, you **must**:
 
 The Playwright suite in `e2e/` runs the real UI against a containerised gateway instead of mocks, so it needs Docker.
 
-1. Start both gateways. The scripts stack serves most of the suite; the rosbag
+1. Start the three gateways. The scripts stack serves most of the suite; the rosbag
    specs need the second one, which also runs a fault manager so a fault can own
-   black-box recordings. Skip it and those three specs skip themselves:
+   black-box recordings. Skip it and those three specs skip themselves. The data
+   specs need the third one, which runs runtime discovery and a node that
+   publishes data items. Without it they fail:
 
     ```bash
     docker compose -f e2e/docker-compose.yml up -d
     docker compose -f e2e/docker-compose.rosbag.yml up -d
+    docker compose -f e2e/docker-compose.data.yml up -d
     ```
 
     The rosbag stack seeds its fixture in the background. Wait for it before
@@ -117,7 +120,7 @@ The Playwright suite in `e2e/` runs the real UI against a containerised gateway 
 
     Use `npm run test:e2e:ui` instead to step through the tests with the Playwright UI.
 
-3. Stop both gateways once you are done, dropping their volumes along with them.
+3. Stop the gateways once you are done, dropping their volumes along with them.
    The rosbag volume holds `faults.db` as well as the bags, so a reused one
    starts with the fault already confirmed and seeds a different number of
    recordings than a clean run:
@@ -125,6 +128,7 @@ The Playwright suite in `e2e/` runs the real UI against a containerised gateway 
     ```bash
     docker compose -f e2e/docker-compose.yml down -v
     docker compose -f e2e/docker-compose.rosbag.yml down -v
+    docker compose -f e2e/docker-compose.data.yml down -v
     ```
 
 `e2e/scripts.spec.ts` uploads, runs and deletes scripts against the shared gateway container, mutating its state as it goes, so it and the other specs that touch the live gateway are pinned to a single Playwright worker (see `playwright.config.ts`). Do not attempt to parallelize these specs or run them against a gateway instance you care about keeping in a known state.
@@ -148,6 +152,9 @@ The rosbag stack has its own set, all optional: `E2E_ROSBAG_GATEWAY_PORT`
 `E2E_ROSBAG_FIXTURE_TIMEOUT` for the wait script. `E2E_ROSBAG_GATEWAY_IMAGE`
 points the stack at a locally built gateway instead of the pinned release, which
 is how you run these specs against a gateway change before it ships.
+
+The data stack has the same kind of set: `E2E_DATA_GATEWAY_PORT` (default 8082),
+`E2E_DATA_GATEWAY_URL` and `E2E_DATA_GATEWAY_IMAGE`.
 
 ### Pull Request Checklist
 

@@ -88,9 +88,10 @@ npm run test:ui
 npm run test:coverage
 
 # Run the end-to-end suite against containerised gateways
-# (the second stack carries the rosbag specs; see CONTRIBUTING.md)
+# (the second stack carries the rosbag specs, the third the data specs; see CONTRIBUTING.md)
 docker compose -f e2e/docker-compose.yml up -d
 docker compose -f e2e/docker-compose.rosbag.yml up -d
+docker compose -f e2e/docker-compose.data.yml up -d
 ./e2e/wait-for-rosbag-fixture.sh
 npm run test:e2e
 
