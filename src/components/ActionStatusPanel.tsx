@@ -26,35 +26,35 @@ function getStatusStyle(status: ExecutionStatus): {
 } {
     switch (status) {
         case 'pending':
-            return { variant: 'outline', icon: Clock, color: 'text-blue-500', bgColor: 'bg-blue-500/10' };
+            return { variant: 'outline', icon: Clock, color: 'text-state-warn-text', bgColor: 'bg-state-warn-bg' };
         case 'running':
             return {
                 variant: 'default',
                 icon: Activity,
-                color: 'text-blue-500',
-                bgColor: 'bg-blue-500/10',
+                color: 'text-state-healed-text',
+                bgColor: 'bg-acid/25',
             };
         case 'succeeded':
         case 'completed':
             return {
                 variant: 'default',
                 icon: CheckCircle,
-                color: 'text-green-500',
-                bgColor: 'bg-green-500/10',
+                color: 'text-state-fixed-text',
+                bgColor: 'bg-state-fixed-bg',
             };
         case 'canceled':
             return {
                 variant: 'secondary',
                 icon: XCircle,
-                color: 'text-gray-500',
-                bgColor: 'bg-gray-500/10',
+                color: 'text-muted-foreground',
+                bgColor: 'bg-canvas-2',
             };
         case 'failed':
             return {
                 variant: 'destructive',
                 icon: AlertCircle,
-                color: 'text-red-500',
-                bgColor: 'bg-red-500/10',
+                color: 'text-state-fault-text',
+                bgColor: 'bg-state-fault-bg',
             };
         default:
             return {
@@ -155,7 +155,7 @@ export function ActionStatusPanel({ executionId }: ActionStatusPanelProps) {
                                     className={`w-4 h-4 ${statusStyle?.color} ${execution.status === 'running' ? 'animate-pulse' : ''}`}
                                 />
                                 {execution.status === 'running' && (
-                                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-blue-500 rounded-full animate-ping" />
+                                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-acid-strong rounded-full animate-ping" />
                                 )}
                             </div>
                         ) : (
@@ -197,7 +197,7 @@ export function ActionStatusPanel({ executionId }: ActionStatusPanelProps) {
                 {isActive && (
                     <div className="space-y-1">
                         <div className="flex items-center gap-2">
-                            <Navigation className="w-3.5 h-3.5 text-blue-500 animate-bounce" />
+                            <Navigation className="w-3.5 h-3.5 text-state-healed-text animate-bounce" />
                             <span className="text-xs text-muted-foreground">
                                 {execution.status === 'pending' && 'Waiting to start...'}
                                 {execution.status === 'running' && 'Execution in progress...'}
@@ -205,7 +205,7 @@ export function ActionStatusPanel({ executionId }: ActionStatusPanelProps) {
                         </div>
                         {/* Animated progress bar */}
                         <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div className="h-full bg-blue-500 rounded-full animate-progress-indeterminate" />
+                            <div className="h-full bg-acid-strong rounded-full animate-progress-indeterminate" />
                         </div>
                     </div>
                 )}

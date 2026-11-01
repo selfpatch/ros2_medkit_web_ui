@@ -282,7 +282,12 @@ describe('FaultsDashboard refresh behaviour', () => {
             DELETE: vi.fn(async () => ({ data: undefined, error: undefined })),
         };
         connect(client, true);
-        const { container } = await mount(<FaultsDashboard />);
+        const { container, getByText } = await mount(<FaultsDashboard />);
+        // Clear sits on the fault's page: open it first, and count from there.
+        await act(async () => {
+            getByText('LIDAR_RANGE_INVALID').click();
+            await vi.advanceTimersByTimeAsync(0);
+        });
         const readsBeforeClear = client.GET.mock.calls.length;
 
         const clearButton = container.querySelector('button[title="Clear fault"]') as HTMLElement;
@@ -600,6 +605,12 @@ describe('FaultsDashboard refresh behaviour', () => {
                     },
                 ],
             } as never);
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        // The list is flat until asked to group by entity.
+        await act(async () => {
+            (container.querySelector('#group-by') as HTMLElement).click();
             await vi.advanceTimersByTimeAsync(0);
         });
 

@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useShallow } from 'zustand/shallow';
-import { Settings, Loader2, RefreshCw, Lock, Save, X, RotateCcw } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Loader2, RefreshCw, Lock, Save, X, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { RowGrid } from '@/components/RowGrid';
 import { useAppStore, type AppState } from '@/lib/store';
 import type { Parameter, ParameterType } from '@/lib/types';
+import { cn } from '@/lib/utils';
 import type { SovdResourceEntityType } from '@/lib/types';
 
 interface ConfigurationPanelProps {
@@ -15,21 +15,6 @@ interface ConfigurationPanelProps {
     highlightParam?: string;
     /** Entity type for API calls */
     entityType?: SovdResourceEntityType;
-}
-
-/**
- * Get badge color for parameter type
- */
-function getTypeBadgeVariant(type: ParameterType): 'default' | 'secondary' | 'outline' {
-    switch (type) {
-        case 'bool':
-            return 'default';
-        case 'int':
-        case 'double':
-            return 'secondary';
-        default:
-            return 'outline';
-    }
 }
 
 /**
@@ -109,40 +94,58 @@ function ParameterRow({
 
     return (
         <div
-            className={`flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/30 transition-colors ${isHighlighted ? 'ring-2 ring-primary border-primary' : ''}`}
+            className={cn(
+                // Where the pane is narrow, the type, value and reset wrap under the name
+                'flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 transition-colors',
+                // The parameter a link led to: a breath of acid behind it
+                isHighlighted ? 'bg-[#f4ffd6]' : 'bg-white hover:bg-canvas'
+            )}
         >
             {/* Parameter name */}
-            <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm truncate">{param.name}</span>
+            <div className="min-w-0 flex-1 basis-56">
+                <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-[13px] text-foreground truncate">{param.name}</span>
                     {param.read_only && (
                         <span title="Read-only">
-                            <Lock className="w-3 h-3 text-muted-foreground" />
+                            <Lock className="w-3 h-3 text-faint" />
                         </span>
                     )}
                 </div>
-                {param.description && (
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">{param.description}</p>
-                )}
+                {param.description && <p className="text-xs text-faint truncate mt-0.5">{param.description}</p>}
             </div>
 
-            {/* Type badge */}
-            <Badge variant={getTypeBadgeVariant(param.type)} className="shrink-0">
+            {/* Type */}
+            <span className="ml-auto inline-flex h-5 shrink-0 items-center rounded-full bg-canvas px-2 font-mono text-[11px] text-muted-foreground">
                 {param.type}
-            </Badge>
+            </span>
 
             {/* Value display/edit */}
             <div className="w-40 shrink-0">
                 {param.type === 'bool' ? (
                     // Boolean toggle button
                     <Button
-                        variant={param.value ? 'default' : 'outline'}
+                        variant="outline"
                         size="sm"
-                        className="w-full"
+                        className="h-8 w-full justify-start gap-2 px-2.5 font-mono text-[13px]"
                         disabled={param.read_only || isSaving}
                         onClick={toggleBool}
                     >
-                        {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : param.value ? 'true' : 'false'}
+                        {isSaving ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                            <>
+                                <span
+                                    aria-hidden
+                                    className={cn(
+                                        'size-2 shrink-0 rounded-full',
+                                        param.value
+                                            ? 'bg-state-ok'
+                                            : 'bg-white shadow-[inset_0_0_0_1.5px_var(--color-state-off)]'
+                                    )}
+                                />
+                                {param.value ? 'true' : 'false'}
+                            </>
+                        )}
                     </Button>
                 ) : isEditing ? (
                     // Editing mode
@@ -151,7 +154,7 @@ function ParameterRow({
                             value={editValue}
                             onChange={(e) => setEditValue(e.target.value)}
                             onKeyDown={handleKeyDown}
-                            className="h-8 text-sm font-mono"
+                            className="h-8 border-graphite/12 bg-white font-mono text-[13px]"
                             autoFocus
                             disabled={isSaving}
                         />
@@ -177,11 +180,12 @@ function ParameterRow({
                 ) : (
                     // Display mode - click to edit
                     <div
-                        className={`px-3 py-1.5 rounded border text-sm font-mono truncate ${
+                        className={cn(
+                            'h-8 truncate rounded-lg border px-2.5 py-1.5 font-mono text-[13px] leading-[18px]',
                             param.read_only
-                                ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                                : 'bg-background cursor-pointer hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2'
-                        }`}
+                                ? 'cursor-not-allowed border-transparent bg-canvas text-muted-foreground'
+                                : 'cursor-pointer border-graphite/12 bg-white text-foreground hover:border-graphite/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+                        )}
                         onClick={startEditing}
                         onKeyDown={(e) => {
                             if (!param.read_only && (e.key === 'Enter' || e.key === ' ')) {
@@ -323,63 +327,60 @@ export function ConfigurationPanel({ entityId, highlightParam, entityType = 'com
 
     if (isLoadingConfigurations && parameters.length === 0) {
         return (
-            <Card>
-                <CardContent className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                </CardContent>
-            </Card>
+            <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
         );
     }
 
+    // The tab says these are the configuration: here how many, and its actions
     return (
-        <Card>
-            <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <Settings className="w-5 h-5 text-muted-foreground" />
-                        <CardTitle className="text-base">Configurations</CardTitle>
-                        <span className="text-xs text-muted-foreground">({parameters.length} parameters)</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleResetAll}
-                            disabled={isResettingAll || parameters.length === 0}
-                            title="Reset all parameters to defaults"
-                        >
-                            {isResettingAll ? (
-                                <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                            ) : (
-                                <RotateCcw className="w-4 h-4 mr-1" />
-                            )}
-                            Reset All
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={isLoadingConfigurations}>
-                            <RefreshCw className={`w-4 h-4 ${isLoadingConfigurations ? 'animate-spin' : ''}`} />
-                        </Button>
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent>
-                {parameters.length === 0 ? (
-                    <div className="text-center text-muted-foreground py-4">
-                        No parameters available for this component.
-                    </div>
-                ) : (
-                    <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-                        {parameters.map((param) => (
-                            <ParameterRow
-                                key={param.name}
-                                param={param}
-                                onSetParameter={handleSetParameter}
-                                onResetParameter={handleResetParameter}
-                                isHighlighted={param.name === highlightParam}
-                            />
-                        ))}
-                    </div>
-                )}
-            </CardContent>
-        </Card>
+        <section className="space-y-3">
+            <div className="flex items-center gap-1.5">
+                <span className="text-xs text-faint">{parameters.length} parameters</span>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-auto h-8 px-3"
+                    onClick={handleResetAll}
+                    disabled={isResettingAll || parameters.length === 0}
+                    title="Reset all parameters to defaults"
+                >
+                    {isResettingAll ? (
+                        <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                    ) : (
+                        <RotateCcw className="w-4 h-4 mr-1.5" />
+                    )}
+                    Reset All
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 text-muted-foreground"
+                    onClick={handleRefresh}
+                    disabled={isLoadingConfigurations}
+                    title="Refresh parameters"
+                >
+                    <RefreshCw className={`w-4 h-4 ${isLoadingConfigurations ? 'animate-spin' : ''}`} />
+                </Button>
+            </div>
+            {parameters.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                    No parameters available for this component.
+                </p>
+            ) : (
+                <RowGrid columns={1}>
+                    {parameters.map((param) => (
+                        <ParameterRow
+                            key={param.name}
+                            param={param}
+                            onSetParameter={handleSetParameter}
+                            onResetParameter={handleResetParameter}
+                            isHighlighted={param.name === highlightParam}
+                        />
+                    ))}
+                </RowGrid>
+            )}
+        </section>
     );
 }

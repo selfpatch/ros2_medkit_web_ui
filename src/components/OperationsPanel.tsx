@@ -14,9 +14,9 @@ import {
     History,
     Trash2,
 } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { RowGrid } from '@/components/RowGrid';
+import { SegmentedSwitch } from '@/components/SegmentedSwitch';
 import { Textarea } from '@/components/ui/textarea';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useAppStore, type AppState } from '@/lib/store';
@@ -33,6 +33,7 @@ import { SchemaForm } from './SchemaFormField';
 import { getSchemaDefaults } from '@/lib/schema-utils';
 import { OperationResponseDisplay } from './OperationResponse';
 import type { SovdResourceEntityType } from '@/lib/types';
+import { cn } from '@/lib/utils';
 
 /** History entry for an operation invocation */
 interface OperationHistoryEntry {
@@ -50,12 +51,9 @@ interface OperationsPanelProps {
     entityType?: SovdResourceEntityType;
 }
 
-/**
- * Get badge color for operation kind
- */
-function getKindBadgeVariant(kind: OperationKind): 'default' | 'secondary' {
-    return kind === 'service' ? 'default' : 'secondary';
-}
+/** A quiet chip beside an operation's name */
+const CHIP =
+    'inline-flex h-5 shrink-0 items-center rounded-full bg-canvas px-2 text-[11px] font-medium text-muted-foreground';
 
 /**
  * Get icon for operation kind
@@ -210,44 +208,38 @@ function OperationRow({
     }, []);
 
     return (
-        <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
-            <div className="rounded-lg border bg-card">
+        <Collapsible open={isExpanded} onOpenChange={setIsExpanded} className="bg-white">
+            <div>
                 {/* Operation header - simplified, no button */}
                 <CollapsibleTrigger asChild>
-                    <div className="flex items-center gap-3 p-3 cursor-pointer hover:bg-accent/30 transition-colors">
-                        <KindIcon className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <div className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition-colors hover:bg-canvas">
+                        <KindIcon className="w-4 h-4 text-faint shrink-0" />
 
                         <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                                <span className="font-medium text-sm truncate">{operation.name}</span>
-                                <Badge variant={getKindBadgeVariant(operation.kind)} className="shrink-0">
-                                    {operation.kind}
-                                </Badge>
-                                {!hasInputFields && (
-                                    <Badge variant="outline" className="shrink-0 text-xs">
-                                        no params
-                                    </Badge>
-                                )}
+                            <div className="flex items-center gap-1.5">
+                                <span className="mr-0.5 truncate font-mono text-[13px] font-medium text-foreground">
+                                    {operation.name}
+                                </span>
+                                <span className={CHIP}>{operation.kind}</span>
+                                {!hasInputFields && <span className={CHIP}>no params</span>}
                                 {history.length > 0 && (
-                                    <Badge variant="secondary" className="shrink-0 text-xs">
+                                    <span className={cn(CHIP, 'bg-state-fixed-bg text-state-fixed-text')}>
                                         {history.length} call{history.length > 1 ? 's' : ''}
-                                    </Badge>
+                                    </span>
                                 )}
                             </div>
-                            <p className="text-xs text-muted-foreground truncate">{operation.type}</p>
+                            <p className="text-xs text-faint truncate">{operation.type}</p>
                         </div>
 
-                        {isExpanded ? (
-                            <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                        ) : (
-                            <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                        )}
+                        <ChevronDown
+                            className={cn('w-4 h-4 text-faint transition-transform', isExpanded && 'rotate-180')}
+                        />
                     </div>
                 </CollapsibleTrigger>
 
                 {/* Expanded content */}
                 <CollapsibleContent>
-                    <div className="px-3 pb-3 space-y-3 border-t pt-3">
+                    <div className="space-y-3 border-t border-hairline bg-canvas/50 px-4 py-4">
                         {/* Input section - Form or JSON */}
                         {hasInputFields ? (
                             <div>
@@ -256,31 +248,19 @@ function OperationRow({
                                         {operation.kind === 'service' ? 'Request' : 'Goal'}
                                     </label>
                                     {hasSchema && (
-                                        <div className="flex items-center gap-1">
-                                            <Button
-                                                variant={useFormView ? 'secondary' : 'ghost'}
-                                                size="sm"
-                                                className="h-6 px-2"
-                                                onClick={() => setUseFormView(true)}
-                                            >
-                                                <FormInput className="w-3 h-3 mr-1" />
-                                                Form
-                                            </Button>
-                                            <Button
-                                                variant={!useFormView ? 'secondary' : 'ghost'}
-                                                size="sm"
-                                                className="h-6 px-2"
-                                                onClick={() => setUseFormView(false)}
-                                            >
-                                                <FileJson className="w-3 h-3 mr-1" />
-                                                JSON
-                                            </Button>
-                                        </div>
+                                        <SegmentedSwitch
+                                            options={[
+                                                { value: 'form', label: 'Form', icon: FormInput },
+                                                { value: 'json', label: 'JSON', icon: FileJson },
+                                            ]}
+                                            value={useFormView ? 'form' : 'json'}
+                                            onChange={(view) => setUseFormView(view === 'form')}
+                                        />
                                     )}
                                 </div>
 
                                 {useFormView && hasSchema && inputSchema ? (
-                                    <div className="bg-muted/30 p-3 rounded-md space-y-3">
+                                    <div className="space-y-3 rounded-lg bg-white p-3 ring-1 ring-graphite/8">
                                         <SchemaForm schema={inputSchema} value={formData} onChange={handleFormChange} />
                                         {/* Invoke button inside form */}
                                         <Button
@@ -307,7 +287,10 @@ function OperationRow({
                                                 setJsonError(null); // Clear error on change
                                             }}
                                             placeholder="{}"
-                                            className={`font-mono text-sm min-h-[80px] ${jsonError ? 'border-destructive' : ''}`}
+                                            className={cn(
+                                                'min-h-[80px] border-graphite/12 bg-white font-mono text-[13px]',
+                                                jsonError && 'border-destructive'
+                                            )}
                                         />
                                         {jsonError && (
                                             <div className="flex items-center gap-2 text-xs text-destructive">
@@ -336,7 +319,7 @@ function OperationRow({
                         ) : (
                             /* No params - just show button */
                             <div className="space-y-2">
-                                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 p-2 rounded">
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                     <AlertCircle className="w-3 h-3" />
                                     This {operation.kind} takes no parameters
                                 </div>
@@ -393,12 +376,11 @@ function OperationRow({
                                         {history.map((entry, idx) => (
                                             <div key={entry.id} className="relative">
                                                 {idx === 0 && (
-                                                    <Badge
-                                                        variant="outline"
-                                                        className="absolute -top-1 -right-1 text-[10px] z-10"
+                                                    <span
+                                                        className={cn(CHIP, 'absolute -top-1 -right-1 z-10 bg-white')}
                                                     >
                                                         latest
-                                                    </Badge>
+                                                    </span>
                                                 )}
                                                 <div className="text-[10px] text-muted-foreground mb-1">
                                                     {entry.timestamp.toLocaleTimeString()}
@@ -426,7 +408,7 @@ function OperationRow({
 
                 {/* Action status monitoring - OUTSIDE CollapsibleContent to keep polling active when collapsed */}
                 {latestExecutionId && operation.kind === 'action' && (
-                    <div className="px-3 pb-3">
+                    <div className="px-4 pb-3">
                         <ActionStatusPanel executionId={latestExecutionId} />
                     </div>
                 )}
@@ -468,85 +450,65 @@ export function OperationsPanel({ entityId, highlightOperation, entityType = 'co
 
     if (isLoadingOperations && entityOperations.length === 0) {
         return (
-            <Card>
-                <CardContent className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                </CardContent>
-            </Card>
+            <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
         );
     }
 
-    return (
-        <Card>
-            <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <Zap className="w-5 h-5 text-muted-foreground" />
-                        <CardTitle className="text-base">Operations</CardTitle>
-                        <span className="text-xs text-muted-foreground">
-                            ({services.length} services, {actions.length} actions)
-                        </span>
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={isLoadingOperations}>
-                        <RefreshCw className={`w-4 h-4 ${isLoadingOperations ? 'animate-spin' : ''}`} />
-                    </Button>
-                </div>
-            </CardHeader>
-            <CardContent>
-                {entityOperations.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                        <Zap className="w-10 h-10 mb-3 opacity-30" />
-                        <p className="text-sm font-medium">No operations available</p>
-                        <p className="text-xs mt-1">This entity has no services or actions</p>
-                    </div>
-                ) : (
-                    <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
-                        {/* Services section */}
-                        {services.length > 0 && (
-                            <div className="space-y-2">
-                                <h4 className="text-sm font-medium text-muted-foreground flex items-center gap-2 sticky top-0 bg-card py-1 z-10">
-                                    <Zap className="w-4 h-4" />
-                                    Services
-                                </h4>
-                                <div className="space-y-2">
-                                    {services.map((op) => (
-                                        <OperationRow
-                                            key={op.name}
-                                            operation={op}
-                                            entityId={entityId}
-                                            onInvoke={handleInvoke}
-                                            defaultExpanded={op.name === highlightOperation}
-                                            entityType={entityType}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        )}
+    const sections = [
+        { label: 'Services', icon: Zap, items: services },
+        { label: 'Actions', icon: Clock, items: actions },
+    ].filter((section) => section.items.length > 0);
 
-                        {/* Actions section */}
-                        {actions.length > 0 && (
-                            <div className="space-y-2">
-                                <h4 className="text-sm font-medium text-muted-foreground flex items-center gap-2 sticky top-0 bg-card py-1 z-10">
-                                    <Clock className="w-4 h-4" />
-                                    Actions
-                                </h4>
-                                <div className="space-y-2">
-                                    {actions.map((op) => (
-                                        <OperationRow
-                                            key={op.name}
-                                            operation={op}
-                                            entityId={entityId}
-                                            onInvoke={handleInvoke}
-                                            defaultExpanded={op.name === highlightOperation}
-                                            entityType={entityType}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </CardContent>
-        </Card>
+    // The tab says these are operations: here how many of each, and a refresh
+    return (
+        <section className="space-y-3">
+            <div className="flex items-center gap-1.5">
+                <span className="text-xs text-faint">
+                    {services.length} services, {actions.length} actions
+                </span>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto size-8 text-muted-foreground"
+                    onClick={handleRefresh}
+                    disabled={isLoadingOperations}
+                    title="Refresh operations"
+                >
+                    <RefreshCw className={`w-4 h-4 ${isLoadingOperations ? 'animate-spin' : ''}`} />
+                </Button>
+            </div>
+            {entityOperations.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                    <Zap className="w-10 h-10 mb-3 opacity-30" />
+                    <p className="text-sm font-medium">No operations available</p>
+                    <p className="text-xs mt-1">This entity has no services or actions</p>
+                </div>
+            ) : (
+                <div className="space-y-5">
+                    {sections.map(({ label, icon: Icon, items }) => (
+                        <div key={label} className="space-y-2">
+                            <h4 className="flex items-center gap-2 font-sans text-[13px] font-semibold tracking-normal text-foreground">
+                                <Icon className="w-4 h-4 text-faint" />
+                                {label}
+                            </h4>
+                            <RowGrid columns={1}>
+                                {items.map((op) => (
+                                    <OperationRow
+                                        key={op.name}
+                                        operation={op}
+                                        entityId={entityId}
+                                        onInvoke={handleInvoke}
+                                        defaultExpanded={op.name === highlightOperation}
+                                        entityType={entityType}
+                                    />
+                                ))}
+                            </RowGrid>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </section>
     );
 }

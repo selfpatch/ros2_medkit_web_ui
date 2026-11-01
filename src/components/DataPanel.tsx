@@ -1,8 +1,6 @@
 import { useState } from 'react';
-import { Radio, RefreshCw, Copy, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Radio, Copy, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { JsonFormViewer } from '@/components/JsonFormViewer';
 import { TopicPublishForm } from '@/components/TopicPublishForm';
@@ -17,11 +15,11 @@ interface DataPanelProps {
     entityId: string;
     /** Entity type for API endpoint */
     entityType?: SovdResourceEntityType;
-    /** Whether a refresh is in progress */
-    isRefreshing?: boolean;
-    /** Callback when refresh is requested */
-    onRefresh?: () => void;
 }
+
+/** A quiet chip for how many publish and subscribe */
+const ENDPOINT_CHIP =
+    'inline-flex h-5 items-center rounded-full bg-white px-2 text-[11px] font-medium text-muted-foreground ring-1 ring-graphite/8';
 
 /**
  * Format QoS profile for display
@@ -91,9 +89,9 @@ function ConnectionStatus({ topic }: { topic: ComponentTopic }) {
     const qosCheck = checkQosCompatibility(topic.publishers || [], topic.subscribers || []);
 
     const statusIcon = hasData ? (
-        <CheckCircle2 className="w-4 h-4 text-green-500" />
+        <CheckCircle2 className="w-4 h-4 text-state-ok" />
     ) : reportsEndpoints && pubCount > 0 ? (
-        <AlertTriangle className="w-4 h-4 text-amber-500" />
+        <AlertTriangle className="w-4 h-4 text-state-warn" />
     ) : (
         <XCircle className="w-4 h-4 text-muted-foreground" />
     );
@@ -107,24 +105,16 @@ function ConnectionStatus({ topic }: { topic: ComponentTopic }) {
             : 'No publishers';
 
     return (
-        <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+        <div className="rounded-lg bg-canvas px-3 py-2.5 space-y-3">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     {statusIcon}
-                    <span className="text-sm font-medium">{statusText}</span>
+                    <span className="text-sm font-medium text-foreground">{statusText}</span>
                 </div>
                 {reportsEndpoints && (
-                    <div className="flex items-center gap-4 text-sm">
-                        <span className="flex items-center gap-1">
-                            <Badge variant="outline" className="text-xs">
-                                {pubCount} pub
-                            </Badge>
-                        </span>
-                        <span className="flex items-center gap-1">
-                            <Badge variant="outline" className="text-xs">
-                                {subCount} sub
-                            </Badge>
-                        </span>
+                    <div className="flex items-center gap-1.5">
+                        <span className={ENDPOINT_CHIP}>{pubCount} pub</span>
+                        <span className={ENDPOINT_CHIP}>{subCount} sub</span>
                     </div>
                 )}
             </div>
@@ -134,7 +124,9 @@ function ConnectionStatus({ topic }: { topic: ComponentTopic }) {
                 <div
                     className={cn(
                         'flex items-start gap-2 text-xs p-2 rounded',
-                        qosCheck.compatible ? 'bg-amber-500/10 text-amber-600' : 'bg-destructive/10 text-destructive'
+                        qosCheck.compatible
+                            ? 'bg-state-warn-bg text-state-warn-text'
+                            : 'bg-state-fault-bg text-state-fault-text'
                     )}
                 >
                     <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -171,7 +163,7 @@ function QosDetails({ publishers, subscribers }: { publishers?: TopicEndpoint[];
                             {publishers.map((pub, idx) => (
                                 <div
                                     key={idx}
-                                    className="flex items-center justify-between text-xs p-1.5 rounded bg-muted/50"
+                                    className="flex items-center justify-between gap-3 rounded-md bg-canvas px-2 py-1.5 text-xs"
                                 >
                                     <span className="font-mono truncate">{pub.fqn}</span>
                                     <span className="text-muted-foreground">{formatQos(pub.qos)}</span>
@@ -187,7 +179,7 @@ function QosDetails({ publishers, subscribers }: { publishers?: TopicEndpoint[];
                             {subscribers.map((sub, idx) => (
                                 <div
                                     key={idx}
-                                    className="flex items-center justify-between text-xs p-1.5 rounded bg-muted/50"
+                                    className="flex items-center justify-between gap-3 rounded-md bg-canvas px-2 py-1.5 text-xs"
                                 >
                                     <span className="font-mono truncate">{sub.fqn}</span>
                                     <span className="text-muted-foreground">{formatQos(sub.qos)}</span>
@@ -204,13 +196,7 @@ function QosDetails({ publishers, subscribers }: { publishers?: TopicEndpoint[];
 /**
  * DataPanel - Full diagnostic view for a data item
  */
-export function DataPanel({
-    topic,
-    entityId,
-    entityType = 'components',
-    isRefreshing = false,
-    onRefresh,
-}: DataPanelProps) {
+export function DataPanel({ topic, entityId, entityType = 'components' }: DataPanelProps) {
     // Use nullish coalescing so legitimate falsy scalars (0, false, '') are
     // preserved as the initial publish value instead of collapsing to `{}`.
     const [publishValue, setPublishValue] = useState<unknown>(topic.type_info?.default_value ?? topic.data ?? {});
@@ -243,82 +229,68 @@ export function DataPanel({
         }
     };
 
+    // The topic's name, kind and Refresh are on the toolbar line above
     return (
-        <Card>
-            <CardHeader>
-                <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                        <Radio className={cn('w-5 h-5 shrink-0', hasData ? 'text-primary' : 'text-muted-foreground')} />
-                        <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <CardTitle className="text-base">{topic.topic}</CardTitle>
-                                {topic.type && (
-                                    <span className="text-xs text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">
-                                        {topic.type}
-                                    </span>
-                                )}
-                            </div>
-                            <CardDescription className="text-xs mt-1">Data diagnostics and access</CardDescription>
-                        </div>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={onRefresh} disabled={isRefreshing}>
-                        <RefreshCw className={cn('w-4 h-4 mr-2', isRefreshing && 'animate-spin')} />
-                        Refresh
-                    </Button>
-                </div>
-            </CardHeader>
+        <div className="space-y-4">
+            <p className="flex flex-wrap items-center gap-x-2 text-xs text-faint">
+                <Radio className={cn('w-3.5 h-3.5 shrink-0', hasData ? 'text-state-ok' : 'text-faint')} />
+                <span>Data diagnostics and access</span>
+                {topic.type && <span className="font-mono text-muted-foreground">{topic.type}</span>}
+            </p>
 
-            <CardContent className="space-y-4">
-                {/* Connection Status */}
-                <ConnectionStatus topic={topic} />
+            {/* Connection Status */}
+            <ConnectionStatus topic={topic} />
 
-                {/* QoS Details (collapsible) */}
-                <QosDetails publishers={topic.publishers} subscribers={topic.subscribers} />
+            {/* QoS Details (collapsible) */}
+            <QosDetails publishers={topic.publishers} subscribers={topic.subscribers} />
 
-                {/* Last Received Value */}
-                <div className="space-y-2" role="region" aria-label="Last received value">
-                    <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">Last Received Value</span>
-                        {hasData && (
-                            <Button variant="ghost" size="sm" onClick={handleCopyFromLast} className="h-7 text-xs">
-                                <Copy className="w-3 h-3 mr-1" />
-                                Copy to Publish
-                            </Button>
-                        )}
-                    </div>
-                    {hasData ? (
-                        <JsonFormViewer
-                            data={topic.data}
-                            schema={topic.type_info?.schema}
-                            editable={false}
-                            timestamp={topic.timestamp}
-                        />
-                    ) : (
-                        <div className="rounded-lg border bg-muted/30 p-4 text-center">
-                            <p className="text-sm text-muted-foreground">
-                                {topic.status === 'metadata_only'
-                                    ? 'No data received yet. Schema available for publishing.'
-                                    : 'Topic exists but is not publishing messages.'}
-                            </p>
-                        </div>
+            {/* Last Received Value */}
+            <section className="space-y-2" role="region" aria-label="Last received value">
+                <div className="flex items-center justify-between">
+                    <h3 className="font-sans text-[13px] font-semibold tracking-normal text-foreground">
+                        Last Received Value
+                    </h3>
+                    {hasData && (
+                        <Button variant="ghost" size="sm" onClick={handleCopyFromLast} className="h-7 px-2 text-xs">
+                            <Copy className="w-3 h-3 mr-1" />
+                            Copy to Publish
+                        </Button>
                     )}
                 </div>
-
-                {/* Write/Publish Section */}
-                {canWrite && (
-                    <div className="border-t pt-4 space-y-2">
-                        <span className="text-sm font-medium">{writeSectionLabel}</span>
-                        <TopicPublishForm
-                            topic={topic}
-                            entityId={entityId}
-                            entityType={entityType}
-                            initialValue={publishValue}
-                            onValueChange={setPublishValue}
-                        />
+                {hasData ? (
+                    <JsonFormViewer
+                        data={topic.data}
+                        schema={topic.type_info?.schema}
+                        editable={false}
+                        timestamp={topic.timestamp}
+                    />
+                ) : (
+                    <div className="rounded-lg bg-canvas p-4 text-center">
+                        <p className="text-sm text-muted-foreground">
+                            {topic.status === 'metadata_only'
+                                ? 'No data received yet. Schema available for publishing.'
+                                : 'Topic exists but is not publishing messages.'}
+                        </p>
                     </div>
                 )}
-            </CardContent>
-        </Card>
+            </section>
+
+            {/* Write/Publish Section */}
+            {canWrite && (
+                <section className="space-y-2 border-t border-hairline pt-4">
+                    <h3 className="font-sans text-[13px] font-semibold tracking-normal text-foreground">
+                        {writeSectionLabel}
+                    </h3>
+                    <TopicPublishForm
+                        topic={topic}
+                        entityId={entityId}
+                        entityType={entityType}
+                        initialValue={publishValue}
+                        onValueChange={setPublishValue}
+                    />
+                </section>
+            )}
+        </div>
     );
 }
 

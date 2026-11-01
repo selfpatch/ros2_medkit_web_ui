@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
 import { ChevronDown, ChevronRight, Code, FormInput } from 'lucide-react';
+import { SegmentedSwitch } from '@/components/SegmentedSwitch';
 import { cn } from '@/lib/utils';
 import type { TopicSchema } from '@/lib/types';
 import { SchemaForm } from './SchemaFormField';
@@ -57,11 +57,11 @@ function ReadonlyField({ name, value, depth = 0 }: ReadonlyFieldProps) {
                     ) : value === undefined ? (
                         <span className="text-muted-foreground italic">undefined</span>
                     ) : typeof value === 'boolean' ? (
-                        <span className={value ? 'text-green-600' : 'text-red-600'}>{String(value)}</span>
+                        <span className="text-foreground">{String(value)}</span>
                     ) : typeof value === 'number' ? (
-                        <span className="text-blue-600">{value}</span>
+                        <span className="text-foreground">{value}</span>
                     ) : typeof value === 'string' ? (
-                        <span className="text-amber-600">"{value}"</span>
+                        <span className="text-foreground">"{value}"</span>
                     ) : (
                         String(value)
                     )}
@@ -234,28 +234,17 @@ export function JsonFormViewer({
     return (
         <div className={cn('rounded-lg border bg-card', className)}>
             {/* Header with label and mode toggle */}
-            <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/50">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-hairline bg-canvas">
                 {label && <span className="text-sm font-medium">{label}</span>}
-                <div className="flex items-center gap-1 ml-auto">
-                    <Button
-                        variant={mode === 'json' ? 'secondary' : 'ghost'}
-                        size="sm"
-                        onClick={() => setMode('json')}
-                        className="h-7 px-2"
-                    >
-                        <Code className="h-3.5 w-3.5 mr-1" />
-                        JSON
-                    </Button>
-                    <Button
-                        variant={mode === 'form' ? 'secondary' : 'ghost'}
-                        size="sm"
-                        onClick={() => setMode('form')}
-                        className="h-7 px-2"
-                    >
-                        <FormInput className="h-3.5 w-3.5 mr-1" />
-                        Form
-                    </Button>
-                </div>
+                <SegmentedSwitch
+                    className="ml-auto"
+                    options={[
+                        { value: 'json', label: 'JSON', icon: Code },
+                        { value: 'form', label: 'Form', icon: FormInput },
+                    ]}
+                    value={mode}
+                    onChange={setMode}
+                />
             </div>
 
             {/* Content */}

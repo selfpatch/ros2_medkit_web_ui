@@ -35,16 +35,16 @@ function toneForStatus(status: string): ExecutionTone {
 }
 
 const TONE_BADGE_CLASSES: Record<ExecutionTone, string> = {
-    ok: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-    error: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
-    stopped: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+    ok: 'bg-green-100 text-green-800',
+    error: 'bg-red-100 text-red-800',
+    stopped: 'bg-amber-100 text-amber-800',
     neutral: 'bg-muted text-muted-foreground',
 };
 
 const TONE_TEXT_CLASSES: Record<ExecutionTone, string> = {
-    ok: 'text-green-700 dark:text-green-400',
-    error: 'text-red-600 dark:text-red-400',
-    stopped: 'text-amber-700 dark:text-amber-400',
+    ok: 'text-green-700',
+    error: 'text-red-600',
+    stopped: 'text-amber-700',
     neutral: 'text-muted-foreground',
 };
 

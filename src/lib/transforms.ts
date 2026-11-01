@@ -143,6 +143,8 @@ export interface RawFaultItem {
      *  `transformFault` normalises all of these to an ISO timestamp. */
     first_occurred?: number | string | null;
     last_occurred?: number | string | null;
+    /** When the fault last passed (healed), in the same forms as the times above. */
+    last_passed?: number | string | null;
     occurrence_count?: number;
     reporting_sources?: string[];
     /** Entity type if provided by the gateway (not currently included in
@@ -263,6 +265,7 @@ export function transformFault(
         parameters: {
             occurrence_count: apiFault.occurrence_count,
             last_occurred: apiFault.last_occurred,
+            last_passed: apiFault.last_passed,
             reporting_sources: apiFault.reporting_sources,
         },
     };

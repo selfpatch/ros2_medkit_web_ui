@@ -4,6 +4,7 @@ import { Database, Loader2, MessageSquare } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { DataValuePreview } from '@/components/DataValuePreview';
+import { ResourceTabBar } from '@/components/ResourceTabBar';
 import { useAppStore } from '@/lib/store';
 import { RESOURCE_TABS, renderResourceTabContent, type ResourceTabId } from '@/components/ResourceTabs';
 import type { SovdResourceEntityType } from '@/lib/types';
@@ -177,41 +178,18 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
 
     return (
         <div className="space-y-4">
-            {/* Tab Navigation */}
-            <div className="flex gap-1 p-1 bg-muted rounded-lg overflow-x-auto">
-                {RESOURCE_TABS.map((tab) => {
-                    const TabIcon = tab.icon;
-                    const isActive = activeTab === tab.id;
-                    let count = 0;
-                    if (tab.id === 'data') count = data.length;
-                    if (tab.id === 'operations') count = operations.length;
-                    if (tab.id === 'configurations') count = storeConfigurations.get(entityId)?.length || 0;
-                    if (tab.id === 'faults') count = faults.length;
-
-                    return (
-                        <button
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
-                            className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
-                                isActive
-                                    ? 'bg-background text-foreground shadow-sm'
-                                    : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
-                            }`}
-                        >
-                            <TabIcon className="w-4 h-4" />
-                            {tab.label}
-                            {count > 0 && (
-                                <Badge
-                                    variant={isActive ? 'default' : 'secondary'}
-                                    className={`ml-1 h-5 px-1.5 ${tab.id === 'faults' && count > 0 ? 'bg-red-500 text-white' : ''}`}
-                                >
-                                    {count}
-                                </Badge>
-                            )}
-                        </button>
-                    );
-                })}
-            </div>
+            <ResourceTabBar
+                tabs={RESOURCE_TABS}
+                activeTab={activeTab}
+                onTabChange={setActiveTab}
+                counts={{
+                    data: data.length,
+                    operations: operations.length,
+                    configurations: storeConfigurations.get(entityId)?.length || 0,
+                    faults: faults.length,
+                }}
+                alarmTab="faults"
+            />
 
             {isLoading ? (
                 <Card>

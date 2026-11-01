@@ -64,6 +64,26 @@ describe('SnapshotCard', () => {
         expect(screen.getByRole('button')).toBeInTheDocument(); // Download button
     });
 
+    it('shows a text freeze frame by its topic, with its text laid out', () => {
+        const status: FreezeFrameSnapshot = {
+            type: 'freeze_frame',
+            name: 'status',
+            data: '{"mode": "held", "free_width": 1.4}',
+            'x-medkit': {
+                topic: '/navigation/status',
+                message_type: 'std_msgs/msg/String',
+                full_data: { data: '{"mode": "held", "free_width": 1.4}' },
+                captured_at: '2026-11-01T20:09:41Z',
+            },
+        };
+
+        renderWithTooltip(<SnapshotCard snapshot={status} index={2} />);
+
+        expect(screen.getByText('/navigation/status')).toBeInTheDocument();
+        expect(screen.getByText('Data (text)')).toBeInTheDocument();
+        expect(screen.getByText(/"mode": "held"/)).toBeInTheDocument();
+    });
+
     it('displays captured_at from x-medkit', () => {
         const snapshot: FreezeFrameSnapshot = {
             type: 'freeze_frame',

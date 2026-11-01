@@ -80,38 +80,12 @@ function getEntityIcon(type: string, isExpanded?: boolean) {
 }
 
 /**
- * Get color class for entity type
+ * Icon colour for a tree node. Only a fault carries a colour: the kinds are told
+ * apart by their icons and type labels, and colour stays for states.
  */
 function getEntityColor(type: string, isSelected?: boolean): string {
-    if (isSelected) return 'text-primary';
-
-    switch (type.toLowerCase()) {
-        case 'area':
-            return 'text-cyan-500';
-        case 'subarea':
-            return 'text-cyan-400';
-        case 'component':
-        case 'ecu':
-            return 'text-indigo-500';
-        case 'subcomponent':
-            return 'text-indigo-400';
-        case 'app':
-            return 'text-emerald-500';
-        case 'function':
-            return 'text-violet-500';
-        case 'server':
-            return 'text-primary';
-        case 'topic':
-            return 'text-blue-400';
-        case 'service':
-            return 'text-amber-400';
-        case 'action':
-            return 'text-orange-400';
-        case 'fault':
-            return 'text-red-400';
-        default:
-            return 'text-muted-foreground';
-    }
+    if (type.toLowerCase() === 'fault') return 'text-state-fault';
+    return isSelected ? 'text-foreground' : 'text-muted-foreground';
 }
 
 /**
@@ -221,9 +195,9 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
                 aria-label={`${node.type} ${node.name}`}
                 tabIndex={0}
                 className={cn(
-                    'flex items-center gap-1 py-1.5 px-2 rounded-md cursor-pointer hover:bg-accent/50 transition-colors',
-                    'focus:outline-none focus:ring-2 focus:ring-primary/50',
-                    isSelected && 'bg-primary/10 text-primary font-medium'
+                    'flex items-center gap-1 py-1.5 px-2 rounded-lg cursor-pointer text-body transition-colors',
+                    'outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
+                    isSelected ? 'raised text-foreground font-medium' : 'hover:bg-graphite/5 hover:text-foreground'
                 )}
                 style={{ paddingLeft: `${depth * 16 + 8}px` }}
                 onClick={handleSelect}
@@ -244,7 +218,7 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
                     <button
                         aria-label={isExpanded ? 'Collapse' : 'Expand'}
                         className={cn(
-                            'p-0.5 rounded hover:bg-primary/10 transition-transform',
+                            'p-0.5 rounded hover:bg-graphite/8 transition-transform',
                             !hasChildren && 'invisible'
                         )}
                     >
@@ -255,7 +229,7 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
                                 className={cn(
                                     'w-4 h-4 text-muted-foreground transition-transform',
                                     isExpanded && 'rotate-90',
-                                    isSelected && 'text-primary'
+                                    isSelected && 'text-foreground'
                                 )}
                             />
                         )}
@@ -304,8 +278,8 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
                 {/* Type label badge */}
                 <span
                     className={cn(
-                        'text-xs shrink-0 px-1 py-0.5 rounded',
-                        isSelected ? 'text-primary/70' : 'text-muted-foreground bg-muted/50'
+                        'text-[11px] shrink-0 px-1.5 py-0.5 rounded-md text-muted-foreground',
+                        isSelected ? 'bg-canvas' : 'bg-graphite/5'
                     )}
                 >
                     {typeof node.type === 'string' ? node.type : 'unknown'}

@@ -1,22 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/shallow';
-import {
-    Copy,
-    Radio,
-    ChevronRight,
-    ArrowUp,
-    ArrowDown,
-    Database,
-    Settings,
-    RefreshCw,
-    Box,
-    Layers,
-    Cpu,
-    GitBranch,
-    Home,
-    Server,
-} from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Copy, Radio, ChevronRight, ArrowUp, ArrowDown, Database, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/EmptyState';
@@ -32,6 +16,10 @@ import { ServerInfoPanel } from '@/components/ServerInfoPanel';
 import { FaultsDashboard } from '@/components/FaultsDashboard';
 import { UpdatesDashboard } from '@/components/UpdatesDashboard';
 import { EntityStatusControl } from '@/components/EntityStatusControl';
+import { EntityToolbar } from '@/components/EntityToolbar';
+import { SidebarLine } from '@/components/SidebarToggle';
+import { ResourceTabBar } from '@/components/ResourceTabBar';
+import { RowGrid } from '@/components/RowGrid';
 import { useAppStore, findNode, type AppState } from '@/lib/store';
 import type { ComponentTopic, Parameter, SovdResourceEntityType } from '@/lib/types';
 
@@ -63,28 +51,6 @@ function getEntityTypeForApi(entityType: string | undefined): SovdResourceEntity
             return 'areas';
         default:
             return 'components'; // default fallback
-    }
-}
-
-/**
- * Get icon for entity type to display in breadcrumbs
- */
-function getBreadcrumbIcon(type: string) {
-    switch (type) {
-        case 'server':
-            return <Server className="w-3 h-3" />;
-        case 'area':
-        case 'subarea':
-            return <Layers className="w-3 h-3" />;
-        case 'component':
-        case 'subcomponent':
-            return <Box className="w-3 h-3" />;
-        case 'app':
-            return <Cpu className="w-3 h-3" />;
-        case 'function':
-            return <GitBranch className="w-3 h-3" />;
-        default:
-            return null;
     }
 }
 
@@ -145,6 +111,34 @@ interface DataTabContentProps {
     topicsData: ComponentTopic[] | null;
 }
 
+/** A data row's narrowest column: its topic and message type read whole */
+const DATA_COLUMN = '20rem';
+
+function DataRow({ name, type, onSelect }: { name: string; type?: string; onSelect: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onSelect}
+            className="group flex min-w-0 items-center gap-3 bg-white px-4 py-2.5 text-left outline-none transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+        >
+            <Radio className="size-4 shrink-0 text-faint" aria-hidden />
+            <span className="min-w-0 flex-1">
+                <span className="block truncate font-mono text-[13px] text-foreground">{name}</span>
+                {type !== undefined && <span className="block truncate text-xs text-faint">{type}</span>}
+            </span>
+            <ChevronRight
+                className="size-4 shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100"
+                aria-hidden
+            />
+        </button>
+    );
+}
+
+function topicPathOf(selectedPath: string, topic: string): string {
+    const cleanName = topic.startsWith('/') ? topic.slice(1) : topic;
+    return `${selectedPath}/data/${encodeURIComponent(cleanName)}`;
+}
+
 function DataTabContent({
     selectedPath,
     selectedEntity,
@@ -154,151 +148,64 @@ function DataTabContent({
 }: DataTabContentProps) {
     if (topicsData === null) {
         return (
-            <Card>
-                <CardHeader className="pb-3">
-                    <div className="flex items-center gap-2">
-                        <Database className="w-5 h-5 text-muted-foreground" />
-                        <CardTitle className="text-base">Data</CardTitle>
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid gap-3 md:grid-cols-2">
-                        {[0, 1, 2, 3].map((i) => (
-                            <div key={i} className="h-14 rounded-lg border bg-muted/30 animate-pulse" />
-                        ))}
-                    </div>
-                </CardContent>
-            </Card>
+            <RowGrid aria-busy="true" minColumn={DATA_COLUMN}>
+                {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="h-[52px] animate-pulse bg-white" />
+                ))}
+            </RowGrid>
         );
     }
 
     // topicsData is loaded at this point. Prefer it over the entity-level fallback
     // so we never surface stale `selectedEntity.topics` when the fresh fetch is empty.
     const topics = topicsData.length > 0 ? topicsData : (selectedEntity.topics as ComponentTopic[] | undefined) || [];
-    const hasTopics = topics.length > 0;
 
-    if (hasTopics) {
+    if (topics.length > 0) {
         return (
-            <Card>
-                <CardHeader className="pb-3">
-                    <div className="flex items-center gap-2">
-                        <Database className="w-5 h-5 text-muted-foreground" />
-                        <CardTitle className="text-base">Data</CardTitle>
-                        <span className="text-xs text-muted-foreground">({topics.length} items)</span>
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid gap-3 md:grid-cols-2 max-h-[500px] overflow-y-auto pr-1">
-                        {topics.map((topic) => {
-                            const cleanName = topic.topic.startsWith('/') ? topic.topic.slice(1) : topic.topic;
-                            const encodedName = encodeURIComponent(cleanName);
-                            const topicPath = `${selectedPath}/data/${encodedName}`;
-
-                            return (
-                                <div
-                                    key={topic.uniqueKey || topic.topic}
-                                    className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/30 cursor-pointer group transition-colors"
-                                    onClick={() => selectEntity(topicPath)}
-                                >
-                                    <Radio className="w-4 h-4 text-muted-foreground shrink-0" />
-                                    <div className="min-w-0 flex-1">
-                                        <div className="font-medium truncate text-sm">{topic.topic}</div>
-                                        <div className="text-xs text-muted-foreground truncate">
-                                            {topic.type || 'Unknown Type'}
-                                        </div>
-                                    </div>
-                                    <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                                </div>
-                            );
-                        })}
-                    </div>
-                </CardContent>
-            </Card>
+            <RowGrid minColumn={DATA_COLUMN}>
+                {topics.map((topic) => (
+                    <DataRow
+                        key={topic.uniqueKey || topic.topic}
+                        name={topic.topic}
+                        type={topic.type || 'Unknown Type'}
+                        onSelect={() => selectEntity(topicPathOf(selectedPath, topic.topic))}
+                    />
+                ))}
+            </RowGrid>
         );
     }
 
     if (hasTopicsInfo) {
         const topicsInfo = selectedEntity.topicsInfo as NonNullable<typeof selectedEntity.topicsInfo>;
+        const sections = [
+            { label: 'Publishes', icon: ArrowUp, items: topicsInfo.publishes },
+            { label: 'Subscribes', icon: ArrowDown, items: topicsInfo.subscribes },
+        ].filter((section) => section.items.length > 0);
         return (
-            <div className="space-y-4">
-                {/* Publishes Section */}
-                {topicsInfo.publishes.length > 0 && (
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <div className="flex items-center gap-2">
-                                <ArrowUp className="w-4 h-4 text-green-500" />
-                                <CardTitle className="text-base">Publishes</CardTitle>
-                                <Badge variant="secondary">{topicsInfo.publishes.length}</Badge>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="space-y-1 max-h-[300px] overflow-y-auto pr-1">
-                                {topicsInfo.publishes.map((topic: string) => {
-                                    const cleanName = topic.startsWith('/') ? topic.slice(1) : topic;
-                                    const encodedName = encodeURIComponent(cleanName);
-                                    const topicPath = `${selectedPath}/data/${encodedName}`;
-
-                                    return (
-                                        <div
-                                            key={topic}
-                                            className="flex items-center gap-2 p-2 rounded-md hover:bg-accent/50 cursor-pointer group"
-                                            onClick={() => selectEntity(topicPath)}
-                                        >
-                                            <Radio className="w-3 h-3 text-green-500" />
-                                            <span className="text-sm font-mono truncate flex-1">{topic}</span>
-                                            <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100" />
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-
-                {/* Subscribes Section */}
-                {topicsInfo.subscribes.length > 0 && (
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <div className="flex items-center gap-2">
-                                <ArrowDown className="w-4 h-4 text-blue-500" />
-                                <CardTitle className="text-base">Subscribes</CardTitle>
-                                <Badge variant="secondary">{topicsInfo.subscribes.length}</Badge>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="space-y-1 max-h-[300px] overflow-y-auto pr-1">
-                                {topicsInfo.subscribes.map((topic: string) => {
-                                    const cleanName = topic.startsWith('/') ? topic.slice(1) : topic;
-                                    const encodedName = encodeURIComponent(cleanName);
-                                    const topicPath = `${selectedPath}/data/${encodedName}`;
-
-                                    return (
-                                        <div
-                                            key={topic}
-                                            className="flex items-center gap-2 p-2 rounded-md hover:bg-accent/50 cursor-pointer group"
-                                            onClick={() => selectEntity(topicPath)}
-                                        >
-                                            <Radio className="w-3 h-3 text-blue-500" />
-                                            <span className="text-sm font-mono truncate flex-1">{topic}</span>
-                                            <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100" />
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
+            <div className="space-y-5">
+                {sections.map(({ label, icon: Icon, items }) => (
+                    <section key={label} className="space-y-2">
+                        <h3 className="flex items-center gap-2 font-sans text-[13px] font-semibold tracking-normal text-foreground">
+                            <Icon className="size-4 text-faint" aria-hidden />
+                            {label}
+                            <span className="text-xs font-normal tabular-nums text-faint">{items.length}</span>
+                        </h3>
+                        <RowGrid minColumn={DATA_COLUMN}>
+                            {items.map((topic: string) => (
+                                <DataRow
+                                    key={topic}
+                                    name={topic}
+                                    onSelect={() => selectEntity(topicPathOf(selectedPath, topic))}
+                                />
+                            ))}
+                        </RowGrid>
+                    </section>
+                ))}
             </div>
         );
     }
 
-    return (
-        <Card>
-            <CardContent className="pt-6">
-                <div className="text-center text-muted-foreground py-4">No data available for this component.</div>
-            </CardContent>
-        </Card>
-    );
+    return <p className="py-6 text-center text-sm text-muted-foreground">No data available for this component.</p>;
 }
 
 /**
@@ -317,7 +224,8 @@ function OperationDetailCard({ entity, entityId, entityType }: OperationDetailCa
 }
 
 /**
- * Parameter detail card
+ * Parameter detail: its type and whether it can be written, then the configuration
+ * with this parameter highlighted. Its name is the view's heading, in the toolbar.
  */
 interface ParameterDetailCardProps {
     entity: NonNullable<AppState['selectedEntity']>;
@@ -330,36 +238,20 @@ function ParameterDetailCard({ entity, entityId, entityType }: ParameterDetailCa
 
     if (!parameterData) {
         return (
-            <Card>
-                <CardContent className="pt-6">
-                    <p className="text-muted-foreground text-sm text-center">
-                        Parameter data not available. Select from the Configurations tab.
-                    </p>
-                </CardContent>
-            </Card>
+            <p className="py-6 text-center text-sm text-muted-foreground">
+                Parameter data not available. Select from the Configurations tab.
+            </p>
         );
     }
 
     return (
-        <Card>
-            <CardHeader>
-                <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-900">
-                        <Settings className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-                    </div>
-                    <div>
-                        <CardTitle className="text-lg">{entity.name}</CardTitle>
-                        <CardDescription className="flex items-center gap-2">
-                            <Badge variant="outline">{parameterData.type}</Badge>
-                            {parameterData.read_only && <Badge variant="secondary">Read-only</Badge>}
-                        </CardDescription>
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent>
-                <ConfigurationPanel entityId={entityId} highlightParam={entity.name} entityType={entityType} />
-            </CardContent>
-        </Card>
+        <div className="space-y-4">
+            <div className="flex items-center gap-2">
+                <Badge variant="outline">{parameterData.type}</Badge>
+                {parameterData.read_only && <Badge variant="secondary">Read-only</Badge>}
+            </div>
+            <ConfigurationPanel entityId={entityId} highlightParam={entity.name} entityType={entityType} />
+        </div>
     );
 }
 
@@ -523,19 +415,21 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
     // Not connected - show empty state
     if (!isConnected) {
         return (
-            <main className="flex-1 flex items-center justify-center bg-background">
-                <EmptyState type="no-connection" onAction={onConnectClick} />
+            <main className="flex-1 flex flex-col bg-background">
+                <SidebarLine />
+                <div className="flex flex-1 items-center justify-center">
+                    <EmptyState type="no-connection" onAction={onConnectClick} />
+                </div>
             </main>
         );
     }
 
     // Faults Dashboard view
     if (viewMode === 'faults-dashboard' && !selectedPath) {
+        // The dashboard draws its own toolbar line and page width
         return (
-            <main className="flex-1 overflow-y-auto p-6 bg-background">
-                <div className="max-w-4xl mx-auto">
-                    <FaultsDashboard />
-                </div>
+            <main className="flex-1 overflow-y-auto bg-background">
+                <FaultsDashboard />
             </main>
         );
     }
@@ -543,8 +437,9 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
     // Updates Dashboard view
     if (viewMode === 'updates-dashboard' && !selectedPath) {
         return (
-            <main className="flex-1 overflow-y-auto p-6 bg-background">
-                <div className="max-w-4xl mx-auto">
+            <main className="flex-1 overflow-y-auto bg-background">
+                <SidebarLine />
+                <div className="max-w-6xl p-6">
                     <UpdatesDashboard />
                 </div>
             </main>
@@ -554,8 +449,9 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
     // No selection - show server info
     if (!selectedPath) {
         return (
-            <main className="flex-1 overflow-y-auto p-6 bg-background">
-                <div className="max-w-4xl mx-auto">
+            <main className="flex-1 overflow-y-auto bg-background">
+                <SidebarLine />
+                <div className="max-w-6xl p-6">
                     <ServerInfoPanel />
                 </div>
             </main>
@@ -565,8 +461,9 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
     // Loading
     if (isLoadingDetails) {
         return (
-            <main className="flex-1 overflow-y-auto p-6 bg-background">
-                <div className="max-w-4xl mx-auto">
+            <main className="flex-1 overflow-y-auto bg-background">
+                <SidebarLine />
+                <div className="max-w-6xl p-6">
                     <EntityDetailSkeleton />
                 </div>
             </main>
@@ -642,118 +539,52 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
             // Otherwise keep default (components)
         }
 
-        // Get icon for entity type
-        const getEntityTypeIcon = () => {
-            switch (selectedEntity.type) {
-                case 'server':
-                    return <Server className="w-6 h-6 text-primary" />;
-                case 'area':
-                case 'subarea':
-                    return <Layers className="w-6 h-6 text-cyan-500" />;
-                case 'component':
-                case 'subcomponent':
-                    return <Box className="w-6 h-6 text-indigo-500" />;
-                case 'app':
-                    return <Cpu className="w-6 h-6 text-emerald-500" />;
-                case 'function':
-                    return <GitBranch className="w-6 h-6 text-violet-500" />;
-                default:
-                    return <Box className="w-6 h-6 text-primary" />;
-            }
-        };
-
-        // Get background color for entity type
-        const getEntityBgColor = () => {
-            switch (selectedEntity.type) {
-                case 'server':
-                    return 'bg-primary/10';
-                case 'area':
-                case 'subarea':
-                    return 'bg-cyan-100 dark:bg-cyan-900';
-                case 'component':
-                case 'subcomponent':
-                    return 'bg-indigo-100 dark:bg-indigo-900';
-                case 'app':
-                    return 'bg-emerald-100 dark:bg-emerald-900';
-                case 'function':
-                    return 'bg-violet-100 dark:bg-violet-900';
-                default:
-                    return 'bg-primary/10';
-            }
-        };
-
-        // Build breadcrumb from path. Prefer the real entity type from the
-        // loaded tree so nested types (subarea / subcomponent) and deeper
-        // hierarchies get the correct icon; fall back to position-based
-        // inference for segments not present in the tree.
-        const breadcrumbs = pathParts.map((part, index) => {
-            const breadcrumbPath = '/' + pathParts.slice(0, index + 1).join('/');
-            // Decode URL-encoded parts for display
-            const decodedPart = decodeURIComponent(part);
-            let type: string;
-            if (part === 'server') {
-                type = 'server';
-            } else if (['data', 'operations', 'configurations', 'faults', 'resources'].includes(part)) {
-                type = 'folder';
-            } else {
-                const node = findNode(rootEntities, breadcrumbPath);
-                if (node) {
-                    type = node.type;
-                } else if (index === 1) {
-                    type = 'area';
-                } else if (index === 2) {
-                    type = 'component';
-                } else {
-                    type = 'app';
-                }
-            }
-            return {
-                label: decodedPart,
-                path: breadcrumbPath,
-                type,
-            };
+        // The entities above this one, by the names the tree knows them by. A path
+        // segment the tree has not loaded (a resource folder such as `data`) keeps its own.
+        const crumbs = pathParts.slice(0, -1).map((part, index) => {
+            const crumbPath = '/' + pathParts.slice(0, index + 1).join('/');
+            return { label: findNode(rootEntities, crumbPath)?.name ?? decodeURIComponent(part), path: crumbPath };
         });
 
-        return (
-            <main className="flex-1 overflow-y-auto p-6 bg-background">
-                <div className="max-w-4xl mx-auto space-y-6">
-                    {/* Breadcrumb Navigation */}
-                    {breadcrumbs.length > 0 && (
-                        <nav className="flex items-center gap-1 text-sm text-muted-foreground overflow-x-auto">
-                            <button
-                                onClick={() => selectEntity('/server')}
-                                className="flex items-center gap-1 hover:text-primary transition-colors whitespace-nowrap"
-                            >
-                                <Home className="w-4 h-4" />
-                            </button>
-                            {breadcrumbs.map((crumb, index) => (
-                                <div key={crumb.path} className="flex items-center gap-1">
-                                    <ChevronRight className="w-4 h-4 text-muted-foreground/50" />
-                                    <button
-                                        onClick={() => selectEntity(crumb.path)}
-                                        className={`flex items-center gap-1 hover:text-primary transition-colors whitespace-nowrap ${
-                                            index === breadcrumbs.length - 1 ? 'text-foreground font-medium' : ''
-                                        }`}
-                                    >
-                                        {getBreadcrumbIcon(crumb.type)}
-                                        {crumb.label}
-                                    </button>
-                                </div>
-                            ))}
-                        </nav>
-                    )}
+        // Refresh and Copy JSON belong to the views that have no panel of their own
+        const isGenericView = !isServer && !isArea && !isApp && !isFunction;
+        const description = typeof selectedEntity.description === 'string' ? selectedEntity.description : undefined;
 
+        return (
+            <main className="flex-1 overflow-y-auto bg-background">
+                <EntityToolbar
+                    crumbs={crumbs}
+                    onNavigate={selectEntity}
+                    title={selectedEntity.name}
+                    kind={selectedEntity.type}
+                    actions={
+                        isGenericView ? (
+                            <>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8"
+                                    onClick={refreshSelectedEntity}
+                                    disabled={isRefreshing}
+                                >
+                                    <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                                    Refresh
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-8" onClick={handleCopyEntity}>
+                                    <Copy className="w-4 h-4 mr-2" />
+                                    Copy JSON
+                                </Button>
+                            </>
+                        ) : undefined
+                    }
+                />
+                <div className="@container max-w-6xl space-y-5 px-4 py-5 sm:px-6">
                     {/* Server Entity View */}
                     {isServer && !hasError && <ServerInfoPanel />}
 
                     {/* Area Entity View */}
                     {isArea && !hasError && (
-                        <AreasPanel
-                            key={selectedEntity.id}
-                            areaId={selectedEntity.id}
-                            areaName={selectedEntity.name}
-                            path={selectedPath}
-                        />
+                        <AreasPanel key={selectedEntity.id} areaId={selectedEntity.id} path={selectedPath} />
                     )}
 
                     {/* App Entity View */}
@@ -761,7 +592,6 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                         <AppsPanel
                             key={selectedEntity.id}
                             appId={selectedEntity.id}
-                            appName={selectedEntity.name}
                             fqn={selectedEntity.fqn as string | undefined}
                             nodeName={selectedEntity.node_name as string | undefined}
                             namespace={selectedEntity.namespace as string | undefined}
@@ -776,115 +606,37 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                         <FunctionsPanel
                             key={selectedEntity.id}
                             functionId={selectedEntity.id}
-                            functionName={selectedEntity.name}
                             description={selectedEntity.description as string | undefined}
                             path={selectedPath}
                             onNavigate={selectEntity}
                         />
                     )}
 
-                    {/* Component/Generic Header */}
-                    {!isServer && !isArea && !isApp && !isFunction && (
-                        <Card>
-                            <CardHeader>
-                                <div className="flex items-start justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`p-2 rounded-lg ${getEntityBgColor()}`}>
-                                            {getEntityTypeIcon()}
-                                        </div>
-                                        <div>
-                                            <CardTitle className="text-xl">{selectedEntity.name}</CardTitle>
-                                            {selectedEntity.description && (
-                                                <p className="text-sm text-muted-foreground">
-                                                    {selectedEntity.description}
-                                                </p>
-                                            )}
-                                            <CardDescription className="flex items-center gap-2">
-                                                <Badge variant="outline">{selectedEntity.type}</Badge>
-                                                <span className="text-muted-foreground">•</span>
-                                                <span className="font-mono text-xs">{selectedPath}</span>
-                                            </CardDescription>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={refreshSelectedEntity}
-                                            disabled={isRefreshing}
-                                        >
-                                            <RefreshCw
-                                                className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`}
-                                            />
-                                            Refresh
-                                        </Button>
-                                        <Button variant="outline" size="sm" onClick={handleCopyEntity}>
-                                            <Copy className="w-4 h-4 mr-2" />
-                                            Copy JSON
-                                        </Button>
-                                    </div>
-                                </div>
-                                {/* Lifecycle status control (gateway 0.6.0 lifecycle API) */}
-                                {isComponent && (
-                                    <div className="mt-4">
-                                        <EntityStatusControl entityType="components" entityId={entityId} />
-                                    </div>
-                                )}
-                            </CardHeader>
-
-                            {/* Tab Navigation for Components */}
+                    {/* Component / generic: what it is, its lifecycle (gateway 0.6.0 lifecycle API) and its tabs */}
+                    {isGenericView && (description || isComponent) && (
+                        <div className="space-y-4">
+                            {description && <p className="max-w-prose text-sm text-body">{description}</p>}
+                            {isComponent && <EntityStatusControl entityType="components" entityId={entityId} />}
                             {isComponent && (
-                                <div className="px-6 pb-4">
-                                    <div className="flex gap-1 p-1 bg-muted rounded-lg">
-                                        {componentTabs.map((tab) => {
-                                            const TabIcon = tab.icon;
-                                            const isActive = activeTab === tab.id;
-                                            const count = resourceCounts[tab.id];
-                                            return (
-                                                <button
-                                                    key={tab.id}
-                                                    onClick={() => setActiveTab(tab.id)}
-                                                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                                                        isActive
-                                                            ? 'bg-background text-foreground shadow-sm'
-                                                            : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
-                                                    }`}
-                                                >
-                                                    <TabIcon className="w-4 h-4" />
-                                                    {tab.label}
-                                                    {count > 0 && (
-                                                        <Badge
-                                                            variant={isActive ? 'default' : 'secondary'}
-                                                            className={`ml-1 h-5 px-1.5 text-xs ${
-                                                                tab.id === 'faults' && count > 0
-                                                                    ? 'bg-red-500 text-white'
-                                                                    : ''
-                                                            }`}
-                                                        >
-                                                            {count}
-                                                        </Badge>
-                                                    )}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
+                                <ResourceTabBar
+                                    tabs={componentTabs}
+                                    activeTab={activeTab}
+                                    onTabChange={setActiveTab}
+                                    counts={resourceCounts}
+                                    alarmTab="faults"
+                                />
                             )}
-                        </Card>
+                        </div>
                     )}
 
                     {/* Content based on entity type and active tab */}
                     {hasError ? (
-                        <Card>
-                            <CardContent className="pt-6">
-                                <div className="flex flex-col items-center justify-center p-6 text-center text-muted-foreground">
-                                    <p className="font-medium text-destructive">Failed to load entity details</p>
-                                    <p className="text-sm mt-2">
-                                        The server might be unreachable or the entity might not exist.
-                                    </p>
-                                </div>
-                            </CardContent>
-                        </Card>
+                        <div className="py-6 text-center">
+                            <p className="font-medium text-destructive">Failed to load entity details</p>
+                            <p className="mt-2 text-sm text-muted-foreground">
+                                The server might be unreachable or the entity might not exist.
+                            </p>
+                        </div>
                     ) : hasTopicData ? (
                         // Single Data View - use DataPanel
                         (() => {
@@ -895,8 +647,6 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                                     topic={topic}
                                     entityId={entityId}
                                     entityType={entityType}
-                                    isRefreshing={isRefreshing}
-                                    onRefresh={refreshSelectedEntity}
                                 />
                             );
                         })()
@@ -920,13 +670,9 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
                         // Parameter detail view
                         <ParameterDetailCard entity={selectedEntity} entityId={entityId} entityType={entityType} />
                     ) : (
-                        <Card>
-                            <CardContent className="pt-6">
-                                <div className="text-center text-muted-foreground">
-                                    No detailed information available for this entity.
-                                </div>
-                            </CardContent>
-                        </Card>
+                        <p className="py-6 text-center text-sm text-muted-foreground">
+                            No detailed information available for this entity.
+                        </p>
                     )}
                 </div>
             </main>
@@ -935,8 +681,9 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
 
     // Fallback - show server info while loading
     return (
-        <main className="flex-1 overflow-y-auto p-6 bg-background">
-            <div className="max-w-4xl mx-auto">
+        <main className="flex-1 overflow-y-auto bg-background">
+            <SidebarLine />
+            <div className="max-w-6xl p-6">
                 <ServerInfoPanel />
             </div>
         </main>

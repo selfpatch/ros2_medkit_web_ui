@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import CodeMirror, { EditorView } from '@uiw/react-codemirror';
 import type { Extension } from '@uiw/react-codemirror';
 import { python } from '@codemirror/lang-python';
@@ -35,34 +35,11 @@ interface ScriptEditorProps {
 }
 
 /**
- * Reads the app's own dark-mode signal: a `dark` class on `document.documentElement`
- * toggled by ThemeToggle. There is no exported hook for it, and this component
- * stays self-contained rather than reach into ThemeToggle's internals, so it
- * watches the class directly with a MutationObserver.
- */
-function useIsDarkMode(): boolean {
-    const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
-
-    useEffect(() => {
-        const root = document.documentElement;
-        const observer = new MutationObserver(() => {
-            setIsDark(root.classList.contains('dark'));
-        });
-        observer.observe(root, { attributes: true, attributeFilter: ['class'] });
-        return () => observer.disconnect();
-    }, []);
-
-    return isDark;
-}
-
-/**
  * Thin wrapper around `@uiw/react-codemirror` used by the Write script mode of
  * the upload dialog. Default export so it can be lazily imported and kept out
  * of the main bundle.
  */
 export default function ScriptEditor({ value, onChange, filename, ariaLabel, disabled }: ScriptEditorProps) {
-    const isDark = useIsDarkMode();
-
     const language = languageForFilename(filename);
     const extensions = useMemo<Extension[]>(() => {
         const nameExtension = EditorView.contentAttributes.of({ 'aria-label': ariaLabel });
@@ -77,7 +54,7 @@ export default function ScriptEditor({ value, onChange, filename, ariaLabel, dis
                 value={value}
                 onChange={onChange}
                 height="240px"
-                theme={isDark ? 'dark' : 'light'}
+                theme="light"
                 extensions={extensions}
                 editable={!disabled}
                 // Tab must move focus to the next dialog control, not indent -

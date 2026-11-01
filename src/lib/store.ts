@@ -331,6 +331,8 @@ export interface AppState {
         entityId: string,
         faultCode: string
     ) => Promise<unknown>;
+    /** A topic's message now, read through the app that reports a fault; null when it cannot be read */
+    readFaultTopic: (entityType: SovdResourceEntityType, entityId: string, topic: string) => Promise<unknown>;
     publishToEntityData: (
         entityType: SovdResourceEntityType,
         entityId: string,
@@ -3232,6 +3234,18 @@ export const useAppStore = create<AppState>()(
                     faultCode,
                 });
                 return null;
+            },
+
+            readFaultTopic: async (entityType: SovdResourceEntityType, entityId: string, topic: string) => {
+                const { client } = get();
+                if (!client) return null;
+                try {
+                    const { data, error: fetchError } = await getEntityDataItem(client, entityType, entityId, topic);
+                    if (fetchError || !data) return null;
+                    return (data as { data?: unknown }).data ?? null;
+                } catch {
+                    return null;
+                }
             },
 
             publishToEntityData: async (

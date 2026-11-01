@@ -1,116 +1,19 @@
-import { useState, useCallback, useMemo } from 'react';
+import { Fragment, useState, useCallback, useEffect, useMemo, useRef, type RefCallback } from 'react';
 import { useShallow } from 'zustand/shallow';
-import {
-    AlertTriangle,
-    AlertCircle,
-    AlertOctagon,
-    Info,
-    CheckCircle,
-    RefreshCw,
-    Filter,
-    Trash2,
-    Loader2,
-    ChevronDown,
-    ChevronRight,
-} from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { AlertOctagon, AlertTriangle, CheckCircle, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuCheckboxItem,
-    DropdownMenuTrigger,
-    DropdownMenuSeparator,
-    DropdownMenuLabel,
-} from '@/components/ui/dropdown-menu';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Skeleton } from '@/components/ui/skeleton';
-import { SnapshotCard } from './SnapshotCard';
+import { EntityToolbar } from '@/components/EntityToolbar';
+import { FaultDetail } from '@/components/FaultDetail';
+import { StatusSwatch } from '@/components/FaultRow';
 import { useAppStore } from '@/lib/store';
 import { useFaultPolling } from '@/hooks/useFaultPolling';
-import type { Fault, FaultSeverity, FaultStatus, FaultResponse } from '@/lib/types';
-import { faultKey, mapFaultEntityTypeToResourceType } from '@/lib/utils';
+import { isOpen, toMs } from '@/lib/fault-story';
+import type { Fault, FaultSeverity, FaultResponse } from '@/lib/types';
+import { cn, faultKey, mapFaultEntityTypeToResourceType } from '@/lib/utils';
 
-/**
- * Get badge variant for fault severity
- */
-function getSeverityBadgeVariant(severity: FaultSeverity): 'default' | 'secondary' | 'destructive' | 'outline' {
-    switch (severity) {
-        case 'critical':
-        case 'error':
-            return 'destructive';
-        case 'warning':
-            return 'default';
-        case 'info':
-            return 'secondary';
-        default:
-            return 'outline';
-    }
-}
-
-/**
- * Get badge variant for fault status
- */
-function getStatusBadgeVariant(status: FaultStatus): 'default' | 'secondary' | 'outline' {
-    switch (status) {
-        case 'active':
-            return 'default';
-        case 'pending':
-            return 'secondary';
-        default:
-            return 'outline';
-    }
-}
-
-/**
- * Get icon for fault severity
- */
-function getSeverityIcon(severity: FaultSeverity) {
-    switch (severity) {
-        case 'critical':
-            return <AlertOctagon className="w-4 h-4" />;
-        case 'error':
-            return <AlertCircle className="w-4 h-4" />;
-        case 'warning':
-            return <AlertTriangle className="w-4 h-4" />;
-        case 'info':
-            return <Info className="w-4 h-4" />;
-        default:
-            return <AlertCircle className="w-4 h-4" />;
-    }
-}
-
-/**
- * Get color class for severity
- */
-function getSeverityColorClass(severity: FaultSeverity): string {
-    switch (severity) {
-        case 'critical':
-            return 'text-red-600 dark:text-red-400';
-        case 'error':
-            return 'text-orange-600 dark:text-orange-400';
-        case 'warning':
-            return 'text-yellow-600 dark:text-yellow-400';
-        case 'info':
-            return 'text-blue-600 dark:text-blue-400';
-        default:
-            return 'text-muted-foreground';
-    }
-}
-
-/**
- * Format timestamp for display
- */
-function formatTimestamp(timestamp: string): string {
-    try {
-        const date = new Date(timestamp);
-        return date.toLocaleString();
-    } catch {
-        return timestamp;
-    }
-}
+type Tab = 'now' | 'history';
 
 /** Worst first, then most recent, then by identity so equal rows never swap places. */
 const DISPLAY_SEVERITY_RANK: Record<FaultSeverity, number> = {
@@ -128,240 +31,129 @@ function compareFaultsForDisplay(a: Fault, b: Fault): number {
     return faultKey(a).localeCompare(faultKey(b));
 }
 
+/** History: the newest end first */
+function compareByEnd(a: Fault, b: Fault): number {
+    const ended = (fault: Fault) => toMs(fault.parameters?.last_passed) ?? toMs(fault.parameters?.last_occurred) ?? 0;
+    return ended(b) - ended(a) || faultKey(a).localeCompare(faultKey(b));
+}
+
+// A fault's details are read again when it comes or ends, not on every report of it: a node
+// that keeps reporting moves its newest report along every few seconds.
+const versionOf = (fault: Fault) => `${fault.status}|${String(fault.parameters?.last_passed ?? '')}`;
+
+// An open fault's details are read again now and then: its recording is written some
+// seconds after it came.
+const OPEN_DETAILS_EVERY_MS = 30_000;
+
 /**
- * Single fault row component with collapsible environment data
+ * Whether an element is laid out: a pane the layout hides (display: none) is not. A fault
+ * is picked for a pane only once the pane shows, so a phone-wide list reads nothing it
+ * does not show. A callback ref: the pane comes and goes with the list.
  */
-function FaultRow({
-    fault,
-    onClear,
-    isClearing,
-    isExpanded,
-    onToggle,
-    environmentData,
-    isLoadingDetails,
-}: {
-    fault: Fault;
-    onClear: (fault: Fault) => void;
-    isClearing: boolean;
-    isExpanded: boolean;
-    onToggle: () => void;
-    environmentData?: FaultResponse['environment_data'];
-    isLoadingDetails: boolean;
-}) {
-    const canClear = fault.status === 'active' || fault.status === 'pending';
+function useLaidOut<T extends HTMLElement>(): [RefCallback<T>, boolean] {
+    const [laidOut, setLaidOut] = useState(false);
+    const watching = useRef<ResizeObserver | null>(null);
+    const ref = useCallback((node: T | null) => {
+        watching.current?.disconnect();
+        watching.current = null;
+        if (!node) {
+            setLaidOut(false);
+            return;
+        }
+        const sized = new ResizeObserver(() => setLaidOut(node.getClientRects().length > 0));
+        sized.observe(node);
+        watching.current = sized;
+    }, []);
+    return [ref, laidOut];
+}
 
+/** The two halves of the page, as a segmented switch: what is open now, and what ended */
+function TabSwitch({ tab, onChange, openCount }: { tab: Tab; onChange: (tab: Tab) => void; openCount: number }) {
+    const tabs: { id: Tab; label: string }[] = [
+        { id: 'now', label: 'Now' },
+        { id: 'history', label: 'History' },
+    ];
     return (
-        <Collapsible open={isExpanded} onOpenChange={onToggle}>
-            <div className="rounded-lg border bg-card">
-                <CollapsibleTrigger asChild>
-                    <div
-                        className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-muted/50 transition-colors ${fault.status === 'healed' ? 'opacity-60' : ''}`}
-                    >
-                        {/* Expand/Collapse Icon */}
-                        <div className="shrink-0 mt-0.5">
-                            {isExpanded ? (
-                                <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                            ) : (
-                                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                            )}
-                        </div>
-
-                        {/* Severity Icon */}
-                        <div className={`shrink-0 mt-0.5 ${getSeverityColorClass(fault.severity)}`}>
-                            {getSeverityIcon(fault.severity)}
-                        </div>
-
-                        {/* Fault details */}
-                        <div className="min-w-0 flex-1 space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-mono text-sm font-medium">{fault.code}</span>
-                                <Badge variant={getSeverityBadgeVariant(fault.severity)} className="text-xs">
-                                    {fault.severity}
-                                </Badge>
-                                <Badge
-                                    variant={getStatusBadgeVariant(fault.status)}
-                                    className={`text-xs ${fault.status === 'healed' ? 'text-green-600 border-green-300 dark:text-green-400 dark:border-green-700' : ''}`}
-                                >
-                                    {fault.status}
-                                </Badge>
-                            </div>
-                            <p className="text-sm text-foreground">{fault.message}</p>
-                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                                <span>{formatTimestamp(fault.timestamp)}</span>
-                                <span className="font-mono">
-                                    {fault.entity_type}: {fault.entity_id}
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Clear button */}
-                        {canClear && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onClear(fault);
-                                }}
-                                disabled={isClearing}
-                                className="shrink-0"
-                                title="Clear fault"
-                            >
-                                {isClearing ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                    <Trash2 className="w-4 h-4" />
-                                )}
-                            </Button>
-                        )}
-                    </div>
-                </CollapsibleTrigger>
-
-                <CollapsibleContent>
-                    <div className="px-3 pb-3 pt-0 border-t">
-                        {isLoadingDetails ? (
-                            <div className="flex items-center justify-center py-4">
-                                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-                                <span className="ml-2 text-sm text-muted-foreground">Loading environment data...</span>
-                            </div>
-                        ) : environmentData ? (
-                            <div className="pt-3 space-y-4">
-                                {/* Extended Data Records */}
-                                {environmentData.extended_data_records && (
-                                    <div>
-                                        <h5 className="text-sm font-medium text-muted-foreground mb-2">
-                                            Extended Data Records
-                                        </h5>
-                                        <dl className="grid grid-cols-2 gap-2 text-sm">
-                                            {environmentData.extended_data_records.first_occurrence && (
-                                                <>
-                                                    <dt className="text-muted-foreground">First Occurrence</dt>
-                                                    <dd className="font-mono text-xs">
-                                                        {new Date(
-                                                            environmentData.extended_data_records.first_occurrence
-                                                        ).toLocaleString()}
-                                                    </dd>
-                                                </>
-                                            )}
-                                            {environmentData.extended_data_records.last_occurrence && (
-                                                <>
-                                                    <dt className="text-muted-foreground">Last Occurrence</dt>
-                                                    <dd className="font-mono text-xs">
-                                                        {new Date(
-                                                            environmentData.extended_data_records.last_occurrence
-                                                        ).toLocaleString()}
-                                                    </dd>
-                                                </>
-                                            )}
-                                        </dl>
-                                    </div>
-                                )}
-
-                                {/* Snapshots */}
-                                {environmentData.snapshots && environmentData.snapshots.length > 0 && (
-                                    <div>
-                                        <h5 className="text-sm font-medium text-muted-foreground mb-2">
-                                            Snapshots ({environmentData.snapshots.length})
-                                        </h5>
-                                        <div className="space-y-2">
-                                            {environmentData.snapshots.map((snapshot, idx) => (
-                                                <SnapshotCard
-                                                    key={`${snapshot.name}-${idx}`}
-                                                    snapshot={snapshot}
-                                                    index={idx}
-                                                />
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* No environment data message */}
-                                {!environmentData.extended_data_records &&
-                                    (!environmentData.snapshots || environmentData.snapshots.length === 0) && (
-                                        <p className="text-sm text-muted-foreground italic py-2">
-                                            No environment data available
-                                        </p>
-                                    )}
-                            </div>
-                        ) : (
-                            <p className="text-sm text-muted-foreground italic py-3">No environment data available</p>
-                        )}
-                    </div>
-                </CollapsibleContent>
-            </div>
-        </Collapsible>
+        <div className="inline-flex gap-px rounded-[9px] bg-canvas-2 p-0.5">
+            {tabs.map(({ id, label }) => (
+                <button
+                    key={id}
+                    type="button"
+                    aria-pressed={tab === id}
+                    onClick={() => onChange(id)}
+                    className={cn(
+                        'flex h-7 items-center gap-1.5 rounded-[7px] px-2.5 text-[13px] font-medium outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+                        tab === id ? 'raised text-foreground' : 'text-muted-foreground hover:text-foreground'
+                    )}
+                >
+                    {label}
+                    {id === 'now' && openCount > 0 && (
+                        <span className="grid h-4 min-w-4 place-items-center rounded-full bg-state-fault-bg px-1 text-[11px] font-semibold text-state-fault-text tabular-nums">
+                            {openCount}
+                        </span>
+                    )}
+                </button>
+            ))}
+        </div>
     );
 }
 
+// A code may break after its underscores, never inside a word; its text stays the code.
+function breakable(code: string) {
+    return code.split('_').map((part, i) => (
+        <Fragment key={i}>
+            {i > 0 && (
+                <>
+                    _<wbr />
+                </>
+            )}
+            {part}
+        </Fragment>
+    ));
+}
+
 /**
- * Group of faults by entity
+ * A fault in the list: its entity in bold with how it stands as a small square, and its
+ * code under it. Under an entity's heading the entity goes without saying.
  */
-function FaultGroup({
-    entityId,
-    entityType,
-    faults,
-    onClear,
-    clearingCodes,
-    expandedFaults,
-    onToggleFault,
-    faultDetails,
-    loadingDetails,
+function ListItem({
+    fault,
+    selected,
+    withEntity,
+    onPick,
 }: {
-    entityId: string;
-    entityType: string;
-    faults: Fault[];
-    onClear: (fault: Fault) => void;
-    clearingCodes: Set<string>;
-    expandedFaults: Set<string>;
-    onToggleFault: (fault: Fault) => void;
-    faultDetails: Map<string, FaultResponse>;
-    loadingDetails: Set<string>;
+    fault: Fault;
+    selected: boolean;
+    withEntity: boolean;
+    onPick: () => void;
 }) {
-    const [isOpen, setIsOpen] = useState(true);
-
-    const criticalCount = faults.filter((f) => f.severity === 'critical' || f.severity === 'error').length;
-    const warningCount = faults.filter((f) => f.severity === 'warning').length;
-
     return (
-        <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-            <CollapsibleTrigger asChild>
-                <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 cursor-pointer">
-                    {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                    <span className="font-medium text-sm">{entityId}</span>
-                    <Badge variant="outline" className="text-xs">
-                        {entityType}
-                    </Badge>
-                    <div className="flex-1" />
-                    {criticalCount > 0 && (
-                        <Badge variant="destructive" className="text-xs">
-                            {criticalCount}
-                        </Badge>
-                    )}
-                    {warningCount > 0 && (
-                        <Badge variant="default" className="text-xs">
-                            {warningCount}
-                        </Badge>
-                    )}
-                    <Badge variant="secondary" className="text-xs">
-                        {faults.length} total
-                    </Badge>
-                </div>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="pl-6 space-y-2 mt-2">
-                {faults.map((fault) => (
-                    <FaultRow
-                        key={faultKey(fault)}
-                        fault={fault}
-                        onClear={onClear}
-                        isClearing={clearingCodes.has(faultKey(fault))}
-                        isExpanded={expandedFaults.has(faultKey(fault))}
-                        onToggle={() => onToggleFault(fault)}
-                        environmentData={faultDetails.get(faultKey(fault))?.environment_data}
-                        isLoadingDetails={loadingDetails.has(faultKey(fault))}
-                    />
-                ))}
-            </CollapsibleContent>
-        </Collapsible>
+        <li>
+            <button
+                type="button"
+                aria-current={selected ? 'true' : undefined}
+                onClick={onPick}
+                className={cn(
+                    'grid w-full gap-0.5 rounded-[9px] px-2.5 py-1.5 text-left outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+                    selected ? 'raised' : 'hover:bg-canvas'
+                )}
+            >
+                {withEntity && (
+                    <span className="flex min-w-0 items-center justify-between gap-2">
+                        <b className="truncate text-[13px] leading-snug font-semibold text-foreground">
+                            {fault.entity_id}
+                        </b>
+                        <StatusSwatch status={fault.status} />
+                    </span>
+                )}
+                <span className="flex min-w-0 items-center justify-between gap-2">
+                    <span className="min-w-0 font-mono text-xs leading-snug [overflow-wrap:anywhere] text-body">
+                        {breakable(fault.code)}
+                    </span>
+                    {!withEntity && <StatusSwatch status={fault.status} />}
+                </span>
+            </button>
+        </li>
     );
 }
 
@@ -370,55 +162,57 @@ function FaultGroup({
  */
 function DashboardSkeleton() {
     return (
-        <div className="space-y-4">
-            <div className="flex items-center gap-4">
-                <Skeleton className="h-10 w-32" />
-                <Skeleton className="h-10 w-32" />
-                <Skeleton className="h-10 w-24" />
-            </div>
-            <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                    <div key={i} className="p-4 rounded-lg border space-y-3">
-                        <div className="flex items-center gap-2">
-                            <Skeleton className="h-4 w-4" />
-                            <Skeleton className="h-5 w-32" />
-                            <Skeleton className="h-5 w-16" />
-                        </div>
-                        <Skeleton className="h-4 w-full" />
-                        <Skeleton className="h-3 w-48" />
-                    </div>
-                ))}
-            </div>
+        <div className="grid content-start gap-2 px-1.5 py-4 sm:px-3.5 @2xl:w-[184px]">
+            {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="grid gap-1.5 px-2.5 py-1.5">
+                    <Skeleton className="h-3.5 w-24" />
+                    <Skeleton className="h-3 w-32" />
+                </div>
+            ))}
         </div>
     );
 }
 
 /**
- * Faults Dashboard - displays all faults across the system
+ * Faults Dashboard - every fault the gateway knows, as the selfpatch platform's fault page
  *
- * Features:
- * - Real-time updates via shared store polling
- * - Filtering by severity and status
- * - Grouping by entity
- * - Clear fault actions
+ * Three panes on a wide screen: the faults (Now: open; History: ended), the picked fault's
+ * life moment by moment, and the fault itself (how it stands, what is wrong in words, what
+ * the robot read when it came and now, its recordings). Narrower, the list and the fault
+ * take turns.
  *
  * Uses shared faults state from useAppStore to avoid duplicate API calls
  * when both FaultsDashboard and FaultsCountBadge are visible.
  */
 export function FaultsDashboard() {
+    // A page per gateway: fault keys repeat across gateways, so what the page picked, kept
+    // and read of one gateway's faults must not carry over to the next one's.
+    const serverUrl = useAppStore((state) => state.serverUrl);
+    return <FaultsPage key={serverUrl ?? ''} />;
+}
+
+function FaultsPage() {
     const [isRefreshing, setIsRefreshing] = useState(false);
     // Keyed by faultKey, not by code: one code can be reported by two entities.
     const [clearingCodes, setClearingCodes] = useState<Set<string>>(new Set());
-    const [expandedFaults, setExpandedFaults] = useState<Set<string>>(new Set());
-    const [faultDetails, setFaultDetails] = useState<Map<string, FaultResponse>>(new Map());
-    const [loadingDetails, setLoadingDetails] = useState<Set<string>>(new Set());
+    // What the gateway keeps of each fault; null once it answered with nothing.
+    const [faultDetails, setFaultDetails] = useState<Map<string, FaultResponse | null>>(new Map());
+    const requested = useRef(new Map<string, string>());
 
-    // Filters
-    const [severityFilters, setSeverityFilters] = useState<Set<FaultSeverity>>(
-        new Set(['critical', 'error', 'warning', 'info'])
-    );
-    const [statusFilters, setStatusFilters] = useState<Set<FaultStatus>>(new Set(['active', 'pending']));
-    const [groupByEntity, setGroupByEntity] = useState(true);
+    const [tab, setTab] = useState<Tab>('now');
+    const [query, setQuery] = useState('');
+    const [groupByEntity, setGroupByEntity] = useState(false);
+    // The fault on the page, and whether someone picked it (which a narrow screen follows).
+    const [selectedKey, setSelectedKey] = useState<string | null>(null);
+    const [picked, setPicked] = useState(false);
+    // The fault picked on Now stays in its list when it ends while someone watches it.
+    const [watchedKey, setWatchedKey] = useState<string | null>(null);
+    // The fault on the page as last listed, and the one whose fate a read was asked for
+    // (`<key>#read` once it answered).
+    const lastShown = useRef<Fault | null>(null);
+    const askedAbout = useRef<string | null>(null);
+    const [, setAnswered] = useState(0);
+    const [pane, paneLaidOut] = useLaidOut<HTMLDivElement>();
 
     // Use shared faults state from store
     const {
@@ -465,6 +259,8 @@ export function FaultsDashboard() {
         async (fault: Fault) => {
             const key = faultKey(fault);
             setClearingCodes((prev) => new Set([...prev, key]));
+            // Gone after a clear is what was asked for: no read to find out why.
+            askedAbout.current = `${key}#read`;
 
             try {
                 // Map the fault's entity_type to the correct resource type for the API
@@ -482,66 +278,61 @@ export function FaultsDashboard() {
         [clearFault]
     );
 
-    // Toggle fault expansion and lazy-load environment data
-    const handleToggleFault = useCallback(
-        async (fault: Fault) => {
+    // Read what the gateway keeps of a fault. `force` reads again (a press on the fault
+    // asks anew: it gains recordings while the page is open); otherwise a fault is read
+    // once a time it comes or ends.
+    const loadDetails = useCallback(
+        async (fault: Fault, force: boolean) => {
             const key = faultKey(fault);
-            // Functional update, BEFORE the await: the row opens on the click
-            // (the previous entry stays rendered while the refetch runs), and a
-            // second click during the request collapses instead of reading a
-            // stale closed-over set and firing another GET.
-            let opened = false;
-            setExpandedFaults((prev) => {
-                const next = new Set(prev);
-                if (next.has(key)) {
-                    next.delete(key);
-                } else {
-                    next.add(key);
-                    opened = true;
-                }
-                return next;
-            });
-            if (!opened) return;
-
-            // Always refetch: a fault gains recordings while the page is open,
-            // and a cache filled once on first expand would keep serving the
-            // shorter list.
-            setLoadingDetails((prev) => new Set([...prev, key]));
+            const version = versionOf(fault);
+            if (!force && requested.current.get(key) === version) return;
+            requested.current.set(key, version);
             try {
                 const entityGroup = mapFaultEntityTypeToResourceType(fault.entity_type);
-                const details = await getFaultWithEnvironmentData(entityGroup, fault.entity_id, fault.code);
+                const details = (await getFaultWithEnvironmentData(
+                    entityGroup,
+                    fault.entity_id,
+                    fault.code
+                )) as FaultResponse | null;
                 // A 404 resolves to null rather than throwing; overwriting the
                 // cache with it would blank evidence that was already on screen.
-                if (details) {
-                    setFaultDetails((prev) => new Map(prev).set(key, details as FaultResponse));
-                }
+                setFaultDetails((prev) => (!details && prev.get(key) ? prev : new Map(prev).set(key, details ?? null)));
             } catch (err) {
                 console.error('Failed to fetch fault details:', err);
-            } finally {
-                setLoadingDetails((prev) => {
-                    const next = new Set(prev);
-                    next.delete(key);
-                    return next;
-                });
+                setFaultDetails((prev) => (prev.has(key) ? prev : new Map(prev).set(key, null)));
             }
         },
         [getFaultWithEnvironmentData]
     );
 
-    // Filter faults, then put them in a fixed order. Rows arrive in whatever order the
-    // gateway or the stream produced them, and a row that moves while the pointer is on
-    // its way to Clear is a row that gets the wrong fault cleared.
-    const filteredFaults = useMemo(() => {
-        return faults
-            .filter((f) => severityFilters.has(f.severity) && statusFilters.has(f.status))
-            .sort(compareFaultsForDisplay);
-    }, [faults, severityFilters, statusFilters]);
+    // Each tab's faults in a fixed order. Rows arrive in whatever order the gateway or the
+    // stream produced them, and a row that moves while the pointer is on its way to it is
+    // a row that opens the wrong fault.
+    const openCount = useMemo(() => faults.filter(isOpen).length, [faults]);
+    // The gateway's stream says "cleared" for a fault that healed as well, and the list
+    // drops it. The fault on the page stays as it was until a read of the whole list says
+    // how it ended, or that it is gone.
+    const last = lastShown.current;
+    const dropped =
+        last && askedAbout.current !== `${faultKey(last)}#read` && !faults.some((f) => faultKey(f) === faultKey(last))
+            ? last
+            : null;
+    const items = useMemo(() => {
+        const listed = dropped ? [...faults, dropped] : faults;
+        if (tab === 'now') {
+            return listed.filter((f) => isOpen(f) || faultKey(f) === watchedKey).sort(compareFaultsForDisplay);
+        }
+        const q = query.trim().toLowerCase();
+        return listed
+            .filter((f) => !isOpen(f))
+            .filter((f) => !q || [f.entity_id, f.code, f.message].some((text) => text.toLowerCase().includes(q)))
+            .sort(compareByEnd);
+    }, [faults, dropped, tab, watchedKey, query]);
 
-    // Group faults by entity
+    // Group faults by entity, in the order their worst fault comes in the list.
     const groupedFaults = useMemo(() => {
         const groups = new Map<string, { entityId: string; entityType: string; faults: Fault[] }>();
-
-        for (const fault of filteredFaults) {
+        for (const fault of items) {
             // Keyed by type and id: an app and the component it runs on can share a name,
             // and merging them puts one entity's faults under another entity's heading.
             const key = `${fault.entity_type}/${fault.entity_id}`;
@@ -550,339 +341,261 @@ export function FaultsDashboard() {
             }
             groups.get(key)!.faults.push(fault);
         }
+        return Array.from(groups.entries());
+    }, [items]);
 
-        // Sort groups by number of critical/error faults
-        return Array.from(groups.entries()).sort((a, b) => {
-            const aCritical = a[1].faults.filter((f) => f.severity === 'critical' || f.severity === 'error').length;
-            const bCritical = b[1].faults.filter((f) => f.severity === 'critical' || f.severity === 'error').length;
-            return bCritical - aCritical;
+    // The picked fault while it is listed; on a pane that shows, the first one until then.
+    const picks = items.find((f) => faultKey(f) === selectedKey) ?? null;
+    const shown = picks ?? (paneLaidOut ? (items[0] ?? null) : null);
+    const shownKey = shown ? faultKey(shown) : null;
+    const showingDetail = picked && shown !== null;
+    // A pane the layout hides draws nothing and reads nothing.
+    const drawn = shown !== null && (paneLaidOut || showingDetail) ? shown : null;
+    const shownOpen = shown ? isOpen(shown) : false;
+
+    // Hold the fault on screen: a newer one coming on top of the list does not take its place.
+    useEffect(() => {
+        if (shownKey !== null && shownKey !== selectedKey) setSelectedKey(shownKey);
+    }, [shownKey, selectedKey]);
+    useEffect(() => {
+        setWatchedKey(tab === 'now' ? shownKey : null);
+    }, [tab, shownKey]);
+
+    useEffect(() => {
+        if (!dropped) {
+            if (last && faults.some((f) => faultKey(f) === faultKey(last))) askedAbout.current = null;
+            return;
+        }
+        const key = faultKey(dropped);
+        if (askedAbout.current === key) return;
+        askedAbout.current = key;
+        void fetchFaults({ force: true }).finally(() => {
+            askedAbout.current = `${key}#read`;
+            setAnswered((n) => n + 1);
         });
-    }, [filteredFaults]);
+    }, [dropped, last, faults, fetchFaults]);
+    useEffect(() => {
+        lastShown.current = shown;
+    }, [shown]);
 
-    // Count by severity (active faults only — CONFIRMED + PREFAILED)
-    const activeFaults = useMemo(() => faults.filter((f) => f.status === 'active' || f.status === 'pending'), [faults]);
-    const counts = useMemo(() => {
-        return {
-            critical: activeFaults.filter((f) => f.severity === 'critical').length,
-            error: activeFaults.filter((f) => f.severity === 'error').length,
-            warning: activeFaults.filter((f) => f.severity === 'warning').length,
-            info: activeFaults.filter((f) => f.severity === 'info').length,
-            total: activeFaults.length,
-        };
-    }, [activeFaults]);
+    useEffect(() => {
+        if (drawn) void loadDetails(drawn, false);
+    }, [drawn, loadDetails]);
 
-    // Toggle severity filter
-    const toggleSeverity = (severity: FaultSeverity) => {
-        setSeverityFilters((prev) => {
-            const next = new Set(prev);
-            if (next.has(severity)) {
-                next.delete(severity);
-            } else {
-                next.add(severity);
-            }
-            return next;
-        });
+    const drawnRef = useRef(drawn);
+    drawnRef.current = drawn;
+    useEffect(() => {
+        if (!drawn || !shownOpen) return;
+        const timer = window.setInterval(() => {
+            if (drawnRef.current) void loadDetails(drawnRef.current, true);
+        }, OPEN_DETAILS_EVERY_MS);
+        return () => window.clearInterval(timer);
+        // Started per fault on screen, not per new copy of it in the list.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [shownKey, drawn !== null, shownOpen, loadDetails]);
+
+    const pick = (fault: Fault) => {
+        setSelectedKey(faultKey(fault));
+        setPicked(true);
+        void loadDetails(fault, true);
     };
 
-    // Toggle status filter
-    const toggleStatus = (status: FaultStatus) => {
-        setStatusFilters((prev) => {
-            const next = new Set(prev);
-            if (next.has(status)) {
-                next.delete(status);
-            } else {
-                next.add(status);
-            }
-            return next;
-        });
+    const switchTab = (next: Tab) => {
+        setTab(next);
+        setSelectedKey(null);
+        setPicked(false);
     };
 
     if (!isConnected) {
         return (
-            <Card>
-                <CardContent className="pt-6">
-                    <div className="text-center text-muted-foreground">
-                        <AlertTriangle className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">Connect to a server to view faults.</p>
-                    </div>
-                </CardContent>
-            </Card>
+            <div className="py-12 text-center text-muted-foreground">
+                <AlertTriangle className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Connect to a server to view faults.</p>
+            </div>
         );
     }
 
+    const isBusy = isRefreshing || isLoadingFaults;
+
+    // The page's line on top: its name, Now and History, and keeping it fresh
+    const toolbar = (
+        <EntityToolbar
+            title="Faults Dashboard"
+            lead={
+                <>
+                    <TabSwitch tab={tab} onChange={switchTab} openCount={faultsError ? 0 : openCount} />
+                    {faultsError ? (
+                        <span className="text-sm text-faint">Fault status unknown</span>
+                    ) : (
+                        openCount === 0 && <span className="text-sm text-faint">No faults detected</span>
+                    )}
+                </>
+            }
+            actions={
+                <>
+                    <div className="flex items-center gap-2 text-sm">
+                        <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} id="auto-refresh" />
+                        <label htmlFor="auto-refresh" className="cursor-pointer text-muted-foreground">
+                            Auto-refresh
+                        </label>
+                    </div>
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        className="size-8"
+                        onClick={handleRefresh}
+                        disabled={isBusy}
+                        title="Refresh faults"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${isBusy ? 'animate-spin' : ''}`} />
+                    </Button>
+                </>
+            }
+        />
+    );
+
     if (isLoadingFaults && faults.length === 0) {
         return (
-            <div className="space-y-6">
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <AlertTriangle className="w-5 h-5" />
-                            Faults Dashboard
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <DashboardSkeleton />
-                    </CardContent>
-                </Card>
+            <div className="@container flex h-full min-h-0 flex-col">
+                {toolbar}
+                <DashboardSkeleton />
+            </div>
+        );
+    }
+
+    let body;
+    if (faultsError && faults.length === 0) {
+        body = (
+            <div className="flex flex-col items-start px-4 py-6 sm:px-6">
+                <AlertOctagon className="mb-3 size-8 text-state-fault" />
+                <p className="font-medium text-foreground">Fault list unavailable</p>
+                <p className="max-w-md text-sm text-muted-foreground">
+                    The gateway did not answer with a fault list, so this page cannot say whether anything is wrong.
+                    This is not the same as a system without faults.
+                </p>
+                <p className="mt-2 font-mono text-xs text-destructive">{faultsError}</p>
+                <Button variant="outline" size="sm" className="mt-4" onClick={handleRefresh} disabled={isBusy}>
+                    <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    Try again
+                </Button>
+            </div>
+        );
+    } else if (tab === 'now' && items.length === 0) {
+        body = (
+            <div className="flex flex-col items-start px-4 py-6 text-muted-foreground sm:px-6">
+                <CheckCircle className="mb-3 size-8 text-state-ok" />
+                <p className="font-medium text-foreground">No faults to display</p>
+                <p className="text-sm">System is operating normally</p>
+            </div>
+        );
+    } else {
+        const list = (faultsOfList: Fault[], withEntity: boolean) => (
+            <ul className="grid gap-0.5">
+                {faultsOfList.map((fault) => (
+                    <ListItem
+                        key={faultKey(fault)}
+                        fault={fault}
+                        withEntity={withEntity}
+                        selected={drawn !== null && faultKey(drawn) === faultKey(fault)}
+                        onPick={() => pick(fault)}
+                    />
+                ))}
+            </ul>
+        );
+        const sharedIds = new Set(
+            groupedFaults.map(([, group]) => group.entityId).filter((id, i, all) => all.indexOf(id) !== i)
+        );
+        body = (
+            <div className="min-h-0 flex-1 overflow-y-auto @2xl:grid @2xl:grid-cols-[184px_minmax(0,1fr)] @2xl:grid-rows-[minmax(0,1fr)] @2xl:overflow-hidden">
+                <nav
+                    aria-label={tab === 'now' ? 'Faults now' : 'Fault history'}
+                    className={cn(
+                        'grid content-start gap-3 px-1.5 py-3 sm:px-3.5 @2xl:min-h-0 @2xl:overflow-y-auto @2xl:border-r @2xl:border-hairline',
+                        showingDetail && '@max-2xl:hidden'
+                    )}
+                >
+                    {tab === 'history' && (
+                        <label className="relative block">
+                            <span className="sr-only">Search faults</span>
+                            <Search
+                                aria-hidden
+                                className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-faint"
+                            />
+                            <input
+                                type="search"
+                                placeholder="Entity, code or words"
+                                autoComplete="off"
+                                spellCheck={false}
+                                value={query}
+                                onChange={(event) => setQuery(event.target.value)}
+                                className="h-8 w-full truncate rounded-[9px] border border-graphite/10 bg-white pr-2 pl-8 text-[13px] text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-faint hover:border-graphite/20 focus:border-graphite/35 focus:shadow-[0_0_0_4px_rgb(18_20_19/0.05)]"
+                            />
+                        </label>
+                    )}
+                    <div className="flex items-center gap-2 px-2.5">
+                        <Switch size="sm" checked={groupByEntity} onCheckedChange={setGroupByEntity} id="group-by" />
+                        <label htmlFor="group-by" className="cursor-pointer text-xs text-muted-foreground">
+                            Group by entity
+                        </label>
+                    </div>
+                    {items.length === 0 ? (
+                        <p className="px-2.5 py-4 text-[13px] text-faint">
+                            {query.trim()
+                                ? `No fault matches “${query.trim()}”.`
+                                : faults.length > 0
+                                  ? 'Every fault is open now.'
+                                  : 'No faults yet.'}
+                        </p>
+                    ) : groupByEntity ? (
+                        groupedFaults.map(([groupKey, { entityId, entityType, faults: entityFaults }]) => (
+                            <div key={groupKey} className="grid gap-0.5">
+                                <div className="flex items-baseline gap-1.5 px-2.5 pt-1">
+                                    <h3 className="truncate font-sans text-sm font-medium tracking-normal text-foreground">
+                                        {entityId}
+                                    </h3>
+                                    {sharedIds.has(entityId) && (
+                                        <span className="text-[11px] text-faint">{entityType}</span>
+                                    )}
+                                </div>
+                                {list(entityFaults, false)}
+                            </div>
+                        ))
+                    ) : (
+                        list(items, true)
+                    )}
+                </nav>
+                <div ref={pane} className={cn('min-w-0 @2xl:min-h-0', !showingDetail && '@max-2xl:hidden')}>
+                    {drawn && (
+                        <FaultDetail
+                            key={faultKey(drawn)}
+                            fault={drawn}
+                            details={faultDetails.get(faultKey(drawn))}
+                            onBack={() => setPicked(false)}
+                            onClear={() => handleClear(drawn)}
+                            isClearing={clearingCodes.has(faultKey(drawn))}
+                        />
+                    )}
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="space-y-6">
-            {/* Header Card */}
-            <Card>
-                <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <CardTitle className="flex items-center gap-2">
-                                <AlertTriangle className="w-5 h-5 text-muted-foreground" />
-                                Faults Dashboard
-                            </CardTitle>
-                            <CardDescription>
-                                {faultsError
-                                    ? 'Fault status unknown'
-                                    : counts.total === 0
-                                      ? 'No faults detected'
-                                      : `${counts.total} fault${counts.total !== 1 ? 's' : ''} detected`}
-                            </CardDescription>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            {/* Auto-refresh toggle */}
-                            <div className="flex items-center gap-2 text-sm">
-                                <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} id="auto-refresh" />
-                                <label htmlFor="auto-refresh" className="text-muted-foreground cursor-pointer">
-                                    Auto-refresh
-                                </label>
-                            </div>
-                            {/* Manual refresh */}
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleRefresh}
-                                disabled={isRefreshing || isLoadingFaults}
-                            >
-                                <RefreshCw
-                                    className={`w-4 h-4 ${isRefreshing || isLoadingFaults ? 'animate-spin' : ''}`}
-                                />
-                            </Button>
-                        </div>
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    {faultsError && faults.length > 0 && (
-                        <p className="mb-4 font-mono text-xs text-destructive">
-                            Last refresh failed, these faults may be out of date: {faultsError}
-                        </p>
-                    )}
-                    {/* Summary badges */}
-                    <div className="flex flex-wrap gap-2 mb-4">
-                        {counts.critical > 0 && (
-                            <Badge variant="destructive">
-                                <AlertOctagon className="w-3 h-3 mr-1" />
-                                {counts.critical} Critical
-                            </Badge>
-                        )}
-                        {counts.error > 0 && (
-                            <Badge variant="destructive">
-                                <AlertCircle className="w-3 h-3 mr-1" />
-                                {counts.error} Error
-                            </Badge>
-                        )}
-                        {counts.warning > 0 && (
-                            <Badge variant="default">
-                                <AlertTriangle className="w-3 h-3 mr-1" />
-                                {counts.warning} Warning
-                            </Badge>
-                        )}
-                        {counts.info > 0 && (
-                            <Badge variant="secondary">
-                                <Info className="w-3 h-3 mr-1" />
-                                {counts.info} Info
-                            </Badge>
-                        )}
-                        {counts.total === 0 && !faultsError && filteredFaults.length === 0 && (
-                            <Badge variant="outline" className="text-green-600 border-green-300">
-                                <CheckCircle className="w-3 h-3 mr-1" />
-                                All Clear
-                            </Badge>
-                        )}
-                    </div>
-
-                    {/* Filters */}
-                    <div className="flex items-center gap-2">
-                        {/* Severity filter */}
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="sm">
-                                    <Filter className="w-4 h-4 mr-2" />
-                                    Severity
-                                    <ChevronDown className="w-4 h-4 ml-2" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent>
-                                <DropdownMenuLabel>Filter by Severity</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuCheckboxItem
-                                    checked={severityFilters.has('critical')}
-                                    onCheckedChange={() => toggleSeverity('critical')}
-                                >
-                                    <AlertOctagon className="w-4 h-4 mr-2 text-red-500" />
-                                    Critical
-                                </DropdownMenuCheckboxItem>
-                                <DropdownMenuCheckboxItem
-                                    checked={severityFilters.has('error')}
-                                    onCheckedChange={() => toggleSeverity('error')}
-                                >
-                                    <AlertCircle className="w-4 h-4 mr-2 text-orange-500" />
-                                    Error
-                                </DropdownMenuCheckboxItem>
-                                <DropdownMenuCheckboxItem
-                                    checked={severityFilters.has('warning')}
-                                    onCheckedChange={() => toggleSeverity('warning')}
-                                >
-                                    <AlertTriangle className="w-4 h-4 mr-2 text-yellow-500" />
-                                    Warning
-                                </DropdownMenuCheckboxItem>
-                                <DropdownMenuCheckboxItem
-                                    checked={severityFilters.has('info')}
-                                    onCheckedChange={() => toggleSeverity('info')}
-                                >
-                                    <Info className="w-4 h-4 mr-2 text-blue-500" />
-                                    Info
-                                </DropdownMenuCheckboxItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-
-                        {/* Status filter */}
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="sm">
-                                    <Filter className="w-4 h-4 mr-2" />
-                                    Status
-                                    <ChevronDown className="w-4 h-4 ml-2" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent>
-                                <DropdownMenuLabel>Filter by Status</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuCheckboxItem
-                                    checked={statusFilters.has('active')}
-                                    onCheckedChange={() => toggleStatus('active')}
-                                >
-                                    Active
-                                </DropdownMenuCheckboxItem>
-                                <DropdownMenuCheckboxItem
-                                    checked={statusFilters.has('pending')}
-                                    onCheckedChange={() => toggleStatus('pending')}
-                                >
-                                    Pending
-                                </DropdownMenuCheckboxItem>
-                                <DropdownMenuCheckboxItem
-                                    checked={statusFilters.has('cleared')}
-                                    onCheckedChange={() => toggleStatus('cleared')}
-                                >
-                                    Cleared
-                                </DropdownMenuCheckboxItem>
-                                <DropdownMenuCheckboxItem
-                                    checked={statusFilters.has('healed')}
-                                    onCheckedChange={() => toggleStatus('healed')}
-                                >
-                                    Healed
-                                </DropdownMenuCheckboxItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-
-                        {/* Group by toggle */}
-                        <div className="flex items-center gap-2 ml-auto">
-                            <Switch checked={groupByEntity} onCheckedChange={setGroupByEntity} id="group-by" />
-                            <label htmlFor="group-by" className="text-sm text-muted-foreground cursor-pointer">
-                                Group by entity
-                            </label>
-                        </div>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Faults List */}
-            {faultsError && faults.length === 0 ? (
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex flex-col items-center justify-center py-8 text-center">
-                            <AlertOctagon className="w-12 h-12 mb-2 text-destructive" />
-                            <p className="font-medium">Fault list unavailable</p>
-                            <p className="text-sm text-muted-foreground max-w-md">
-                                The gateway did not answer with a fault list, so this page cannot say whether anything
-                                is wrong. This is not the same as a system without faults.
-                            </p>
-                            <p className="mt-2 font-mono text-xs text-destructive">{faultsError}</p>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="mt-4"
-                                onClick={handleRefresh}
-                                disabled={isRefreshing || isLoadingFaults}
-                            >
-                                <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-                                Try again
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-            ) : filteredFaults.length === 0 ? (
-                <Card>
-                    <CardContent className="pt-6">
-                        <div className="flex flex-col items-center justify-center text-muted-foreground py-8">
-                            <CheckCircle className="w-12 h-12 mb-2 text-green-500" />
-                            <p className="font-medium">No faults to display</p>
-                            <p className="text-sm">
-                                {faults.length > 0
-                                    ? 'Adjust filters to see more faults'
-                                    : 'System is operating normally'}
-                            </p>
-                        </div>
-                    </CardContent>
-                </Card>
-            ) : groupByEntity ? (
-                <Card>
-                    <CardContent className="pt-4 space-y-4">
-                        {groupedFaults.map(([groupKey, { entityId, entityType, faults: entityFaults }]) => (
-                            <FaultGroup
-                                key={groupKey}
-                                entityId={entityId}
-                                entityType={entityType}
-                                faults={entityFaults}
-                                onClear={handleClear}
-                                clearingCodes={clearingCodes}
-                                expandedFaults={expandedFaults}
-                                onToggleFault={handleToggleFault}
-                                faultDetails={faultDetails}
-                                loadingDetails={loadingDetails}
-                            />
-                        ))}
-                    </CardContent>
-                </Card>
-            ) : (
-                <Card>
-                    <CardContent className="pt-4 space-y-2">
-                        {filteredFaults.map((fault) => (
-                            <FaultRow
-                                key={faultKey(fault)}
-                                fault={fault}
-                                onClear={handleClear}
-                                isClearing={clearingCodes.has(faultKey(fault))}
-                                isExpanded={expandedFaults.has(faultKey(fault))}
-                                onToggle={() => handleToggleFault(fault)}
-                                environmentData={faultDetails.get(faultKey(fault))?.environment_data}
-                                isLoadingDetails={loadingDetails.has(faultKey(fault))}
-                            />
-                        ))}
-                    </CardContent>
-                </Card>
+        <div className="@container flex h-full min-h-0 flex-col">
+            {toolbar}
+            {faultsError && faults.length > 0 && (
+                <p className="border-b border-hairline px-4 py-2 font-mono text-xs text-destructive sm:px-6">
+                    Last refresh failed, these faults may be out of date: {faultsError}
+                </p>
             )}
+            {body}
         </div>
     );
 }
+
+// The count beside a place in the sidebar, as the selfpatch platform's.
+const COUNT_PILL =
+    'ml-auto grid h-[18px] min-w-[18px] place-items-center rounded-full px-[5px] text-[11px] font-semibold tabular-nums';
 
 /**
  * Faults count badge for sidebar.
@@ -909,21 +622,16 @@ export function FaultsCountBadge() {
         // The last known count still says more than a question mark; the marker says it
         // was not checked. Only with nothing known at all is there no number to show.
         return (
-            <Badge
-                variant="outline"
-                className="text-xs ml-auto text-destructive border-destructive/50"
+            <span
+                className={cn(COUNT_PILL, 'text-state-fault-text shadow-[inset_0_0_0_1px_rgb(214_69_69/0.45)]')}
                 title={`This count could not be checked: ${faultsError}`}
             >
                 {count > 0 ? count : '?'}
-            </Badge>
+            </span>
         );
     }
 
     if (count === 0) return null;
 
-    return (
-        <Badge variant="destructive" className="text-xs ml-auto">
-            {count}
-        </Badge>
-    );
+    return <span className={cn(COUNT_PILL, 'bg-state-fault-bg text-state-fault-text')}>{count}</span>;
 }

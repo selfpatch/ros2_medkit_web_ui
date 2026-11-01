@@ -124,7 +124,8 @@ describe('FaultsPanel', () => {
 
         expect(screen.queryByText('A_FAULT')).toBeNull();
         expect(screen.getByText('B_FAULT')).toBeInTheDocument();
-        expect(screen.getByText('Faults')).toBeInTheDocument();
+        // Loaded, not left on the spinner: the panel's own Refresh shows only once it is
+        expect(screen.getByTitle('Refresh faults')).toBeInTheDocument();
     });
 
     it("does not show the previous entity's late failure", async () => {
@@ -167,7 +168,8 @@ describe('FaultsPanel', () => {
 
         expect(screen.queryByText('A_REMAINING')).toBeNull();
         expect(screen.getByText('B_FAULT')).toBeInTheDocument();
-        expect(screen.getByText('Faults')).toBeInTheDocument();
+        // Loaded, not left on the spinner: the panel's own Refresh shows only once it is
+        expect(screen.getByTitle('Refresh faults')).toBeInTheDocument();
     });
 
     it("keeps the entity it shows when its own read answers after a clear's reload started", async () => {
@@ -178,7 +180,8 @@ describe('FaultsPanel', () => {
 
         expect(screen.queryByText('A_REMAINING')).toBeNull();
         expect(screen.getByText('B_FAULT')).toBeInTheDocument();
-        expect(screen.getByText('Faults')).toBeInTheDocument();
+        // Loaded, not left on the spinner: the panel's own Refresh shows only once it is
+        expect(screen.getByTitle('Refresh faults')).toBeInTheDocument();
     });
 
     it('shows the row being cleared as clearing until the delete answers', async () => {

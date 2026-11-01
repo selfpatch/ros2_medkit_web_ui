@@ -16,16 +16,33 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import { Download, Loader2, RefreshCw, ScrollText, Search, Settings, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useAppStore } from '@/lib/store';
+import { cn } from '@/lib/utils';
 import type { LogCollection, LogEntry, LogSeverity, LogsFetchResult, SovdResourceEntityType } from '@/lib/types';
 
 interface LogsPanelProps {
     entityId: string;
     entityType: SovdResourceEntityType;
 }
+
+/** The toolbar's selects, as the design's fields: white on a hairline */
+const FIELD =
+    'h-8 rounded-lg border border-graphite/12 bg-white px-2 text-xs outline-none focus-visible:outline-2 focus-visible:outline-ring';
+
+/** The toolbar's icon buttons, as the design's outline buttons */
+const ICON_BUTTON =
+    'h-8 w-8 inline-flex items-center justify-center rounded-lg border border-graphite/12 bg-white text-muted-foreground shadow-[0_1px_1px_rgb(18_20_19/0.04)] hover:border-graphite/30 hover:text-foreground';
+
+/** A log line's severity in its colour; debug stays quiet */
+const SEVERITY_CHIP: Record<LogSeverity, string> = {
+    fatal: 'bg-state-fault text-white',
+    error: 'bg-state-fault-bg text-state-fault-text',
+    warning: 'bg-state-warn-bg text-state-warn-text',
+    info: 'bg-canvas-2 text-body',
+    debug: 'text-faint',
+};
 
 export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
     const { fetchEntityLogs, getLogsConfiguration, updateLogsConfiguration } = useAppStore(
@@ -255,7 +272,7 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                 <span className="text-muted-foreground">Severity:</span>
                 <select
                     aria-label="severity"
-                    className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                    className={FIELD}
                     value={severity}
                     onChange={(e) => setSeverity(e.target.value as LogSeverity)}
                 >
@@ -272,7 +289,7 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                     placeholder="Context filter"
                     value={contextDraft}
                     onChange={(e) => setContextDraft(e.target.value)}
-                    className="h-8 w-40 text-xs"
+                    className="h-8 w-40 border-graphite/12 bg-white text-xs"
                 />
             )}
             <div className="relative">
@@ -282,15 +299,10 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                     placeholder="Search messages"
                     value={messageSearch}
                     onChange={(e) => setMessageSearch(e.target.value)}
-                    className="h-8 w-48 text-xs pl-7"
+                    className="h-8 w-48 border-graphite/12 bg-white text-xs pl-7"
                 />
             </div>
-            <button
-                type="button"
-                onClick={() => void doFetch()}
-                aria-label="Refresh"
-                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-input hover:bg-accent"
-            >
+            <button type="button" onClick={() => void doFetch()} aria-label="Refresh" className={ICON_BUTTON}>
                 <RefreshCw className="w-3.5 h-3.5" />
             </button>
             <label className="flex items-center gap-1.5 text-xs">
@@ -305,7 +317,7 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                 <span className="text-muted-foreground">Interval:</span>
                 <select
                     aria-label="Refresh interval"
-                    className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                    className={FIELD}
                     value={refreshIntervalMs}
                     onChange={(e) => setRefreshIntervalMs(Number(e.target.value))}
                 >
@@ -316,29 +328,19 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                 </select>
             </label>
             {lastRefreshFailed && <span className="text-xs text-destructive">Last refresh failed</span>}
-            <button
-                type="button"
-                onClick={handleClear}
-                aria-label="Clear"
-                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-input hover:bg-accent"
-            >
+            <button type="button" onClick={handleClear} aria-label="Clear" className={ICON_BUTTON}>
                 <Trash2 className="w-3.5 h-3.5" />
             </button>
             <button
                 type="button"
                 onClick={handleDownload}
                 aria-label="Download"
-                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-input hover:bg-accent disabled:opacity-50 disabled:pointer-events-none"
+                className={cn(ICON_BUTTON, 'disabled:opacity-50 disabled:pointer-events-none')}
                 disabled={displayedEntries.length === 0}
             >
                 <Download className="w-3.5 h-3.5" />
             </button>
-            <button
-                type="button"
-                onClick={() => void toggleConfig()}
-                aria-label="Settings"
-                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-input hover:bg-accent"
-            >
+            <button type="button" onClick={() => void toggleConfig()} aria-label="Settings" className={ICON_BUTTON}>
                 <Settings className="w-3.5 h-3.5" />
             </button>
         </div>
@@ -347,160 +349,156 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
     let body: React.JSX.Element;
     if (isLoading) {
         body = (
-            <Card>
-                <CardContent className="py-8 flex items-center justify-center gap-2">
-                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">Loading logs...</span>
-                </CardContent>
-            </Card>
+            <div className="py-8 flex items-center justify-center gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Loading logs...</span>
+            </div>
         );
     } else if (errorStatus === 503 || errorStatus === 404) {
         const message =
             errorStatus === 503 ? 'Logs not available on this gateway' : 'Logs not available for this entity';
         body = (
-            <Card>
-                <CardContent className="py-8 text-center">
-                    <ScrollText className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                    <p className="text-sm text-muted-foreground">{message}</p>
-                    <button
-                        type="button"
-                        onClick={() => void doFetch()}
-                        className="mt-3 text-xs underline text-muted-foreground"
-                    >
-                        Retry
-                    </button>
-                </CardContent>
-            </Card>
+            <div className="py-8 text-center">
+                <ScrollText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm text-muted-foreground">{message}</p>
+                <button
+                    type="button"
+                    onClick={() => void doFetch()}
+                    className="mt-3 text-xs underline text-muted-foreground"
+                >
+                    Retry
+                </button>
+            </div>
         );
     } else if (isCleared && entries.length === 0) {
         body = (
-            <Card>
-                <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                    Cleared - next refresh will repopulate.
-                </CardContent>
-            </Card>
+            <div className="py-8 text-center text-sm text-muted-foreground">
+                Cleared - next refresh will repopulate.
+            </div>
         );
     } else if (displayedEntries.length === 0) {
         body = (
-            <Card>
-                <CardContent className="py-8 text-center">
-                    <ScrollText className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                    <p className="text-sm text-muted-foreground">No log entries</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                        Try a lower severity filter or wait for new logs
-                    </p>
-                </CardContent>
-            </Card>
+            <div className="py-8 text-center">
+                <ScrollText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm text-muted-foreground">No log entries</p>
+                <p className="text-xs text-muted-foreground mt-1">Try a lower severity filter or wait for new logs</p>
+            </div>
         );
     } else {
         body = (
-            <Card>
-                <CardContent className="p-0">
-                    {aggregation?.aggregation_level && (
-                        <div
-                            className="px-4 py-2 text-xs text-muted-foreground border-b"
-                            title={aggregation.aggregation_sources?.join('\n')}
-                        >
-                            Aggregated from {aggregation.host_count ?? aggregation.aggregation_sources?.length ?? 0}{' '}
-                            sources
-                        </div>
-                    )}
-                    <div className="max-h-[60vh] overflow-y-auto">
-                        <table className="w-full text-sm">
-                            <thead className="text-xs uppercase text-muted-foreground border-b sticky top-0 bg-card z-10">
-                                <tr>
-                                    <th className="text-left px-3 py-2 w-28">Time</th>
-                                    <th className="text-left px-3 py-2 w-20">Severity</th>
-                                    <th className="text-left px-3 py-2 w-48">Node</th>
-                                    <th className="text-left px-3 py-2">Message</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {displayedEntries.map((entry) => {
-                                    const isExpanded = expandedIds.has(entry.id);
-                                    return (
-                                        <Fragment key={entry.id}>
-                                            <tr
-                                                className="border-b hover:bg-accent/30 cursor-pointer focus:outline-none focus:bg-accent/40"
-                                                onClick={() => toggleExpand(entry.id)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter' || e.key === ' ') {
-                                                        e.preventDefault();
-                                                        toggleExpand(entry.id);
-                                                    }
-                                                }}
-                                                role="button"
-                                                tabIndex={0}
-                                                aria-expanded={isExpanded}
-                                            >
-                                                <td className="px-3 py-1.5 font-mono text-xs whitespace-nowrap">
-                                                    {formatTime(entry.timestamp)}
-                                                </td>
-                                                <td className="px-3 py-1.5 text-xs uppercase">{entry.severity}</td>
-                                                <td
-                                                    className="px-3 py-1.5 font-mono text-xs truncate max-w-48"
-                                                    title={entry.context.node}
+            <div className="overflow-hidden rounded-xl bg-white ring-1 ring-graphite/8">
+                {aggregation?.aggregation_level && (
+                    <div
+                        className="px-4 py-2 text-xs text-faint border-b border-hairline"
+                        title={aggregation.aggregation_sources?.join('\n')}
+                    >
+                        Aggregated from {aggregation.host_count ?? aggregation.aggregation_sources?.length ?? 0} sources
+                    </div>
+                )}
+                <div className="max-h-[60vh] overflow-y-auto">
+                    <table className="w-full table-fixed text-sm">
+                        <thead className="text-xs font-medium text-faint border-b border-hairline sticky top-0 bg-canvas z-10">
+                            <tr>
+                                <th className="text-left px-3 py-2 w-28">Time</th>
+                                <th className="text-left px-3 py-2 w-20">Severity</th>
+                                <th className="text-left px-3 py-2 w-48">Node</th>
+                                <th className="text-left px-3 py-2">Message</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {displayedEntries.map((entry) => {
+                                const isExpanded = expandedIds.has(entry.id);
+                                return (
+                                    <Fragment key={entry.id}>
+                                        <tr
+                                            className="border-b border-hairline hover:bg-canvas cursor-pointer focus:outline-none focus-visible:bg-canvas"
+                                            onClick={() => toggleExpand(entry.id)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.preventDefault();
+                                                    toggleExpand(entry.id);
+                                                }
+                                            }}
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-expanded={isExpanded}
+                                        >
+                                            <td className="px-3 py-1.5 font-mono text-xs whitespace-nowrap">
+                                                {formatTime(entry.timestamp)}
+                                            </td>
+                                            <td className="px-3 py-1.5">
+                                                <span
+                                                    className={cn(
+                                                        'inline-flex h-5 items-center rounded-full px-2 text-[11px] font-semibold',
+                                                        SEVERITY_CHIP[entry.severity]
+                                                    )}
                                                 >
-                                                    {entry.context.node}
-                                                </td>
-                                                <td className="px-3 py-1.5 text-xs truncate" title={entry.message}>
-                                                    {entry.message}
+                                                    {entry.severity}
+                                                </span>
+                                            </td>
+                                            <td
+                                                className="px-3 py-1.5 font-mono text-xs truncate max-w-48"
+                                                title={entry.context.node}
+                                            >
+                                                {entry.context.node}
+                                            </td>
+                                            <td className="px-3 py-1.5 text-xs truncate" title={entry.message}>
+                                                {entry.message}
+                                            </td>
+                                        </tr>
+                                        {isExpanded && (
+                                            <tr className="border-b border-hairline bg-canvas/60">
+                                                <td colSpan={4} className="px-6 py-2 text-xs text-muted-foreground">
+                                                    {entry.context.function || entry.context.file ? (
+                                                        <div className="space-y-1">
+                                                            {entry.context.function && (
+                                                                <div>
+                                                                    Function:{' '}
+                                                                    <span className="font-mono">
+                                                                        {entry.context.function}
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                            {entry.context.file && (
+                                                                <div>
+                                                                    Location:{' '}
+                                                                    <span className="font-mono">
+                                                                        {entry.context.file}
+                                                                        {entry.context.line
+                                                                            ? `:${entry.context.line}`
+                                                                            : ''}
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                            <div>
+                                                                Full timestamp:{' '}
+                                                                <span className="font-mono">{entry.timestamp}</span>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div>No source location</div>
+                                                    )}
                                                 </td>
                                             </tr>
-                                            {isExpanded && (
-                                                <tr className="border-b bg-muted/30">
-                                                    <td colSpan={4} className="px-6 py-2 text-xs text-muted-foreground">
-                                                        {entry.context.function || entry.context.file ? (
-                                                            <div className="space-y-1">
-                                                                {entry.context.function && (
-                                                                    <div>
-                                                                        Function:{' '}
-                                                                        <span className="font-mono">
-                                                                            {entry.context.function}
-                                                                        </span>
-                                                                    </div>
-                                                                )}
-                                                                {entry.context.file && (
-                                                                    <div>
-                                                                        Location:{' '}
-                                                                        <span className="font-mono">
-                                                                            {entry.context.file}
-                                                                            {entry.context.line
-                                                                                ? `:${entry.context.line}`
-                                                                                : ''}
-                                                                        </span>
-                                                                    </div>
-                                                                )}
-                                                                <div>
-                                                                    Full timestamp:{' '}
-                                                                    <span className="font-mono">{entry.timestamp}</span>
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <div>No source location</div>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            )}
-                                        </Fragment>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                        {isCapped && (
-                            <div className="px-4 py-2 text-center border-t">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowAllEntries(true)}
-                                    className="text-xs underline text-muted-foreground hover:text-foreground"
-                                >
-                                    Showing {DISPLAY_CAP} of {filteredEntries.length} entries - click to show all
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                </CardContent>
-            </Card>
+                                        )}
+                                    </Fragment>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                    {isCapped && (
+                        <div className="px-4 py-2 text-center border-t border-hairline">
+                            <button
+                                type="button"
+                                onClick={() => setShowAllEntries(true)}
+                                className="text-xs underline text-muted-foreground hover:text-foreground"
+                            >
+                                Showing {DISPLAY_CAP} of {filteredEntries.length} entries - click to show all
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
         );
     }
 
@@ -508,7 +506,7 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
         <div className="space-y-3">
             {toolbar}
             {configOpen && (
-                <div className="rounded-md border border-input bg-muted/30 p-3 flex items-center gap-3 flex-wrap">
+                <div className="rounded-lg bg-canvas p-3 ring-1 ring-graphite/8 flex items-center gap-3 flex-wrap">
                     {configLoading ? (
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading configuration...
@@ -530,7 +528,7 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                                 <span className="text-muted-foreground">Saved severity:</span>
                                 <select
                                     aria-label="saved severity"
-                                    className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                                    className={FIELD}
                                     value={configSeverity}
                                     onChange={(e) => setConfigSeverity(e.target.value as LogSeverity)}
                                 >
@@ -546,7 +544,7 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                                 <Input
                                     type="number"
                                     aria-label="max entries"
-                                    className="h-8 w-24 text-xs"
+                                    className="h-8 w-24 border-graphite/12 bg-white text-xs"
                                     value={configMaxEntries}
                                     onChange={(e) => setConfigMaxEntries(Number(e.target.value))}
                                     min={1}
