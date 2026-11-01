@@ -506,6 +506,14 @@ function dataItemTarget(
     return { entityType, entityId: parentNode.id, dataId: itemId };
 }
 
+/** Toast for a refresh that the gateway answered with an error. */
+function toastRefreshError(error: unknown): void {
+    const message = (error as { message?: unknown } | null)?.message;
+    toast.error(
+        typeof message === 'string' && message ? `Failed to refresh data: ${message}` : 'Failed to refresh data'
+    );
+}
+
 // =============================================================================
 // Entity Selection Handlers
 // =============================================================================
@@ -1795,12 +1803,31 @@ export const useAppStore = create<AppState>()(
 
                 set({ isRefreshing: true });
 
+                // True when the user selected something else while a read was pending.
+                const selectionMoved = () => get().selectedPath !== selectedPath;
+
                 try {
                     if (selectedEntity.type === 'topic') {
                         const target = dataItemTarget(selectedPath, selectedEntity.id, get().rootEntities);
-                        const { data: rawItem } = target
-                            ? await getEntityDataItem(client, target.entityType, target.entityId, target.dataId)
-                            : { data: undefined };
+                        if (!target) {
+                            set({ isRefreshing: false });
+                            return;
+                        }
+                        const { data: rawItem, error } = await getEntityDataItem(
+                            client,
+                            target.entityType,
+                            target.entityId,
+                            target.dataId
+                        );
+                        if (selectionMoved()) {
+                            set({ isRefreshing: false });
+                            return;
+                        }
+                        if (error) {
+                            toastRefreshError(error);
+                            set({ isRefreshing: false });
+                            return;
+                        }
                         const topicData = rawItem ? transformDataResponse({ items: [rawItem] })[0] : undefined;
                         if (topicData) {
                             // A single read has no direction; keep the one the item was opened with.
@@ -1832,7 +1859,16 @@ export const useAppStore = create<AppState>()(
                         return;
                     }
 
-                    const { data } = await getEntityDetail(client, entityType, entityId);
+                    const { data, error } = await getEntityDetail(client, entityType, entityId);
+                    if (selectionMoved()) {
+                        set({ isRefreshing: false });
+                        return;
+                    }
+                    if (error) {
+                        toastRefreshError(error);
+                        set({ isRefreshing: false });
+                        return;
+                    }
                     if (data) {
                         set({ selectedEntity: data as unknown as SovdEntityDetails, isRefreshing: false });
                     } else {
