@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/shallow';
 import { Database, Loader2, MessageSquare } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { DataValuePreview } from '@/components/DataValuePreview';
 import { useAppStore } from '@/lib/store';
 import { RESOURCE_TABS, renderResourceTabContent, type ResourceTabId } from '@/components/ResourceTabs';
 import type { SovdResourceEntityType } from '@/lib/types';
@@ -252,6 +253,7 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
                                             >
                                                 <MessageSquare className="w-4 h-4 text-blue-500 shrink-0" />
                                                 <span className="font-mono text-xs truncate flex-1">{item.topic}</span>
+                                                <DataValuePreview topic={item} />
                                                 {item.type && (
                                                     <Badge variant="outline" className="text-xs shrink-0">
                                                         {item.type.split('/').pop()}

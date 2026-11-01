@@ -483,6 +483,29 @@ export function resolveParentEntityType(
     return NODE_TYPE_TO_RESOURCE[parentNode.type.toLowerCase()];
 }
 
+/** Entity and data id that a selected data item is read from, resolved as selection does. */
+function dataItemTarget(
+    path: string,
+    itemId: string,
+    rootEntities: EntityTreeNode[]
+): { entityType: SovdResourceEntityType; entityId: string; dataId: string } | null {
+    // Opened from a Data tab row: /.../<entity>/data/<id>.
+    if (/\/data\/[^/]+$/.test(path)) {
+        const parsed = parseTreePath(path);
+        if (parsed.resource !== 'data' || !parsed.resourceId) return null;
+        return {
+            entityType: resolveParentEntityType(path, rootEntities) ?? parsed.entityType,
+            entityId: parsed.entityId,
+            dataId: parsed.resourceId,
+        };
+    }
+    // Topic node in the tree: its parent node is the entity.
+    const parentNode = findNode(rootEntities, path.split('/').slice(0, -1).join('/'));
+    const entityType = NODE_TYPE_TO_RESOURCE[parentNode?.type?.toLowerCase() ?? ''];
+    if (!parentNode || !entityType) return null;
+    return { entityType, entityId: parentNode.id, dataId: itemId };
+}
+
 // =============================================================================
 // Entity Selection Handlers
 // =============================================================================
@@ -1773,11 +1796,38 @@ export const useAppStore = create<AppState>()(
                 set({ isRefreshing: true });
 
                 try {
+                    if (selectedEntity.type === 'topic') {
+                        const target = dataItemTarget(selectedPath, selectedEntity.id, get().rootEntities);
+                        const { data: rawItem } = target
+                            ? await getEntityDataItem(client, target.entityType, target.entityId, target.dataId)
+                            : { data: undefined };
+                        const topicData = rawItem ? transformDataResponse({ items: [rawItem] })[0] : undefined;
+                        if (topicData) {
+                            // A single read has no direction; keep the one the item was opened with.
+                            const previous = selectedEntity.topicData;
+                            set({
+                                selectedEntity: {
+                                    ...selectedEntity,
+                                    topicData: {
+                                        ...topicData,
+                                        isPublisher: previous?.isPublisher ?? topicData.isPublisher,
+                                        isSubscriber: previous?.isSubscriber ?? topicData.isSubscriber,
+                                    },
+                                    rosType: topicData.type ?? selectedEntity.rosType,
+                                },
+                                isRefreshing: false,
+                            });
+                        } else {
+                            set({ isRefreshing: false });
+                        }
+                        return;
+                    }
+
                     const entityType = NODE_TYPE_TO_RESOURCE[selectedEntity.type?.toLowerCase() ?? ''];
                     const entityId = selectedEntity.id;
 
                     if (!entityType) {
-                        // For non-entity nodes (topic, fault, parameter), just clear refreshing
+                        // For other non-entity nodes (fault, parameter), just clear refreshing
                         set({ isRefreshing: false });
                         return;
                     }

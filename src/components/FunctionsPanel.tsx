@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/shallow';
 import { AlertTriangle, ChevronRight, Cpu, Database, GitBranch, Info, Loader2, Users, Zap } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { DataValuePreview } from '@/components/DataValuePreview';
 import { useAppStore } from '@/lib/store';
 import {
     RESOURCE_TABS,
@@ -312,6 +313,7 @@ export function FunctionsPanel({ functionId, functionName, description, path, on
                                                 topic
                                             </Badge>
                                             <span className="font-mono text-sm truncate flex-1">{topic.topic}</span>
+                                            <DataValuePreview topic={topic} />
                                             {topic.type && (
                                                 <span className="text-xs text-muted-foreground truncate max-w-[200px]">
                                                     {topic.type}
