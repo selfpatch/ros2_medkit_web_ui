@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { act, render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
@@ -429,7 +429,10 @@ describe('EntityStatusControl', () => {
         const start = await screen.findByRole('button', { name: /^start$/i });
         expect(start).toHaveAttribute('aria-disabled', 'true');
         expect(start).not.toHaveAttribute('disabled');
-        start.focus();
+        // Focus opens the tooltip, which updates state.
+        await act(async () => {
+            start.focus();
+        });
         expect(start).toHaveFocus();
     });
 

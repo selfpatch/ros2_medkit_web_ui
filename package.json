@@ -89,5 +89,8 @@
         "vite": "^7.1.7",
         "vitest": "^4.0.18"
     },
-    "license": "Apache-2.0"
+    "license": "Apache-2.0",
+    "allowScripts": {
+        "esbuild": true
+    }
 }
