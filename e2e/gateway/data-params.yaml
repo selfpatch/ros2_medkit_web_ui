@@ -1,0 +1,14 @@
+# Gateway for the data-values specs: runtime discovery, so the data source node
+# is an app and its topics are its data items.
+/**:
+    ros__parameters:
+        server:
+            host: '0.0.0.0'
+            port: 8080
+        cors:
+            # Same reasoning as params.yaml: the browser's origin is the dev
+            # server, and E2E_APP_URL is overridable.
+            allowed_origins:
+                - '*'
+        discovery:
+            mode: 'runtime_only'

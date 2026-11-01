@@ -57,5 +57,8 @@ export default defineConfig({
         // Reads the scripts gateway without changing it, but counts the requests the
         // app makes, so it must not share a run with specs driving the same app.
         { name: 'faults-serial', testMatch: /faults-.*\.spec\.ts/, fullyParallel: false, workers: 1 },
+        // Its own stack (e2e/docker-compose.data.yml) on its own port: a gateway
+        // with runtime discovery and a node that publishes data items.
+        { name: 'data-serial', testMatch: /data-.*\.spec\.ts/, fullyParallel: false, workers: 1 },
     ],
 });

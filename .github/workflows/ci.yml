@@ -63,6 +63,10 @@ jobs:
             - name: Start rosbag gateway
               run: docker compose -f e2e/docker-compose.rosbag.yml up -d
 
+            # A third stack: runtime discovery and a node that publishes data items.
+            - name: Start data gateway
+              run: docker compose -f e2e/docker-compose.data.yml up -d
+
             - name: Install Playwright browsers
               run: npx playwright install --with-deps chromium
 
@@ -91,6 +95,10 @@ jobs:
               if: failure()
               run: docker compose -f e2e/docker-compose.rosbag.yml logs
 
+            - name: Dump data gateway logs on failure
+              if: failure()
+              run: docker compose -f e2e/docker-compose.data.yml logs
+
             - name: Stop gateway
               if: always()
               run: docker compose -f e2e/docker-compose.yml down -v
@@ -101,6 +109,10 @@ jobs:
             - name: Stop rosbag gateway
               if: always()
               run: docker compose -f e2e/docker-compose.rosbag.yml down -v
+
+            - name: Stop data gateway
+              if: always()
+              run: docker compose -f e2e/docker-compose.data.yml down -v
 
     docker-build:
         runs-on: ubuntu-latest
