@@ -35,6 +35,9 @@ import {
     transformConfigurationsResponse,
     transformFault,
     unwrapItems,
+    findAppByNode,
+    indexAppsByNode,
+    type RawFaultItem,
 } from './transforms';
 import {
     getEntityDetail,
@@ -885,9 +888,11 @@ export function isPeerSourcedComponent(node: Record<string, unknown>): boolean {
  * requests. Holding the in-flight promise here collapses them into one.
  *
  * The promise is cleared on settlement so subsequent expansions refetch
- * fresh data (no stale caching across time).
+ * fresh data (no stale caching across time). It is shared within one
+ * connection only: a read still out on a gateway we have left must not
+ * answer with that gateway's apps for the next one.
  */
-let inFlightAppsRequest: Promise<Record<string, unknown>[]> | null = null;
+let inFlightAppsRequest: { client: MedkitClient; apps: Promise<Record<string, unknown>[]> } | null = null;
 
 /** Reset the dedupe cache. Exposed for tests. */
 export function __resetAppsRequestCache(): void {
@@ -997,15 +1002,64 @@ export function __resetStatusRequestCache(): void {
 }
 
 export async function fetchAllAppsDeduped(client: MedkitClient): Promise<Record<string, unknown>[]> {
-    if (inFlightAppsRequest) return inFlightAppsRequest;
-    inFlightAppsRequest = client
-        .GET('/apps')
-        .then((res) => (res.data ? unwrapItems<Record<string, unknown>>(res.data) : []))
-        .catch(() => [] as Record<string, unknown>[])
-        .finally(() => {
-            inFlightAppsRequest = null;
-        });
-    return inFlightAppsRequest;
+    if (inFlightAppsRequest?.client === client) return inFlightAppsRequest.apps;
+    const request = {
+        client,
+        apps: client
+            .GET('/apps')
+            .then((res) => (res.data ? unwrapItems<Record<string, unknown>>(res.data) : []))
+            .catch(() => [] as Record<string, unknown>[])
+            .finally(() => {
+                if (inFlightAppsRequest === request) inFlightAppsRequest = null;
+            }),
+    };
+    inFlightAppsRequest = request;
+    return request.apps;
+}
+
+/** How long a fault source no app owns waits before it reads the apps again. */
+export const FAULT_APPS_REREAD_MS = 60000;
+
+/**
+ * The connected gateway's apps by the ROS 2 node each runs as, which places faults on
+ * the app the gateway files them under. Per connection, and only ever added to: an
+ * app's node drops out of `GET /apps` while the node is down, and its faults are still
+ * that app's.
+ */
+let faultAppsClient: unknown = null;
+let faultAppsByNode = new Map<string, string>();
+let faultAppsReadAt = Number.NEGATIVE_INFINITY;
+
+/** The items of a faults answer, or none for an answer that has no list. */
+function rawFaultItems(rawData: unknown): unknown[] {
+    const items = (rawData as { items?: unknown } | null | undefined)?.items;
+    return Array.isArray(items) ? items : [];
+}
+
+/**
+ * The index to place these faults with. Reads the apps when a fault comes from a node
+ * the index cannot place - the first faults of a connection, or a node that started
+ * since - and not again within `FAULT_APPS_REREAD_MS`: a source that belongs to no
+ * app stays unplaced, and would otherwise cost a read on every refresh.
+ */
+async function faultAppsFor(client: MedkitClient, rawFaults: unknown[]): Promise<ReadonlyMap<string, string>> {
+    if (faultAppsClient !== client) {
+        faultAppsClient = client;
+        faultAppsByNode = new Map();
+        faultAppsReadAt = Number.NEGATIVE_INFINITY;
+    }
+    const index = faultAppsByNode;
+    const unplaced = rawFaults.some((raw) => {
+        const source = (raw as RawFaultItem | null)?.reporting_sources?.[0];
+        return typeof source === 'string' && source !== '' && findAppByNode(source, index) === undefined;
+    });
+    if (!unplaced || Date.now() - faultAppsReadAt < FAULT_APPS_REREAD_MS) return index;
+    faultAppsReadAt = Date.now();
+    const apps = await fetchAllAppsDeduped(client);
+    for (const [node, app] of indexAppsByNode(apps)) {
+        index.set(node, app);
+    }
+    return index;
 }
 
 /** Fallback: fetch entity details from API when not in tree */
@@ -2723,13 +2777,19 @@ export const useAppStore = create<AppState>()(
                                 query: { status: 'all' },
                             },
                         });
+                        // Faults name the node that reported them; which app that is may take
+                        // a read of its own. Before the checks below, which have to hold once
+                        // the last answer is in.
+                        const appsByNode = faultsError
+                            ? undefined
+                            : await faultAppsFor(client, rawFaultItems(faultsData));
                         // A refresh outlives the session that started it, so an answer from
                         // the gateway we just left must not populate the next one's list,
                         // and neither may one a later read has already answered for.
                         if (get().client !== client || readSeq <= faultsAppliedSeq) return;
                         if (faultsError) throw new Error(describeGatewayError(faultsError));
                         faultsAppliedSeq = readSeq;
-                        const result = transformFaultsResponse(faultsData);
+                        const result = transformFaultsResponse(faultsData, appsByNode);
                         // The fault stream writes this same list. If it did so while this
                         // request was in flight, its state is the newer of the two.
                         if (get().faults !== currentFaults) {
@@ -2918,7 +2978,10 @@ export const useAppStore = create<AppState>()(
                                 continue;
                             }
                             const faultData = faultPayload as Parameters<typeof transformFault>[0];
-                            const fault = transformFault(faultData);
+                            // Keyed like the list, so the event finds the row it is about.
+                            const appsByNode = await faultAppsFor(client, [faultData]);
+                            if (!running) break;
+                            const fault = transformFault(faultData, undefined, appsByNode);
 
                             get().applyFaultStreamEvent(event.event ?? 'fault_confirmed', fault);
                         }
@@ -2974,7 +3037,7 @@ export const useAppStore = create<AppState>()(
                 if (!client) return { items: [], count: 0 };
                 const { data, error: fetchError } = await getEntityFaults(client, entityType, entityId, signal);
                 if (fetchError) return { items: [], count: 0 };
-                return transformFaultsResponse(data);
+                return transformFaultsResponse(data, await faultAppsFor(client, rawFaultItems(data)));
             },
 
             fetchEntityLogs: async (entityType, entityId, params, signal) => {

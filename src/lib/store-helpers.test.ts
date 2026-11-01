@@ -580,6 +580,17 @@ describe('fetchAllAppsDeduped', () => {
 
         await expect(fetchAllAppsDeduped(client)).resolves.toEqual([]);
     });
+
+    it('does not answer one connection with a read still out on another', async () => {
+        const left = { GET: vi.fn(() => new Promise(() => {})) } as unknown as MedkitClient;
+        const current = {
+            GET: vi.fn().mockResolvedValue({ data: { items: [{ id: 'current-app' }] } }),
+        } as unknown as MedkitClient;
+
+        void fetchAllAppsDeduped(left);
+
+        await expect(fetchAllAppsDeduped(current)).resolves.toEqual([{ id: 'current-app' }]);
+    });
 });
 
 // =============================================================================
