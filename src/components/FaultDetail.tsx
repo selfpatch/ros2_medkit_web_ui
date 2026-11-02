@@ -7,7 +7,7 @@ import { useMeasured } from '@/hooks/useMeasured';
 import { parseBulkDataUri, saveBlob } from '@/lib/bulk-data';
 import { useAppStore } from '@/lib/store';
 import {
-    captureTime,
+    captureOf,
     changeOf,
     formatReading,
     isStartupCapture,
@@ -548,7 +548,7 @@ export function FaultDetail({ fault, details, onBack, onClear, isClearing }: Fau
         () => snapshots.filter(isRosbagSnapshot).sort((a, b) => (snapshotTime(b) ?? 0) - (snapshotTime(a) ?? 0)),
         [snapshots]
     );
-    const capture = captureTime(frames) ?? (recordings[0] ? snapshotTime(recordings[0]) : null);
+    const capture = useMemo(() => captureOf(snapshots), [snapshots]);
     const times: FaultTimes = faultTimes(fault, capture);
 
     // Only the topics medkit named and that have a reading in words are read again.

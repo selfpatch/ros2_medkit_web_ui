@@ -27,7 +27,8 @@ import { SEGMENT_GROUP, segmentClass } from '@/components/SegmentedSwitch';
 import { useAppStore } from '@/lib/store';
 import { useFaultPolling } from '@/hooks/useFaultPolling';
 import { useMeasured } from '@/hooks/useMeasured';
-import { isOpen, lastReportedAt, toMs, whenWords } from '@/lib/fault-story';
+import { faultTimes, isOpen, lastReportedAt, whenWords } from '@/lib/fault-story';
+import { captureOf } from '@/lib/fault-readings';
 import type { Fault, FaultSeverity, FaultResponse, FaultStatusValue } from '@/lib/types';
 import { cn, faultKey, mapFaultEntityTypeToResourceType } from '@/lib/utils';
 
@@ -219,6 +220,7 @@ function breakable(code: string) {
  */
 function ListItem({
     fault,
+    came,
     selected,
     withEntity,
     now,
@@ -227,6 +229,8 @@ function ListItem({
     isClearing,
 }: {
     fault: Fault;
+    /** When it came, as its page says once its details are read; until then its first report */
+    came: number | null;
     selected: boolean;
     withEntity: boolean;
     now: number;
@@ -235,7 +239,6 @@ function ListItem({
     isClearing: boolean;
 }) {
     const open = isOpen(fault);
-    const came = toMs(fault.timestamp);
     const code = (
         <code className="min-w-0 font-mono text-xs leading-snug [overflow-wrap:anywhere] text-body">
             {breakable(fault.code)}
@@ -268,7 +271,10 @@ function ListItem({
                 <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
                     <SeverityChip severity={fault.severity} />
                     {came !== null && (
-                        <time dateTime={fault.timestamp} className="truncate text-[11px] text-faint tabular-nums">
+                        <time
+                            dateTime={new Date(came).toISOString()}
+                            className="truncate text-[11px] text-faint tabular-nums"
+                        >
                             {whenWords(came, now)}
                         </time>
                     )}
@@ -378,6 +384,7 @@ function FaultsPage() {
         fetchFaults,
         clearFault,
         getFaultWithEnvironmentData,
+        showingFaults,
     } = useAppStore(
         useShallow((state) => ({
             faults: state.faults,
@@ -389,12 +396,16 @@ function FaultsPage() {
             fetchFaults: state.fetchFaults,
             clearFault: state.clearFault,
             getFaultWithEnvironmentData: state.getFaultWithEnvironmentData,
+            showingFaults: state.showingFaults,
         }))
     );
 
     // Refreshes are shared with every other mounted fault view, so the gateway sees
     // one request per refresh no matter how many of them are on screen.
     useFaultPolling();
+
+    // The list is in front of the user: a fault needs no toast to be seen.
+    useEffect(() => showingFaults(), [showingFaults]);
 
     // Clear fault handler
     const handleClear = useCallback(
@@ -666,12 +677,19 @@ function FaultsPage() {
             </div>
         );
     } else {
+        // Dated the way its page dates it, from medkit's capture where its details are in:
+        // a fault that came back keeps its first report, so that alone would date it then.
+        const cameAt = (fault: Fault) => {
+            const details = faultDetails.get(faultKey(fault));
+            return faultTimes(fault, details ? captureOf(details.environment_data?.snapshots ?? []) : null).came;
+        };
         const list = (faultsOfList: Fault[], withEntity: boolean) => (
             <ul className="grid gap-0.5">
                 {faultsOfList.map((fault) => (
                     <ListItem
                         key={faultKey(fault)}
                         fault={fault}
+                        came={cameAt(fault)}
                         withEntity={withEntity}
                         now={now}
                         selected={drawn !== null && faultKey(drawn) === faultKey(fault)}

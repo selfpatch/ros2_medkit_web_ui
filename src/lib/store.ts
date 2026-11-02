@@ -26,8 +26,9 @@ import type {
     StartScriptExecutionRequest,
 } from './types';
 import { createMedkitClient, normalizeBaseUrl, type MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
-import type { FaultTopicRead, SovdResourceEntityType } from './types';
+import type { FaultSeverity, FaultTopicRead, SovdResourceEntityType } from './types';
 import { faultKey } from './utils';
+import { toMs } from './fault-story';
 import {
     transformFaultsResponse,
     transformOperationsResponse,
@@ -295,8 +296,13 @@ export interface AppState {
     // Faults actions
     /** `force` skips the shared in-flight refresh, for a read that must see the newest state. */
     fetchFaults: (options?: { force?: boolean }) => Promise<void>;
-    /** Applies one fault stream event to the shared list. */
-    applyFaultStreamEvent: (eventType: string, fault: Fault) => void;
+    /** Applies one fault stream event to the shared list; a `replayed` one raises no toast. */
+    applyFaultStreamEvent: (eventType: string, fault: Fault, options?: { replayed?: boolean }) => void;
+    /**
+     * Marks the faults dashboard as on screen until the returned function runs: a fault
+     * raises no toast meanwhile, the list in front of the user already shows it.
+     */
+    showingFaults: () => () => void;
     clearFault: (entityType: SovdResourceEntityType, entityId: string, faultCode: string) => Promise<boolean>;
     registerUpdate: (body: { id: string; [key: string]: unknown }, signal?: AbortSignal) => Promise<void>;
     subscribeFaultStream: () => void;
@@ -967,17 +973,48 @@ function sameFaultTimes(a: Fault, b: Fault): boolean {
 }
 
 /**
+ * A fault row without the times a reported fault keeps moving: which fault it is, on which
+ * entity (one code can be reported by two, and the clear action targets the one displayed),
+ * and what the row says about it.
+ */
+function faultPlaceKey(fault: Fault): string {
+    return `${faultKey(fault)}:${fault.status}:${fault.severity}:${fault.message}:${fault.timestamp}`;
+}
+
+/**
  * Everything a fault row shows, so an answer that changed any of it is not mistaken
- * for the list already on screen. The entity is part of it because one fault code
- * can be reported by two entities and the clear action targets the one displayed.
+ * for the list already on screen.
  */
 function faultRowKey(fault: Fault): string {
     // And the times the fault page tells its story from: a node that keeps reporting a
     // fault moves only its newest report, and a heal and return between two reads only
     // its last pass and count.
     const { last_occurred, last_passed, occurrence_count } = fault.parameters ?? {};
-    const times = `${String(last_occurred)}:${String(last_passed)}:${String(occurrence_count)}`;
-    return `${faultKey(fault)}:${fault.status}:${fault.severity}:${fault.message}:${fault.timestamp}:${times}`;
+    return `${faultPlaceKey(fault)}:${String(last_occurred)}:${String(last_passed)}:${String(occurrence_count)}`;
+}
+
+/** Whether `after` is `before` with only the times of its faults moved. */
+function onlyTimesMoved(before: Fault[], after: Fault[]): boolean {
+    return (
+        before.length === after.length && before.every((fault, i) => faultPlaceKey(fault) === faultPlaceKey(after[i]!))
+    );
+}
+
+/** The newest report of a fault, failed or passed, in ms. */
+function lastReportMs(fault: Fault): number {
+    return Math.max(toMs(fault.parameters?.last_occurred) ?? 0, toMs(fault.parameters?.last_passed) ?? 0);
+}
+
+/**
+ * A read's answer, with a row the stream has since reported more recently kept as the
+ * stream left it: the read may have been answered before that report.
+ */
+function keepNewerReports(answer: Fault[], onScreen: Fault[]): Fault[] {
+    const shown = new Map(onScreen.map((fault) => [faultPlaceKey(fault), fault]));
+    return answer.map((fault) => {
+        const there = shown.get(faultPlaceKey(fault));
+        return there && lastReportMs(there) > lastReportMs(fault) ? there : fault;
+    });
 }
 
 /** The first reporting source a fault carries, if it carries one. */
@@ -1096,6 +1133,20 @@ export const FAULT_APPS_REREAD_MS = 60_000;
  * `FAULT_APPS_REREAD_MS`.
  */
 export const FAULT_APPS_RETRY_MS = 5_000;
+
+/**
+ * A stream opened without a Last-Event-ID first replays the gateway's event buffer (up to
+ * 100 events), so a page that just opened receives every confirm and clear since the
+ * gateway started. An event stamped this long before the stream opened is such a replay:
+ * it still updates the list, but it is not news to raise a toast for. The margin covers a
+ * robot clock a little behind the browser's.
+ */
+export const FAULT_REPLAY_MARGIN_MS = 10_000;
+
+/** How many faults dashboards are on screen: while one is, a fault raises no toast. */
+let faultsOnScreen = 0;
+
+const FAULT_SEVERITY_RANK: Record<FaultSeverity, number> = { info: 0, warning: 1, error: 2, critical: 3 };
 
 /**
  * The connected gateway's apps by the ROS 2 node each runs as, which places faults on
@@ -2931,8 +2982,13 @@ export const useAppStore = create<AppState>()(
                         faultsAppliedSeq = readSeq;
                         const result = transformFaultsResponse(faultsData, appsByNode);
                         // The fault stream writes this same list. If it did so while this
-                        // request was in flight, its state is the newer of the two.
-                        if (get().faults !== currentFaults) {
+                        // request was in flight, its state is the newer of the two - unless it
+                        // only moved times: a confirmed fault sends an update for every report
+                        // of it, and dropping the read for those would drop every read while
+                        // one fault is being reported.
+                        const onScreen = get().faults;
+                        const timesOnly = onScreen !== currentFaults && onlyTimesMoved(currentFaults, onScreen);
+                        if (onScreen !== currentFaults && !timesOnly) {
                             if (isInitialLoad && !faultsBaselineReread) {
                                 // Except on the first read: the stream carries what happens
                                 // next, not what was already raised, so keeping only its
@@ -2953,13 +3009,14 @@ export const useAppStore = create<AppState>()(
                         // re-rendering the list for an identical answer. Every field the row
                         // renders belongs in the key, including the entity: one code can be
                         // reported by two entities, and clearing acts on the entity shown.
-                        const newKey = result.items.map(faultRowKey).join('|');
-                        const oldKey = currentFaults.map(faultRowKey).join('|');
+                        const items = timesOnly ? keepNewerReports(result.items, onScreen) : result.items;
+                        const newKey = items.map(faultRowKey).join('|');
+                        const oldKey = onScreen.map(faultRowKey).join('|');
                         faultsRecoveryAttemptedFor = null;
                         faultsBaselineReread = false;
                         if (newKey !== oldKey) {
                             set({
-                                faults: result.items,
+                                faults: items,
                                 isLoadingFaults: false,
                                 faultsLoaded: true,
                                 faultsError: null,
@@ -3000,7 +3057,7 @@ export const useAppStore = create<AppState>()(
 
             setFaultsAutoRefresh: (enabled: boolean) => set({ faultsAutoRefresh: enabled }),
 
-            applyFaultStreamEvent: (eventType: string, fault: Fault) => {
+            applyFaultStreamEvent: (eventType: string, fault: Fault, options: { replayed?: boolean } = {}) => {
                 // An event proves the gateway is answering, which a failed read of the whole
                 // list had left in doubt. It does not prove the list is complete - only a
                 // read can - so it buys a read rather than clearing the failure by itself.
@@ -3051,16 +3108,32 @@ export const useAppStore = create<AppState>()(
                         }),
                     });
                     // A confirmed fault sends an update for every report of it, FAILED or
-                    // PASSED; one that only moved its times is news to the page, not to the user.
-                    if (sameFault) {
+                    // PASSED, and a node may count in its message ("for 34.1s"): news to the
+                    // page, not to the user. A fault that became confirmed, or worse, is.
+                    const confirmed = fault.status === 'active' && existing.status !== 'active';
+                    const worse = FAULT_SEVERITY_RANK[fault.severity] > FAULT_SEVERITY_RANK[existing.severity];
+                    if (!confirmed && !worse) {
                         readAgainAfterFailure();
                         return;
                     }
                 } else {
                     set({ faults: [...faults, fault] });
                 }
-                toast.warning(`Fault: ${fault.message}`, { autoClose: 5000 });
+                // One toast per fault on screen: a fault that comes and goes faster than the
+                // toast closes must not stack a column of the same message.
+                if (!options.replayed && faultsOnScreen === 0) {
+                    toast.warning(`Fault: ${fault.message}`, { autoClose: 5000, toastId: `fault:${faultKey(fault)}` });
+                }
                 readAgainAfterFailure();
+            },
+
+            showingFaults: () => {
+                faultsOnScreen += 1;
+                let shown = true;
+                return () => {
+                    if (shown) faultsOnScreen -= 1;
+                    shown = false;
+                };
             },
 
             clearFault: async (entityType: SovdResourceEntityType, entityId: string, faultCode: string) => {
@@ -3109,6 +3182,7 @@ export const useAppStore = create<AppState>()(
                 }
 
                 const stream = client.streams.faults();
+                const openedAt = Date.now();
                 let running = true;
 
                 const cleanup = () => {
@@ -3139,8 +3213,12 @@ export const useAppStore = create<AppState>()(
                             const appsByNode = await faultAppsFor(client, [faultData]);
                             if (!running) break;
                             const fault = transformFault(faultData, undefined, appsByNode);
+                            // The gateway stamps each event in seconds; one without a stamp
+                            // counts as live.
+                            const stampedAt = typeof rawData.timestamp === 'number' ? rawData.timestamp * 1000 : null;
+                            const replayed = stampedAt !== null && stampedAt < openedAt - FAULT_REPLAY_MARGIN_MS;
 
-                            get().applyFaultStreamEvent(event.event ?? 'fault_confirmed', fault);
+                            get().applyFaultStreamEvent(event.event ?? 'fault_confirmed', fault, { replayed });
                         }
                         // The stream can also end without an error - a gateway closing the
                         // response cleanly looks like this. Updates have stopped either way,

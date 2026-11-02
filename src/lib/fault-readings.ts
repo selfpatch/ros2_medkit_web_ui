@@ -1,4 +1,4 @@
-import type { FreezeFrameSnapshot, Snapshot } from '@/lib/types';
+import { isRosbagSnapshot, type FreezeFrameSnapshot, type Snapshot } from '@/lib/types';
 
 /**
  * What a fault's freeze frames read, in words a person can compare: "Closest obstacle
@@ -398,6 +398,18 @@ export function captureTime(frames: FreezeFrameSnapshot[]): number | null {
     return times.length ? Math.min(...times) : null;
 }
 
+/**
+ * When the fault's newest time came, as medkit captured it: its newest freeze frames, else
+ * its newest recording; null without either. The page and the list date a fault by it.
+ */
+export function captureOf(snapshots: Snapshot[]): number | null {
+    const recorded = snapshots
+        .filter(isRosbagSnapshot)
+        .map(snapshotTime)
+        .filter((at): at is number => at !== null);
+    return captureTime(newestCapture(snapshots)) ?? (recorded.length ? Math.max(...recorded) : null);
+}
+
 /** Whether every frame of a capture was read at gateway start, none when the fault came */
 export function isStartupCapture(frames: FreezeFrameSnapshot[]): boolean {
     return frames.length > 0 && frames.every(isStartupFrame);
@@ -437,22 +449,31 @@ export function readingRows(
             });
         }
     }
+    // One message can carry a value twice (a clearance at its top and inside what blocks it):
+    // it shows once. The same name on two topics is two readings, each read again live.
     const shown: typeof rows = [];
     for (const row of rows) {
-        const same = shown.filter((one) => one.label === row.label);
+        const same = shown.filter((one) => one.label === row.label && one.then.topic === row.then.topic);
         if (!same.some((one) => formatReading(one.then) === formatReading(row.then))) shown.push(row);
     }
-    const clashing = new Set(shown.map((row) => row.label).filter((label, i, all) => all.indexOf(label) !== i));
-    return shown
+    const clashes = (labels: string[]) => new Set(labels.filter((label, i, all) => all.indexOf(label) !== i));
+    const clashing = clashes(shown.map((row) => row.label));
+    const named = shown
         .sort((a, b) => a.rank - b.rank)
         .map((row) => ({
-            key: row.key,
+            row,
             label: !clashing.has(row.label)
                 ? row.label
                 : row.then.context
                   ? `${row.then.context} ${row.label.toLowerCase()}`
                   : `${row.label} (${words(row.then.topic)})`,
-            then: row.then,
-            now: row.now,
         }));
+    // Two topics of one shape give the same context too: their topic tells them apart.
+    const stillClashing = clashes(named.map((one) => one.label));
+    return named.map(({ row, label }) => ({
+        key: row.key,
+        label: stillClashing.has(label) && row.then.context ? `${label} (${words(row.then.topic)})` : label,
+        then: row.then,
+        now: row.now,
+    }));
 }

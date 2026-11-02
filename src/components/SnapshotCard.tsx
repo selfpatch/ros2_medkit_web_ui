@@ -1,6 +1,7 @@
 import { FileBox, Film } from 'lucide-react';
 import { RosbagDownloadButton } from './RosbagDownloadButton';
 import { snapshotTime } from '@/lib/fault-readings';
+import { whenWords } from '@/lib/fault-story';
 import { formatBytes, formatDuration } from '@/lib/utils';
 import type { FreezeFrameSnapshot, Snapshot } from '@/lib/types';
 import { isFreezeFrameSnapshot, isRosbagSnapshot } from '@/lib/types';
@@ -10,6 +11,33 @@ interface SnapshotCardProps {
     index: number;
 }
 
+const isPlain = (value: unknown) => value === null || typeof value !== 'object';
+
+/**
+ * JSON laid out a field a line, except where that runs long for little: a list of plain
+ * values stays on one line that wraps (a scan's ranges read as a paragraph, not as seven
+ * hundred lines), and so does a small object of plain values inside the message (a point,
+ * a stamp).
+ */
+function layOut(value: unknown, indent = ''): string {
+    const inner = `${indent}  `;
+    if (Array.isArray(value)) {
+        if (value.length === 0) return '[]';
+        if (value.every(isPlain)) return `[${value.map((item) => JSON.stringify(item)).join(', ')}]`;
+        return `[\n${value.map((item) => inner + layOut(item, inner)).join(',\n')}\n${indent}]`;
+    }
+    if (value !== null && typeof value === 'object') {
+        const entries = Object.entries(value);
+        if (entries.length === 0) return '{}';
+        if (indent && entries.length <= 4 && entries.every(([, item]) => isPlain(item))) {
+            return `{${entries.map(([key, item]) => `${JSON.stringify(key)}: ${JSON.stringify(item)}`).join(', ')}}`;
+        }
+        const lines = entries.map(([key, item]) => `${inner}${JSON.stringify(key)}: ${layOut(item, inner)}`);
+        return `{\n${lines.join(',\n')}\n${indent}}`;
+    }
+    return JSON.stringify(value) ?? String(value);
+}
+
 /**
  * A freeze frame of a text message (std_msgs/String and the like) carries its text, not
  * an object: shown as it is, or laid out when the text is JSON.
@@ -17,7 +45,7 @@ interface SnapshotCardProps {
 function frameText(frame: FreezeFrameSnapshot): string | null {
     if (typeof frame.data !== 'string' || frame.data === '') return null;
     try {
-        return JSON.stringify(JSON.parse(frame.data), null, 2);
+        return layOut(JSON.parse(frame.data));
     } catch {
         return frame.data;
     }
@@ -46,20 +74,31 @@ export function SnapshotCard({ snapshot, index }: SnapshotCardProps) {
                 {/* A narrow pane wraps the topic and its type rather than cutting them off. */}
                 <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                        {topic && (
+                        {/* A frame is named by the topic it caught; a recording, or a frame
+                            without a topic, by its place among the fault's snapshots. */}
+                        {topic ? (
                             <span className="font-mono text-[13px] [overflow-wrap:anywhere] text-foreground">
                                 {topic}
                             </span>
+                        ) : (
+                            <span className="text-sm font-medium text-foreground">Snapshot #{index + 1}</span>
                         )}
-                        <span className={topic ? 'text-xs text-faint' : 'text-sm font-medium text-foreground'}>
-                            Snapshot #{index + 1}
-                        </span>
+                        {at !== null && (
+                            <time
+                                dateTime={new Date(at).toISOString()}
+                                title={new Date(at).toLocaleString()}
+                                className="text-xs text-faint tabular-nums"
+                            >
+                                {whenWords(at, Date.now())}
+                            </time>
+                        )}
                     </div>
-                    <div className="text-xs [overflow-wrap:anywhere] text-faint">
-                        <span>{rosbag ? 'Rosbag' : 'Freeze Frame'}</span>
-                        {messageType && ` · ${messageType}`}
-                        {at !== null && ` · ${new Date(at).toLocaleString()}`}
-                    </div>
+                    {(rosbag || messageType) && (
+                        <div className="text-xs [overflow-wrap:anywhere] text-faint">
+                            {rosbag ? 'Rosbag' : messageType}
+                            {rosbag && messageType && ` · ${messageType}`}
+                        </div>
+                    )}
                 </div>
                 {rosbag && <RosbagDownloadButton snapshot={rosbag} size="icon" />}
             </div>
@@ -91,10 +130,10 @@ export function SnapshotCard({ snapshot, index }: SnapshotCardProps) {
             {fields && fieldCount > 0 && (
                 <details className="group border-t border-hairline text-xs">
                     <summary className="cursor-pointer px-3 py-1.5 text-muted-foreground hover:text-foreground">
-                        Data ({fieldCount} fields)
+                        Data ({fieldCount} {fieldCount === 1 ? 'field' : 'fields'})
                     </summary>
-                    <pre className="mx-3 mb-3 max-h-48 overflow-auto rounded-md bg-canvas p-2 font-mono text-xs text-foreground">
-                        {JSON.stringify(fields, null, 2)}
+                    <pre className="mx-3 mb-3 max-h-48 overflow-auto rounded-md bg-canvas p-2 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground">
+                        {layOut(fields)}
                     </pre>
                 </details>
             )}

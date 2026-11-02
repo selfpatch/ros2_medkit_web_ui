@@ -108,8 +108,17 @@ export function faultTimes(fault: Fault, capture: number | null): FaultTimes {
         };
     }
     const ended = fault.status === 'healed' ? lastReport : null;
-    const came = capture !== null && (ended === null || capture <= ended) ? capture : first;
-    return { came, ended, first, lastReport, captureIsEarlier: false };
+    // medkit takes its frames within seconds of the report that confirmed the fault, so a
+    // node that reported it once has its last report just before the capture: still this
+    // time's. One from well after the end is of a later time.
+    const came = capture !== null && (ended === null || capture <= ended + 10 * SECOND) ? capture : first;
+    return {
+        came,
+        ended: ended !== null && came !== null ? Math.max(ended, came) : ended,
+        first,
+        lastReport,
+        captureIsEarlier: false,
+    };
 }
 
 /** How the fault stands, in a few words: the one place the page says how long */
@@ -120,7 +129,8 @@ export function statusWords(fault: Fault, times: FaultTimes, now: number): strin
         case 'pending':
             return times.came === null ? 'Pending' : `Pending ${spanWords(now - times.came)}`;
         case 'healed':
-            return times.came !== null && times.ended !== null
+            // A node that reported it once stopped as it came: how long it lasted is not known.
+            return times.came !== null && times.ended !== null && times.ended - times.came >= 5 * SECOND
                 ? `Healed after ${spanWords(times.ended - times.came)}`
                 : 'Healed';
         case 'cleared':
