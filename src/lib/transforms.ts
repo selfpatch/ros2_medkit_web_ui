@@ -61,13 +61,16 @@ export function unwrapItems<T>(response: unknown): T[] {
  * a fault names the node that reported it, not the app. A gateway that takes its apps
  * from a manifest names them apart from their nodes (`/lane_navigator` runs as app
  * `lane-navigator`), and asking for a fault under the node's name is a 404.
- * An app whose node is not running carries no binding and is left out.
+ * An app whose node is not running carries no binding and is left out, and so is
+ * anything that is not an app: an answer that is not a list reads as no apps.
  */
-export function indexAppsByNode(apps: readonly Record<string, unknown>[]): Map<string, string> {
+export function indexAppsByNode(apps: unknown): Map<string, string> {
     const index = new Map<string, string>();
-    for (const app of apps) {
-        const xMedkit = app['x-medkit'] as { ros2?: { node?: unknown } } | undefined;
-        const node = xMedkit?.ros2?.node;
+    if (!Array.isArray(apps)) return index;
+    for (const item of apps) {
+        if (typeof item !== 'object' || item === null) continue;
+        const app = item as { id?: unknown; 'x-medkit'?: { ros2?: { node?: unknown } } };
+        const node = app['x-medkit']?.ros2?.node;
         if (typeof app.id === 'string' && typeof node === 'string' && node) {
             index.set(node, app.id);
         }
@@ -92,6 +95,28 @@ export function findAppByNode(source: string, appsByNode?: ReadonlyMap<string, s
         }
     }
     return owner?.app;
+}
+
+/**
+ * The index to place an app's own fault list with. The gateway files that list under
+ * the app's node and names it in `x-medkit.source_id` - taken from the manifest binding
+ * while the node is down, when `GET /apps` leaves the node out. When the index does not
+ * know that node, a copy that adds it places this list, so a fault from the app's node
+ * is not filed under an app whose node sits above it; a deeper known node still wins.
+ * `appsByNode` itself is never changed. Without `appId` (not an app's own list), or
+ * without a node name in the answer, it is `appsByNode` as given.
+ */
+export function withListSourceNode(
+    appsByNode: ReadonlyMap<string, string> | undefined,
+    rawData: unknown,
+    appId: string | undefined
+): ReadonlyMap<string, string> | undefined {
+    if (appId === undefined) return appsByNode;
+    const sourceId = (rawData as { 'x-medkit'?: { source_id?: unknown } } | null | undefined)?.['x-medkit']?.source_id;
+    if (typeof sourceId !== 'string' || sourceId === '' || appsByNode?.has(sourceId)) return appsByNode;
+    const withSource = new Map(appsByNode);
+    withSource.set(sourceId, appId);
+    return withSource;
 }
 
 // =============================================================================
@@ -138,12 +163,13 @@ export interface RawFaultItem {
  *   - `reporting_sources[0]` → `entity_id`, the app that source belongs to
  *
  * `appsByNode` (from `indexAppsByNode`) places the source; a source it does not
- * know falls back to its last path segment.
+ * know goes to `fallbackEntityId` when given, else to its last path segment.
  */
 export function transformFault(
     apiFault: RawFaultItem,
     syntheticIdSuffix?: string,
-    appsByNode?: ReadonlyMap<string, string>
+    appsByNode?: ReadonlyMap<string, string>,
+    fallbackEntityId?: string
 ): Fault {
     // Map severity number/label to FaultSeverity.
     // Label check takes priority over numeric value; critical is checked first.
@@ -178,13 +204,13 @@ export function transformFault(
         status = 'healed';
     }
 
-    // Extract entity info from reporting_sources.
-    // reporting_sources contains ROS 2 node paths like "/bridge/diagnostic_bridge".
-    // The app running as that node is the entity, as the gateway itself names it.
-    // A source no known app owns falls back to its last segment (preserving
-    // underscores), which is the app id on gateways that name apps after their nodes.
+    // reporting_sources[0] is a node FQN or a name under one. The entity is the app running
+    // as that node, else the app whose node the source sits under (deepest wins). A source
+    // no known app owns goes to `fallbackEntityId` when the caller has one (an app's own
+    // fault list), else to its last segment (preserving underscores), which is the app id
+    // on gateways that name apps after their nodes.
     const source = apiFault.reporting_sources?.[0] || '';
-    const entity_id = findAppByNode(source, appsByNode) ?? (source.split('/').pop() || 'unknown');
+    const entity_id = findAppByNode(source, appsByNode) ?? fallbackEntityId ?? (source.split('/').pop() || 'unknown');
 
     // Use entity_type from raw data if provided, otherwise default to 'app'.
     // Both channels that produce faults - the list endpoint and the SSE stream - come
@@ -287,26 +313,35 @@ function moreCurrentRevision(a: Fault, b: Fault): Fault {
 }
 
 /**
+ * The items of a faults answer, or none for an answer that has no list. A non-array
+ * `items` (e.g. `{}` or a string) counts as none: `|| []` would catch only nullish
+ * values, and any other truthy non-array would crash iteration. The store decides
+ * from these same items whether a list needs the apps read.
+ */
+export function rawFaultItems(rawData: unknown): unknown[] {
+    const items = (rawData as { items?: unknown } | null | undefined)?.items;
+    return Array.isArray(items) ? items : [];
+}
+
+/**
  * Transform the raw gateway faults list response into `ListFaultsResponse`.
- * `appsByNode` places each fault on its app, as in `transformFault`.
+ * `appsByNode` and `fallbackEntityId` place each fault on its app, as in `transformFault`.
  */
 export function transformFaultsResponse(
     rawData: unknown,
-    appsByNode?: ReadonlyMap<string, string>
+    appsByNode?: ReadonlyMap<string, string>,
+    fallbackEntityId?: string
 ): ListFaultsResponse {
     if (!rawData || typeof rawData !== 'object') return { items: [], count: 0 };
     const data = rawData as RawFaultsResponse;
-    // Guard against non-array `items` (e.g. `{}` or a string) - the `|| []`
-    // fallback only catches nullish values, so any other truthy non-array
-    // would crash `.map`.
-    const rawItems = Array.isArray(data.items) ? data.items : [];
+    const rawItems = rawFaultItems(data);
     // An aggregating gateway can reach one fault through more than one peer and list
     // it twice. A fault is identified by its code on its entity, so the repeats are
     // the same fault: one row, counted once.
     const indexByKey = new Map<string, number>();
     const items: Fault[] = [];
     for (const [idx, rawItem] of rawItems.entries()) {
-        const fault = transformFault(rawItem as RawFaultItem, String(idx), appsByNode);
+        const fault = transformFault(rawItem as RawFaultItem, String(idx), appsByNode, fallbackEntityId);
         const key = faultKey(fault);
         const existing = indexByKey.get(key);
         if (existing === undefined) {
