@@ -23,7 +23,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, act, type RenderResult } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { FaultsDashboard, FaultsCountBadge } from './FaultsDashboard';
-import { useAppStore } from '@/lib/store';
+import { useAppStore, __resetAppsRequestCache, __resetFaultAppsIndex } from '@/lib/store';
 
 const POLL_INTERVAL_MS = 5000;
 const FAULT_STREAM_SAFETY_NET_MS = 30000;
@@ -50,8 +50,8 @@ function clientReturning(items: unknown[]) {
 }
 
 /**
- * Reads of the fault list. The store also reads `GET /apps`, once, to learn which app
- * each fault's node runs as; that read is left out.
+ * Reads of the fault list. The store also reads `GET /apps` to learn which app each
+ * fault's node runs as; those reads are left out.
  */
 function faultReads(client: { GET: { mock: { calls: unknown[][] } } }): number {
     return client.GET.mock.calls.filter((args) => args[0] !== '/apps').length;
@@ -115,6 +115,8 @@ function connect(client: { GET: unknown }, sseActive: boolean) {
 
 beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    __resetAppsRequestCache();
+    __resetFaultAppsIndex();
 });
 
 afterEach(() => {

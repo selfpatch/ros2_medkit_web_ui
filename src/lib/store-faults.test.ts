@@ -19,9 +19,15 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useAppStore, FAULT_APPS_REREAD_MS } from './store';
+import {
+    useAppStore,
+    FAULT_APPS_REREAD_MS,
+    FAULT_APPS_RETRY_MS,
+    __resetAppsRequestCache,
+    __resetFaultAppsIndex,
+} from './store';
 import type { Fault } from './types';
-import { transformFault } from './transforms';
+import { transformFault, type RawFaultItem } from './transforms';
 
 vi.mock('react-toastify', () => ({
     toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
@@ -43,8 +49,8 @@ function raw(overrides: Record<string, unknown> = {}) {
 }
 
 /**
- * Reads of the fault list. The store also reads `GET /apps`, once, to learn which app
- * each fault's node runs as; that read is left out.
+ * Reads of the fault list. The store also reads `GET /apps` to learn which app each
+ * fault's node runs as; those reads are left out.
  */
 function faultReads(client: { GET: { mock: { calls: unknown[][] } } }): number {
     return client.GET.mock.calls.filter((args) => args[0] !== '/apps').length;
@@ -89,6 +95,8 @@ function connected(client: unknown) {
 }
 
 beforeEach(() => {
+    __resetAppsRequestCache();
+    __resetFaultAppsIndex();
     connected(null);
 });
 
@@ -532,8 +540,57 @@ describe('placing faults on the apps the gateway lists', () => {
         return client.GET.mock.calls.filter((args) => args[0] === '/apps').length;
     }
 
+    /** As `manifestGateway`, but `GET /apps` answers only once `releaseApps` is called. */
+    function heldAppsGateway(faults: { list: unknown[] }, apps: { list: unknown[] }) {
+        let releaseApps!: () => void;
+        const appsHeld = new Promise<void>((resolve) => {
+            releaseApps = resolve;
+        });
+        const GET = vi.fn(async (path: string) => {
+            if (path === '/apps') await appsHeld;
+            return { data: { items: path === '/apps' ? apps.list : faults.list }, error: undefined };
+        });
+        return { client: { GET }, releaseApps };
+    }
+
+    /** Lets every pending callback run, so a caller that does not wait has already answered. */
+    function settle(): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
     afterEach(() => {
         vi.restoreAllMocks();
+    });
+
+    it('places an entity panel read that overlaps the first apps read', async () => {
+        const { client, releaseApps } = heldAppsGateway({ list: [LANE_BLOCKED] }, { list: [LANE_NAVIGATOR] });
+        connected(client);
+
+        const dashboard = useAppStore.getState().fetchFaults();
+        await vi.waitFor(() => expect(appReads(client)).toBe(1));
+        const panel = useAppStore.getState().listEntityFaults('components', 'amr-07');
+        await settle();
+        releaseApps();
+        const [, result] = await Promise.all([dashboard, panel]);
+
+        expect(result.items.map((f) => f.entity_id)).toEqual(['lane-navigator']);
+        expect(appReads(client)).toBe(1);
+    });
+
+    it('places a forced refresh that overlaps a background apps read', async () => {
+        const { client, releaseApps } = heldAppsGateway({ list: [LANE_BLOCKED] }, { list: [LANE_NAVIGATOR] });
+        connected(client);
+        useAppStore.setState({ faultsLoaded: true } as never);
+
+        const background = useAppStore.getState().fetchFaults();
+        await vi.waitFor(() => expect(appReads(client)).toBe(1));
+        // The user presses Refresh while the background read waits for the apps.
+        const forced = useAppStore.getState().fetchFaults({ force: true });
+        await settle();
+        releaseApps();
+        await Promise.all([background, forced]);
+
+        expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['lane-navigator']);
     });
 
     it('files a fault under the app its node runs as', async () => {
@@ -545,11 +602,16 @@ describe('placing faults on the apps the gateway lists', () => {
     });
 
     it('reads the apps once for nodes it knows, not on every refresh', async () => {
+        const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
         const client = manifestGateway({ list: [LANE_BLOCKED] }, { list: [LANE_NAVIGATOR] });
         connected(client);
 
+        // Refreshes a minute apart: the wait between reads does not hold them back, so
+        // what does is that every fault is already placed.
         await useAppStore.getState().fetchFaults();
+        now.mockReturnValue(1_000_000 + FAULT_APPS_REREAD_MS);
         await useAppStore.getState().fetchFaults();
+        now.mockReturnValue(1_000_000 + 2 * FAULT_APPS_REREAD_MS);
         await useAppStore.getState().fetchFaults();
 
         expect(appReads(client)).toBe(1);
@@ -564,7 +626,7 @@ describe('placing faults on the apps the gateway lists', () => {
         expect(appReads(client)).toBe(0);
     });
 
-    it('keeps the node name for a source no app owns, and asks again only after a while', async () => {
+    it('falls back to the last segment for a source no app owns, and asks again only after a while', async () => {
         const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
         const client = manifestGateway(
             { list: [raw({ reporting_sources: ['/test_publisher'] })] },
@@ -583,7 +645,94 @@ describe('placing faults on the apps the gateway lists', () => {
         expect(appReads(client)).toBe(2);
     });
 
-    it('keeps a fault on its app while that app is down and drops out of the app list', async () => {
+    it('says when the apps cannot be read, and tries again soon', async () => {
+        const now = vi.spyOn(Date, 'now').mockReturnValue(9_000_000);
+        const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        let appsFail = true;
+        const client = {
+            GET: vi.fn(async (path: string) => {
+                if (path !== '/apps') return { data: { items: [LANE_BLOCKED] }, error: undefined };
+                return appsFail
+                    ? { data: undefined, error: { status: 503, message: 'busy' } }
+                    : { data: { items: [LANE_NAVIGATOR] }, error: undefined };
+            }),
+        };
+        connected(client);
+
+        await useAppStore.getState().fetchFaults();
+        expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['lane_navigator']);
+        expect(warned).toHaveBeenCalledTimes(1);
+        expect(warned).toHaveBeenCalledWith(
+            '[store] GET /apps failed; retrying. Until it answers, faults from nodes not seen before cannot be placed on their apps.'
+        );
+
+        // The gateway recovers a moment later; the retry waits its short while, not a minute.
+        appsFail = false;
+        now.mockReturnValue(9_000_000 + FAULT_APPS_RETRY_MS - 1);
+        await useAppStore.getState().fetchFaults();
+        expect(appReads(client)).toBe(1);
+
+        now.mockReturnValue(9_000_000 + FAULT_APPS_RETRY_MS);
+        await useAppStore.getState().fetchFaults();
+        expect(appReads(client)).toBe(2);
+        expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['lane-navigator']);
+        expect(useAppStore.getState().faultsError).toBeNull();
+        expect(warned).toHaveBeenCalledTimes(1);
+    });
+
+    it('backs off while the apps keep failing, and warns once for each run of failures', async () => {
+        const start = 9_000_000;
+        const now = vi.spyOn(Date, 'now').mockReturnValue(start);
+        const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const faults = { list: [LANE_BLOCKED] as unknown[] };
+        let appsFail = true;
+        const client = {
+            GET: vi.fn(async (path: string) => {
+                if (path !== '/apps') return { data: { items: faults.list }, error: undefined };
+                return appsFail
+                    ? { data: undefined, error: { status: 503, message: 'busy' } }
+                    : { data: { items: [LANE_NAVIGATOR] }, error: undefined };
+            }),
+        };
+        connected(client);
+        let t = start;
+        /** One dashboard poll, 5 s after the previous one. */
+        const poll = async () => {
+            t += 5_000;
+            now.mockReturnValue(t);
+            await useAppStore.getState().fetchFaults();
+        };
+        /** Polls until the store reads the apps again, at most a minute and a half of polls. */
+        const pollUntilAppsRead = async () => {
+            const reads = appReads(client);
+            for (let i = 0; i < 18 && appReads(client) === reads; i++) await poll();
+        };
+
+        // A minute of polls while GET /apps keeps failing.
+        await useAppStore.getState().fetchFaults();
+        for (let i = 0; i < 12; i++) await poll();
+        // Fast failures: reads at 0, 5, 15 and 35 s, then the next waits 40 s.
+        expect(appReads(client)).toBe(4);
+        expect(warned).toHaveBeenCalledTimes(1);
+
+        // The gateway recovers: the next read the store allows itself places the fault.
+        appsFail = false;
+        const readsBeforeRecovery = appReads(client);
+        await pollUntilAppsRead();
+        expect(appReads(client)).toBe(readsBeforeRecovery + 1);
+        expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['lane-navigator']);
+        expect(warned).toHaveBeenCalledTimes(1);
+
+        // A later failure starts a new run, which is reported again.
+        appsFail = true;
+        faults.list = [LANE_BLOCKED, raw({ fault_code: 'CAMERA_STALE', reporting_sources: ['/perception'] })];
+        const readsBeforeNewFailure = appReads(client);
+        await pollUntilAppsRead();
+        expect(appReads(client)).toBe(readsBeforeNewFailure + 1);
+        expect(warned).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps a fault on its app while the gateway lists the app without a node', async () => {
         const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
         const faults = { list: [LANE_BLOCKED] };
         const apps = { list: [LANE_NAVIGATOR] as unknown[] };
@@ -618,6 +767,354 @@ describe('placing faults on the apps the gateway lists', () => {
         expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['navigator-b']);
     });
 
+    /**
+     * A gateway whose fault reads (list, entity panels, counts) answer only once
+     * `release` is called, and whose app list answers at once with no apps.
+     */
+    function gatewayLeftBehind() {
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const GET = vi.fn(async (path: string) => {
+            if (path === '/apps') return { data: { items: [] }, error: undefined };
+            await held;
+            return { data: { items: [raw({ fault_code: 'FROM_GATEWAY_A', reporting_sources: ['/lane_navigator'] })] } };
+        });
+        return { client: { GET }, release };
+    }
+
+    /** We move to a gateway that learns its navigator, which then goes down. */
+    async function moveToGatewayWhoseNavigatorGoesDown() {
+        const apps = { list: [LANE_NAVIGATOR] as unknown[] };
+        const client = manifestGateway({ list: [LANE_BLOCKED] }, apps);
+        connected(client);
+        await useAppStore.getState().fetchFaults();
+        apps.list = [{ id: 'lane-navigator', 'x-medkit': { component_id: 'amr-07', is_online: false } }];
+        return client;
+    }
+
+    it('keeps what this gateway learned when a late answer from the one we left arrives', async () => {
+        const left = gatewayLeftBehind();
+        connected(left.client);
+        const late = useAppStore.getState().fetchFaults();
+        await settle();
+
+        const current = await moveToGatewayWhoseNavigatorGoesDown();
+        left.release();
+        await late;
+        await useAppStore.getState().fetchFaults();
+
+        expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['lane-navigator']);
+        expect(appReads(current)).toBe(1);
+        expect(appReads(left.client)).toBe(0);
+    });
+
+    it('keeps what this gateway learned when late panel reads from the one we left arrive', async () => {
+        const left = gatewayLeftBehind();
+        connected(left.client);
+        const lateList = useAppStore.getState().listEntityFaults('apps', 'lane-navigator');
+        const lateCounts = useAppStore.getState().prefetchResourceCounts('apps', 'lane-navigator');
+        await settle();
+
+        const current = await moveToGatewayWhoseNavigatorGoesDown();
+        left.release();
+        await Promise.all([lateList, lateCounts]);
+        await useAppStore.getState().fetchFaults();
+
+        expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['lane-navigator']);
+        expect(appReads(current)).toBe(1);
+        expect(appReads(left.client)).toBe(0);
+    });
+
+    it('drops a list from the gateway we left that was waiting for its apps', async () => {
+        const left = heldAppsGateway(
+            { list: [raw({ fault_code: 'FROM_GATEWAY_A', reporting_sources: ['/lane_navigator'] })] },
+            { list: [LANE_NAVIGATOR] }
+        );
+        connected(left.client);
+        const late = useAppStore.getState().fetchFaults();
+        await vi.waitFor(() => expect(appReads(left.client)).toBe(1));
+
+        const current = manifestGateway(
+            { list: [LANE_BLOCKED] },
+            { list: [{ id: 'navigator-b', 'x-medkit': { ros2: { node: '/lane_navigator' } } }] }
+        );
+        // Only the client changes, so the list the late read started from is still the one
+        // on screen: what drops its answer is that it belongs to the gateway we left.
+        useAppStore.setState({ client: current } as never);
+        left.releaseApps();
+        await late;
+        expect(useAppStore.getState().faults).toEqual([]);
+
+        // The current gateway learns its own apps, not the ones the other one listed.
+        await useAppStore.getState().fetchFaults();
+        expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['navigator-b']);
+        expect(appReads(current)).toBe(1);
+    });
+
+    it('does not let apps read from the gateway we left into the current index', async () => {
+        const left = heldAppsGateway({ list: [LANE_BLOCKED] }, { list: [LANE_NAVIGATOR] });
+        connected(left.client);
+        const late = useAppStore.getState().fetchFaults();
+        await vi.waitFor(() => expect(appReads(left.client)).toBe(1));
+
+        // The current gateway lists its navigator without a node, so the fault keeps its node name.
+        const current = manifestGateway(
+            { list: [LANE_BLOCKED] },
+            { list: [{ id: 'navigator-b', 'x-medkit': { is_online: false } }] }
+        );
+        connected(current);
+        await useAppStore.getState().fetchFaults();
+        left.releaseApps();
+        await late;
+        await useAppStore.getState().fetchFaults();
+
+        expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['lane_navigator']);
+    });
+
+    /** A fault stream that yields `event` once `emit` is called. */
+    function streamOnce(event: unknown) {
+        let emit!: () => void;
+        const emitted = new Promise<void>((resolve) => {
+            emit = resolve;
+        });
+        return {
+            emit,
+            streams: {
+                faults: () => ({
+                    close: vi.fn(),
+                    async *[Symbol.asyncIterator]() {
+                        await emitted;
+                        yield event;
+                    },
+                }),
+            },
+        };
+    }
+
+    /**
+     * The list is read while the navigator is down, so its fault is filed under the node's
+     * name. More than a minute later the node is back and `event` arrives over the stream,
+     * which makes the store read the apps again and place the event on `lane-navigator`.
+     */
+    async function streamAfterTheNodeComesBack(event: unknown) {
+        const now = vi.spyOn(Date, 'now').mockReturnValue(5_000_000);
+        const apps = {
+            list: [{ id: 'lane-navigator', 'x-medkit': { component_id: 'amr-07', is_online: false } }] as unknown[],
+        };
+        const stream = streamOnce(event);
+        const client = { ...manifestGateway({ list: [LANE_BLOCKED] }, apps), streams: stream.streams };
+        connected(client);
+        await useAppStore.getState().fetchFaults();
+        expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['lane_navigator']);
+        useAppStore.getState().subscribeFaultStream();
+
+        apps.list = [LANE_NAVIGATOR];
+        now.mockReturnValue(5_000_000 + FAULT_APPS_REREAD_MS + 1_000);
+        stream.emit();
+        await vi.waitFor(() => expect(appReads(client)).toBe(2));
+    }
+
+    it('updates the listed row when its node comes back after the list was read', async () => {
+        await streamAfterTheNodeComesBack({
+            event: 'fault_updated',
+            data: { fault: { ...LANE_BLOCKED, description: 'lane blocked again', status: 'PREFAILED' } },
+        });
+        await vi.waitFor(() =>
+            expect(useAppStore.getState().faults.some((f) => f.entity_id === 'lane-navigator')).toBe(true)
+        );
+        useAppStore.getState().unsubscribeFaultStream();
+
+        expect(
+            useAppStore.getState().faults.map((f) => ({ entity_id: f.entity_id, message: f.message, status: f.status }))
+        ).toEqual([{ entity_id: 'lane-navigator', message: 'lane blocked again', status: 'pending' }]);
+    });
+
+    it('clears the listed row when its node comes back after the list was read', async () => {
+        await streamAfterTheNodeComesBack({
+            event: 'fault_cleared',
+            data: { fault: { ...LANE_BLOCKED, status: 'CLEARED' } },
+        });
+        await vi.waitFor(() => expect(useAppStore.getState().faults).toEqual([]));
+        useAppStore.getState().unsubscribeFaultStream();
+    });
+
+    it('moves the listed row to its app when the event changes nothing else', async () => {
+        await streamAfterTheNodeComesBack({ event: 'fault_confirmed', data: { fault: LANE_BLOCKED } });
+        await vi.waitFor(() =>
+            expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['lane-navigator'])
+        );
+        useAppStore.getState().unsubscribeFaultStream();
+    });
+
+    it('folds every row a streamed fault is about into the one it updates', () => {
+        connected(clientReturning([]));
+        const byNodeName = transformFault(LANE_BLOCKED as RawFaultItem);
+        const byApp = transformFault(
+            LANE_BLOCKED as RawFaultItem,
+            undefined,
+            new Map([['/lane_navigator', 'lane-navigator']])
+        );
+        useAppStore.setState({ faults: [byNodeName, byApp] } as never);
+
+        useAppStore.getState().applyFaultStreamEvent('fault_updated', { ...byApp, status: 'pending' });
+
+        expect(useAppStore.getState().faults.map((f) => `${f.entity_id}:${f.status}`)).toEqual([
+            'lane-navigator:pending',
+        ]);
+    });
+
+    /** Streams one fault while `GET /apps` is held; resolves once the stream waits for the apps. */
+    async function streamedFaultWaitingForApps() {
+        const { client, releaseApps } = heldAppsGateway({ list: [] }, { list: [LANE_NAVIGATOR] });
+        const stream = streamOnce({ event: 'fault_confirmed', data: { fault: LANE_BLOCKED } });
+        stream.emit();
+        connected({ ...client, streams: stream.streams });
+        useAppStore.getState().subscribeFaultStream();
+        await vi.waitFor(() => expect(appReads(client)).toBe(1));
+        return releaseApps;
+    }
+
+    it('drops a streamed fault still waiting for the apps when the stream is closed', async () => {
+        const releaseApps = await streamedFaultWaitingForApps();
+
+        useAppStore.getState().unsubscribeFaultStream();
+        releaseApps();
+        await settle();
+
+        expect(useAppStore.getState().faults).toEqual([]);
+    });
+
+    it('applies a streamed fault once the apps it was waiting for arrive', async () => {
+        const releaseApps = await streamedFaultWaitingForApps();
+
+        releaseApps();
+        await settle();
+
+        expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['lane-navigator']);
+    });
+
+    it("files an app's own faults under that app when the index cannot place them", async () => {
+        connected(
+            manifestGateway(
+                { list: [LANE_BLOCKED] },
+                { list: [{ id: 'lane-navigator', 'x-medkit': { component_id: 'amr-07', is_online: false } }] }
+            )
+        );
+
+        // The gateway filed these under the app it was asked about.
+        const own = await useAppStore.getState().listEntityFaults('apps', 'lane-navigator');
+        // A component's list does not say which of its apps reported a fault.
+        const component = await useAppStore.getState().listEntityFaults('components', 'amr-07');
+
+        expect(own.items.map((f) => f.entity_id)).toEqual(['lane-navigator']);
+        expect(component.items.map((f) => f.entity_id)).toEqual(['lane_navigator']);
+    });
+
+    /**
+     * `bridge` runs as `/bridge` and `anomaly-detector` as `/bridge/anomaly_detector`, which
+     * `GET /apps` leaves out unless `detectorUp`. Every fault read answers `faults`; an app's
+     * own list also names the app's node in `x-medkit.source_id`, as the gateway does, when
+     * `sourceId` is given.
+     */
+    function bridgeGateway(options: { detectorUp: boolean; faults: unknown[]; sourceId?: string }) {
+        const apps = [
+            { id: 'bridge', 'x-medkit': { ros2: { node: '/bridge' } } },
+            options.detectorUp
+                ? { id: 'anomaly-detector', 'x-medkit': { ros2: { node: '/bridge/anomaly_detector' } } }
+                : { id: 'anomaly-detector', 'x-medkit': { is_online: false } },
+        ];
+        return {
+            GET: vi.fn(async (path: string) => {
+                if (path === '/apps') return { data: { items: apps }, error: undefined };
+                const named =
+                    path === '/apps/{app_id}/faults' && options.sourceId !== undefined
+                        ? { 'x-medkit': { source_id: options.sourceId } }
+                        : {};
+                return { data: { items: options.faults, ...named }, error: undefined };
+            }),
+        };
+    }
+
+    const DETECTOR_FAULT = raw({ fault_code: 'ANOMALY', reporting_sources: ['/bridge/anomaly_detector'] });
+
+    it("files an app's own faults under that app while a node above it is known", async () => {
+        connected(bridgeGateway({ detectorUp: false, faults: [DETECTOR_FAULT], sourceId: '/bridge/anomaly_detector' }));
+
+        const own = await useAppStore.getState().listEntityFaults('apps', 'anomaly-detector');
+
+        expect(own.items.map((f) => f.entity_id)).toEqual(['anomaly-detector']);
+    });
+
+    it("still files a fault from a deeper node on that node's app in an app's own list", async () => {
+        connected(
+            bridgeGateway({
+                detectorUp: true,
+                faults: [raw({ fault_code: 'ANOMALY', reporting_sources: ['/bridge/anomaly_detector/goal_status'] })],
+                sourceId: '/bridge',
+            })
+        );
+
+        const own = await useAppStore.getState().listEntityFaults('apps', 'bridge');
+
+        expect(own.items.map((f) => f.entity_id)).toEqual(['anomaly-detector']);
+    });
+
+    it("places an app's own list as before when the gateway does not name the app's node", async () => {
+        // Without it the fault cannot be told from one of the node above.
+        connected(bridgeGateway({ detectorUp: false, faults: [DETECTOR_FAULT] }));
+
+        const own = await useAppStore.getState().listEntityFaults('apps', 'anomaly-detector');
+
+        expect(own.items.map((f) => f.entity_id)).toEqual(['bridge']);
+    });
+
+    it("keeps the node an app's own list names out of the index the other lists use", async () => {
+        connected(bridgeGateway({ detectorUp: false, faults: [DETECTOR_FAULT], sourceId: '/bridge/anomaly_detector' }));
+        await useAppStore.getState().listEntityFaults('apps', 'anomaly-detector');
+
+        await useAppStore.getState().fetchFaults();
+
+        expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['bridge']);
+    });
+
+    it("counts an entity's faults without reading the apps", async () => {
+        // The count is read alongside the entity's data, which must not wait for GET /apps.
+        const { client, releaseApps } = heldAppsGateway({ list: [LANE_BLOCKED] }, { list: [LANE_NAVIGATOR] });
+        connected(client);
+
+        const counted = useAppStore.getState().prefetchResourceCounts('components', 'amr-07');
+        const first = await Promise.race([counted.then(() => 'counted'), settle().then(() => 'still waiting')]);
+        releaseApps();
+
+        expect(first).toBe('counted');
+        expect(appReads(client)).toBe(0);
+    });
+
+    it("counts an entity's faults the way its Faults tab lists them once the apps are known", async () => {
+        // With a cold index an aggregating gateway's repeated code can count twice until the apps are read.
+        // One node reporting one code under its own name and under a name of its own.
+        connected(
+            manifestGateway(
+                {
+                    list: [
+                        raw({ fault_code: 'ANOMALY', reporting_sources: ['/bridge/anomaly_detector'] }),
+                        raw({ fault_code: 'ANOMALY', reporting_sources: ['/bridge/anomaly_detector/goal_status'] }),
+                    ],
+                },
+                { list: [{ id: 'anomaly-detector', 'x-medkit': { ros2: { node: '/bridge/anomaly_detector' } } }] }
+            )
+        );
+
+        // The tab's read teaches the index; the count places faults with what it knows.
+        const listed = await useAppStore.getState().listEntityFaults('components', 'bridge');
+        const counts = await useAppStore.getState().prefetchResourceCounts('components', 'bridge');
+
+        expect(listed.items.map((f) => f.entity_id)).toEqual(['anomaly-detector']);
+        expect(counts.faults).toBe(listed.items.length);
+    });
+
     it("files an entity panel's faults the same way", async () => {
         connected(manifestGateway({ list: [LANE_BLOCKED] }, { list: [LANE_NAVIGATOR] }));
 
@@ -627,23 +1124,23 @@ describe('placing faults on the apps the gateway lists', () => {
     });
 
     it('files a streamed fault under the same app, so it lands on the row it is about', async () => {
-        const client = {
-            ...manifestGateway({ list: [] }, { list: [LANE_NAVIGATOR] }),
-            streams: {
-                faults: () => ({
-                    close: vi.fn(),
-                    async *[Symbol.asyncIterator]() {
-                        yield { event: 'fault_confirmed', data: { fault: LANE_BLOCKED } };
-                    },
-                }),
-            },
-        };
-        connected(client);
+        const stream = streamOnce({
+            event: 'fault_updated',
+            data: { fault: { ...LANE_BLOCKED, status: 'PREFAILED' } },
+        });
+        connected({
+            ...manifestGateway({ list: [LANE_BLOCKED] }, { list: [LANE_NAVIGATOR] }),
+            streams: stream.streams,
+        });
+        await useAppStore.getState().fetchFaults();
 
         useAppStore.getState().subscribeFaultStream();
+        stream.emit();
 
         await vi.waitFor(() =>
-            expect(useAppStore.getState().faults.map((f) => f.entity_id)).toEqual(['lane-navigator'])
+            expect(useAppStore.getState().faults.map((f) => `${f.entity_id}:${f.status}`)).toEqual([
+                'lane-navigator:pending',
+            ])
         );
     });
 });

@@ -94,6 +94,14 @@ describe('indexAppsByNode', () => {
 
         expect(index.size).toBe(0);
     });
+
+    it('reads nothing from an answer that is not a list, and skips items that are not apps', () => {
+        expect(indexAppsByNode({})).toEqual(new Map());
+        expect(indexAppsByNode(null)).toEqual(new Map());
+        expect(indexAppsByNode([null, 1, { id: 'a', 'x-medkit': { ros2: { node: '/a' } } }])).toEqual(
+            new Map([['/a', 'a']])
+        );
+    });
 });
 
 describe('findAppByNode', () => {
@@ -115,6 +123,13 @@ describe('findAppByNode', () => {
 
         expect(findAppByNode('/bridge/anomaly_detector/goal_status', nested)).toBe('anomaly-detector');
         expect(findAppByNode('/bridge/other_monitor', nested)).toBe('bridge');
+
+        const reversed = indexAppsByNode([
+            { id: 'anomaly-detector', 'x-medkit': { ros2: { node: '/bridge/anomaly_detector' } } },
+            { id: 'bridge', 'x-medkit': { ros2: { node: '/bridge' } } },
+        ]);
+
+        expect(findAppByNode('/bridge/anomaly_detector/goal_status', reversed)).toBe('anomaly-detector');
     });
 
     it('does not take a node that only shares the start of the name', () => {

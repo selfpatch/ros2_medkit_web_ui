@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useShallow } from 'zustand/shallow';
 import {
     AlertTriangle,
@@ -92,6 +92,14 @@ function formatTimestamp(timestamp: string): string {
 /**
  * Single fault row component with collapsible environment data
  */
+/**
+ * A clear in progress, by the entity it was asked on and the fault code. The panel stays
+ * mounted when the selected entity changes, and another entity can list the same code.
+ */
+function clearingKey(entityType: SovdResourceEntityType, entityId: string, code: string): string {
+    return `${entityType}/${entityId}/${code}`;
+}
+
 function FaultRow({
     fault,
     onClear,
@@ -267,7 +275,7 @@ function FaultRow({
 export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanelProps) {
     const [faults, setFaults] = useState<Fault[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [clearingCodes, setClearingCodes] = useState<Set<string>>(new Set());
+    const [clearingKeys, setClearingKeys] = useState<Set<string>>(new Set());
     const [error, setError] = useState<string | null>(null);
     const [expandedFaults, setExpandedFaults] = useState<Set<string>>(new Set());
     const [faultDetails, setFaultDetails] = useState<Map<string, FaultResponse>>(new Map());
@@ -281,23 +289,41 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
         }))
     );
 
+    // The panel stays mounted when the selected entity changes, so the answer for the
+    // entity shown before can arrive after the one shown now. Only the latest read may
+    // write the list, and none once the entity changed or the panel is gone.
+    const latestLoad = useRef(0);
+
     const loadFaults = useCallback(async () => {
+        const load = ++latestLoad.current;
         setIsLoading(true);
         setError(null);
 
         try {
             const response = await listEntityFaults(entityType, entityId);
+            if (load !== latestLoad.current) return;
             setFaults(response.items || []);
         } catch (err) {
+            if (load !== latestLoad.current) return;
             setError(err instanceof Error ? err.message : 'Failed to load faults');
             setFaults([]);
         } finally {
-            setIsLoading(false);
+            if (load === latestLoad.current) setIsLoading(false);
         }
     }, [listEntityFaults, entityId, entityType]);
 
     useEffect(() => {
         loadFaults();
+        return () => {
+            latestLoad.current += 1;
+        };
+    }, [loadFaults]);
+
+    // A clear answers after the panel may have moved to another entity; the reload after
+    // it is for the entity shown by then, not the one the cleared row belonged to.
+    const loadShownFaults = useRef(loadFaults);
+    useEffect(() => {
+        loadShownFaults.current = loadFaults;
     }, [loadFaults]);
 
     const handleToggleFault = useCallback(
@@ -358,23 +384,24 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
 
     const handleClear = useCallback(
         async (code: string) => {
-            setClearingCodes((prev) => new Set([...prev, code]));
+            const key = clearingKey(entityType, entityId, code);
+            setClearingKeys((prev) => new Set([...prev, key]));
 
             try {
                 await clearFault(entityType, entityId, code);
                 // Reload faults after clearing
-                await loadFaults();
+                await loadShownFaults.current();
             } catch {
                 // Error is handled by toast in the store
             } finally {
-                setClearingCodes((prev) => {
+                setClearingKeys((prev) => {
                     const next = new Set(prev);
-                    next.delete(code);
+                    next.delete(key);
                     return next;
                 });
             }
         },
-        [clearFault, entityId, entityType, loadFaults]
+        [clearFault, entityId, entityType]
     );
 
     // Count faults by severity
@@ -434,7 +461,7 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
                                 key={fault.code}
                                 fault={fault}
                                 onClear={handleClear}
-                                isClearing={clearingCodes.has(fault.code)}
+                                isClearing={clearingKeys.has(clearingKey(entityType, entityId, fault.code))}
                                 isExpanded={expandedFaults.has(faultKey(fault))}
                                 onToggle={() => handleToggleFault(fault)}
                                 environmentData={faultDetails.get(faultKey(fault))?.environment_data}
