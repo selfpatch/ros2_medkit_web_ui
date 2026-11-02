@@ -667,11 +667,22 @@ export interface FreezeFrameSnapshot extends SnapshotBase {
     type: 'freeze_frame';
     data: unknown;
     'x-medkit'?: {
+        /** Empty for an entity frame: its values are not a ROS message */
         topic: string;
         message_type: string;
-        full_data: unknown;
-        captured_at: string;
+        /** Missing when the gateway could not parse what it kept (see `parse_error`) */
+        full_data?: unknown;
+        /** Missing with `parse_error`; the epoch when the capture carried no time */
+        captured_at?: string;
         parse_error?: string;
+        /** "startup": an entity frame read at gateway start, not when the fault came */
+        capture_origin?: string;
+        /** Where an entity frame's values came from (a plugin's data path) */
+        source?: string;
+        /** false: the entity was disconnected and served its last known values */
+        connected?: boolean;
+        /** The entity's own time for its values, as its plugin reported it */
+        source_timestamp?: unknown;
     };
 }
 
@@ -684,9 +695,10 @@ export interface RosbagSnapshot extends SnapshotBase {
     size_bytes: number;
     duration_sec: number;
     format: 'mcap' | 'sqlite3' | 'db3';
+    /** Left out when the recording carries no time */
     'x-medkit'?: {
         captured_at: string;
-        fault_code: string;
+        fault_code?: string;
     };
 }
 
@@ -773,6 +785,34 @@ export function isRosbagSnapshot(snapshot: Snapshot): snapshot is RosbagSnapshot
 
 // ==================== Legacy Fault Types ====================
 
+/** A topic's message now, as the gateway sampled it */
+export interface FaultTopicMessage {
+    message: unknown;
+}
+
+/** A topic that gave no message now, and why, in words */
+export interface FaultTopicFailure {
+    failed: string;
+}
+
+/** One read of a topic a fault's snapshots caught, through the app that reports the fault */
+export type FaultTopicRead = FaultTopicMessage | FaultTopicFailure;
+
+/**
+ * What the fault manager says of a fault besides its row, as `transformFault` passes it on.
+ * The times are unix seconds or ISO 8601 strings.
+ */
+export interface FaultParameters {
+    /** 1 for a new fault, one more each time it comes back after being cleared */
+    occurrence_count?: number;
+    /** The newest FAILED report of it */
+    last_occurred?: number | string | null;
+    /** The newest PASSED report of it, whatever its status was then */
+    last_passed?: number | string | null;
+    reporting_sources?: string[];
+    [key: string]: unknown;
+}
+
 /**
  * Legacy fault entity (for backwards compatibility)
  */
@@ -792,7 +832,7 @@ export interface Fault {
     /** Entity type (component, app, etc.) */
     entity_type: string;
     /** Additional fault parameters */
-    parameters?: Record<string, unknown>;
+    parameters?: FaultParameters;
     /** Whether snapshots are available for this fault */
     has_snapshots?: boolean;
 }

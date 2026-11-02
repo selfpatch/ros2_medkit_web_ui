@@ -4,19 +4,13 @@ import { Layers, Box, ChevronRight, MapPin, Database } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '@/lib/store';
-import { ResourceTabBar } from '@/components/ResourceTabBar';
+import { ResourceTabBar, type ResourceTabBarTab } from '@/components/ResourceTabBar';
 import { EntityResourceTabs } from '@/components/EntityResourceTabs';
 import type { EntityTreeNode } from '@/lib/types';
 
 type AreaTab = 'overview' | 'components' | 'resources';
 
-interface TabConfig {
-    id: AreaTab;
-    label: string;
-    icon: typeof Layers;
-}
-
-const AREA_TABS: TabConfig[] = [
+const AREA_TABS: ResourceTabBarTab<AreaTab>[] = [
     { id: 'overview', label: 'Overview', icon: Layers },
     { id: 'components', label: 'Components', icon: Box },
     { id: 'resources', label: 'Resources', icon: Database },
@@ -109,13 +103,13 @@ export function AreasPanel({ areaId, path }: AreasPanelProps) {
                                 onClick={() => setActiveTab('components')}
                                 className="p-3 rounded-lg bg-muted/50 hover:bg-accent/50 transition-colors text-left"
                             >
-                                <Box className="w-4 h-4 text-indigo-500 mb-1" />
+                                <Box className="w-4 h-4 text-faint mb-1" />
                                 <div className="text-lg font-semibold">{components.length}</div>
                                 <div className="text-xs text-muted-foreground">Components</div>
                             </button>
                             {subareas.length > 0 && (
                                 <div className="p-3 rounded-lg bg-muted/50">
-                                    <Layers className="w-4 h-4 text-cyan-400 mb-1" />
+                                    <Layers className="w-4 h-4 text-faint mb-1" />
                                     <div className="text-lg font-semibold">{subareas.length}</div>
                                     <div className="text-xs text-muted-foreground">Subareas</div>
                                 </div>
@@ -124,7 +118,7 @@ export function AreasPanel({ areaId, path }: AreasPanelProps) {
                                 onClick={() => setActiveTab('resources')}
                                 className="p-3 rounded-lg bg-muted/50 hover:bg-accent/50 transition-colors text-left"
                             >
-                                <Database className="w-4 h-4 text-blue-500 mb-1" />
+                                <Database className="w-4 h-4 text-faint mb-1" />
                                 <div className="text-lg font-semibold">→</div>
                                 <div className="text-xs text-muted-foreground">Resources</div>
                             </button>
@@ -137,7 +131,7 @@ export function AreasPanel({ areaId, path }: AreasPanelProps) {
                 <Card>
                     <CardHeader className="pb-3">
                         <div className="flex items-center gap-2">
-                            <Box className="w-5 h-5 text-indigo-500" />
+                            <Box className="w-5 h-5 text-faint" />
                             <CardTitle className="text-base">Components in this Area</CardTitle>
                             <Badge variant="secondary">{components.length}</Badge>
                         </div>
@@ -157,22 +151,26 @@ export function AreasPanel({ areaId, path }: AreasPanelProps) {
                         ) : (
                             <div className="grid gap-3 md:grid-cols-2">
                                 {components.map((component) => (
-                                    <div
+                                    <button
+                                        type="button"
                                         key={component.path}
-                                        className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/30 cursor-pointer group transition-colors"
+                                        className="flex w-full items-center gap-3 p-3 rounded-lg border bg-card text-left hover:bg-accent/30 cursor-pointer group transition-colors"
                                         onClick={() => handleComponentClick(component.path)}
                                     >
-                                        <div className="p-1.5 rounded bg-indigo-100">
-                                            <Box className="w-4 h-4 text-indigo-600" />
-                                        </div>
-                                        <div className="min-w-0 flex-1">
-                                            <div className="font-medium truncate text-sm">{component.name}</div>
-                                            <div className="text-xs text-muted-foreground font-mono truncate">
+                                        <span className="p-1.5 rounded bg-canvas-2">
+                                            <Box className="w-4 h-4 text-body" aria-hidden />
+                                        </span>
+                                        <span className="block min-w-0 flex-1">
+                                            <span className="block font-medium truncate text-sm">{component.name}</span>
+                                            <span className="block text-xs text-muted-foreground font-mono truncate">
                                                 {component.id}
-                                            </div>
-                                        </div>
-                                        <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-                                    </div>
+                                            </span>
+                                        </span>
+                                        <ChevronRight
+                                            className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                                            aria-hidden
+                                        />
+                                    </button>
                                 ))}
                             </div>
                         )}

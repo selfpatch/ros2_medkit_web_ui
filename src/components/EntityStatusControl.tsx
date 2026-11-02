@@ -39,16 +39,14 @@ interface ActionConfig {
     action: LifecycleAction;
     label: string;
     icon: typeof Play;
-    /** Destructive transitions use the destructive button variant. */
-    variant: 'outline' | 'destructive';
 }
 
 const ACTIONS: ActionConfig[] = [
-    { action: 'start', label: 'Start', icon: Play, variant: 'outline' },
-    { action: 'restart', label: 'Restart', icon: RotateCw, variant: 'outline' },
-    { action: 'force-restart', label: 'Force restart', icon: Zap, variant: 'outline' },
-    { action: 'shutdown', label: 'Shutdown', icon: Power, variant: 'destructive' },
-    { action: 'force-shutdown', label: 'Force shutdown', icon: Power, variant: 'destructive' },
+    { action: 'start', label: 'Start', icon: Play },
+    { action: 'restart', label: 'Restart', icon: RotateCw },
+    { action: 'force-restart', label: 'Force restart', icon: Zap },
+    { action: 'shutdown', label: 'Shutdown', icon: Power },
+    { action: 'force-shutdown', label: 'Force shutdown', icon: Power },
 ];
 
 /** Transitions disabled for a given cached readiness value. */
@@ -57,7 +55,7 @@ const DISABLED_BY_STATUS: Record<string, Set<LifecycleAction>> = {
     notReady: new Set<LifecycleAction>(['restart', 'force-restart', 'shutdown', 'force-shutdown']),
 };
 
-/** Destructive transitions get the destructive confirm-button variant. */
+/** Transitions that stop the entity: their button reads in red and their confirmation is the solid red button. */
 const DESTRUCTIVE_ACTIONS = new Set<LifecycleAction>(['shutdown', 'force-shutdown']);
 
 /**
@@ -168,8 +166,8 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                 const result = await setStatus(client, entityType, entityId, action);
                 const httpStatus = result.response?.status;
                 if (httpStatus === 501) {
-                    // The gateway has no actuation provider: record it gateway-wide
-                    // so every transition button disables, and warn (not error) -
+                    // This entity has no actuation provider: record it for this entity
+                    // so every transition button on it disables, and warn (not error) -
                     // this is a missing capability, not a failed request.
                     setEntityActuation(entityType, entityId, false);
                     const msg = errorMessageOf(result.error);
@@ -270,7 +268,7 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1">
-                    {ACTIONS.map(({ action, label, icon: Icon, variant }) => {
+                    {ACTIONS.map(({ action, label, icon: Icon }) => {
                         const isPending = pendingAction === action;
                         const unavailable = isDisabled(action);
                         const tip = unavailable ? tooltipFor(action) : '';
@@ -288,8 +286,7 @@ export function EntityStatusControl({ entityType, entityId }: EntityStatusContro
                                 aria-disabled={unavailable || undefined}
                                 className={cn(
                                     'h-8 px-2.5',
-                                    // A destructive transition reads in red; its confirmation is the solid red button
-                                    variant === 'destructive' && 'text-destructive hover:border-destructive/40',
+                                    DESTRUCTIVE_ACTIONS.has(action) && 'text-destructive hover:border-destructive/40',
                                     unavailable && 'opacity-50 cursor-not-allowed'
                                 )}
                                 onClick={() => {

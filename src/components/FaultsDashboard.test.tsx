@@ -19,11 +19,13 @@
  * second entity's fault cleared the first entity's.
  *
  * The dashboard is a list beside the picked fault's page: a press on a fault in
- * the list opens its page (and reads it again), and Clear sits on that page.
+ * the list opens its page (and reads it again), and Clear sits on an open fault's
+ * line and on its page.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { FaultsDashboard } from './FaultsDashboard';
 import type { Fault } from '@/lib/types';
 
@@ -53,10 +55,48 @@ function fault(entityId: string): Fault {
     };
 }
 
+/** The codes the list shows, in its order */
+function listedCodes(): string[] {
+    return Array.from(document.querySelectorAll('nav li button code')).map((code) => code.textContent ?? '');
+}
+
+/** The faults of one entity, under its heading */
+function groupOf(entityId: string) {
+    return within(screen.getByRole('group', { name: entityId }));
+}
+
+/**
+ * Lays the fault's pane out, as a wide screen does: the pane is measured once it is
+ * observed, and it has a box (or, with `laidOut` false, the layout hides it).
+ */
+function layOutPanes(laidOut: boolean) {
+    vi.stubGlobal(
+        'ResizeObserver',
+        class {
+            callback: ResizeObserverCallback;
+            constructor(callback: ResizeObserverCallback) {
+                this.callback = callback;
+            }
+            observe() {
+                this.callback([], this as unknown as ResizeObserver);
+            }
+            unobserve() {}
+            disconnect() {}
+        }
+    );
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: laidOut ? 1 : 0 } as DOMRectList);
+}
+
+afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+});
+
 beforeEach(() => {
     vi.clearAllMocks();
     mockGetFaultWithEnvironmentData.mockResolvedValue({ environment_data: { snapshots: [] } });
-    mockReadFaultTopic.mockResolvedValue(null);
+    mockReadFaultTopic.mockResolvedValue({ failed: 'not read in these tests' });
     storeState = {
         faults: [fault('app_a'), fault('app_b')],
         isLoadingFaults: false,
@@ -83,17 +123,42 @@ describe('FaultsDashboard with colliding fault codes', () => {
         const page = await screen.findByRole('region', { name: 'Lidar range invalid' });
         expect(within(page).getByText('app_a')).toBeInTheDocument();
         expect(within(page).queryByText('app_b')).not.toBeInTheDocument();
-        expect(screen.getAllByRole('region', { name: 'Lidar range invalid' })).toHaveLength(1);
+        const picked = (entityId: string) =>
+            groupOf(entityId)
+                .getAllByRole('button')
+                .find((button) => button.textContent?.includes('LIDAR_RANGE_INVALID'));
+        expect(picked('app_a')).toHaveAttribute('aria-current', 'true');
+        expect(picked('app_b')).not.toHaveAttribute('aria-current');
     });
 
     it("clears the picked fault's entity, not the first entity with that code", async () => {
         render(<FaultsDashboard />);
 
         fireEvent.click(screen.getAllByText('LIDAR_RANGE_INVALID')[1]!);
-        fireEvent.click(await screen.findByTitle('Clear fault'));
+        const page = await screen.findByRole('region', { name: 'Lidar range invalid' });
+        fireEvent.click(within(page).getByRole('button', { name: 'Clear' }));
 
         await waitFor(() => expect(mockClearFault).toHaveBeenCalledTimes(1));
         expect(mockClearFault).toHaveBeenCalledWith('apps', 'app_b', 'LIDAR_RANGE_INVALID');
+    });
+
+    it("clears from a line the fault of that line's entity", async () => {
+        render(<FaultsDashboard />);
+
+        fireEvent.click(groupOf('app_b').getByRole('button', { name: 'Clear fault LIDAR_RANGE_INVALID' }));
+
+        await waitFor(() => expect(mockClearFault).toHaveBeenCalledTimes(1));
+        expect(mockClearFault).toHaveBeenCalledWith('apps', 'app_b', 'LIDAR_RANGE_INVALID');
+        // Clearing is not picking: no page opens for it.
+        expect(screen.queryByRole('region', { name: 'Lidar range invalid' })).not.toBeInTheDocument();
+    });
+
+    it('offers Clear on the line of an open fault only', () => {
+        storeState.faults = [fault('app_a'), { ...fault('app_b'), status: 'healed' }];
+        render(<FaultsDashboard />);
+        fireEvent.click(screen.getByRole('button', { name: 'History' }));
+
+        expect(screen.queryByRole('button', { name: /Clear fault/ })).not.toBeInTheDocument();
     });
 
     it('keeps evidence on screen when reading the fault again answers 404 (null)', async () => {
@@ -148,18 +213,237 @@ describe('FaultsDashboard while a fault ends', () => {
         expect(within(page).getByText('Healed')).toBeInTheDocument();
         expect(forcedReads()).toBe(1);
     });
+
+    it('lets the fault go, list and page, when the read says it is gone', async () => {
+        let answer!: () => void;
+        mockFetchFaults.mockImplementation((options?: { force?: boolean }) =>
+            options?.force ? new Promise<void>((resolve) => (answer = resolve)) : Promise.resolve()
+        );
+        const { rerender } = render(<FaultsDashboard />);
+        fireEvent.click(groupOf('app_a').getByText('LIDAR_RANGE_INVALID'));
+        await screen.findByRole('region', { name: 'Lidar range invalid' });
+
+        storeState = { ...storeState, faults: [fault('app_b')] };
+        rerender(<FaultsDashboard />);
+        await waitFor(() => expect(mockFetchFaults).toHaveBeenCalledWith({ force: true }));
+        // The read says what the stream said: it is gone.
+        await act(async () => answer());
+        rerender(<FaultsDashboard />);
+
+        expect(screen.queryByRole('group', { name: 'app_a' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('region', { name: 'Lidar range invalid' })).not.toBeInTheDocument();
+    });
+
+    it('reads nothing to find out why a fault it cleared is gone', async () => {
+        const { rerender } = render(<FaultsDashboard />);
+        fireEvent.click(groupOf('app_a').getByText('LIDAR_RANGE_INVALID'));
+        const page = await screen.findByRole('region', { name: 'Lidar range invalid' });
+
+        await act(async () => {
+            fireEvent.click(within(page).getByRole('button', { name: 'Clear' }));
+        });
+        // The list after the clear, without it.
+        storeState = { ...storeState, faults: [fault('app_b')] };
+        rerender(<FaultsDashboard />);
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        expect(mockFetchFaults).not.toHaveBeenCalledWith({ force: true });
+        expect(screen.queryByRole('group', { name: 'app_a' })).not.toBeInTheDocument();
+    });
+});
+
+describe('FaultsDashboard on a wide screen', () => {
+    it('opens the first fault on its own when the pane shows', async () => {
+        layOutPanes(true);
+        render(<FaultsDashboard />);
+
+        await waitFor(() => expect(mockGetFaultWithEnvironmentData).toHaveBeenCalledTimes(1));
+        expect(mockGetFaultWithEnvironmentData).toHaveBeenCalledWith('apps', 'app_a', 'LIDAR_RANGE_INVALID');
+        expect(await screen.findByRole('region', { name: 'Lidar range invalid' })).toBeInTheDocument();
+    });
+
+    it('reads nothing while the layout hides the pane', async () => {
+        layOutPanes(false);
+        render(<FaultsDashboard />);
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        expect(mockGetFaultWithEnvironmentData).not.toHaveBeenCalled();
+        expect(screen.queryByRole('region', { name: 'Lidar range invalid' })).not.toBeInTheDocument();
+    });
+
+    it('reads an open fault once, not on every pass its node reports while it stays confirmed', async () => {
+        const { rerender } = render(<FaultsDashboard />);
+        fireEvent.click(groupOf('app_a').getByText('LIDAR_RANGE_INVALID'));
+        await waitFor(() => expect(mockGetFaultWithEnvironmentData).toHaveBeenCalledTimes(1));
+
+        // Every PASSED report moves last_passed; a confirmed fault stays confirmed through it.
+        for (const at of [1755684060, 1755684061, 1755684062]) {
+            const passed = { ...fault('app_a'), parameters: { last_passed: at, last_occurred: at - 5 } };
+            storeState = { ...storeState, faults: [passed, fault('app_b')] };
+            rerender(<FaultsDashboard />);
+            await act(async () => {});
+        }
+
+        expect(mockGetFaultWithEnvironmentData).toHaveBeenCalledTimes(1);
+    });
+
+    it('reads an open fault again every 30 s, and not for a new copy of the same list', async () => {
+        vi.useFakeTimers();
+        const { rerender } = render(<FaultsDashboard />);
+        fireEvent.click(groupOf('app_a').getByText('LIDAR_RANGE_INVALID'));
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(0);
+        });
+        expect(mockGetFaultWithEnvironmentData).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(30_000);
+        });
+        expect(mockGetFaultWithEnvironmentData).toHaveBeenCalledTimes(2);
+
+        // A refresh that changed nothing hands over a new array of the same faults.
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(10_000);
+        });
+        storeState = { ...storeState, faults: [fault('app_a'), fault('app_b')] };
+        rerender(<FaultsDashboard />);
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(20_000);
+        });
+
+        expect(mockGetFaultWithEnvironmentData).toHaveBeenCalledTimes(3);
+    });
+
+    it("drops what it read of one gateway's faults when it connects to another", async () => {
+        storeState.serverUrl = 'http://robot-a:8080';
+        mockGetFaultWithEnvironmentData.mockResolvedValueOnce({
+            environment_data: { snapshots: [{ type: 'freeze_frame', name: 'ff', data: { level: 82 } }] },
+        });
+        const { rerender } = render(<FaultsDashboard />);
+        fireEvent.click(groupOf('app_a').getByText('LIDAR_RANGE_INVALID'));
+        await screen.findByRole('rowheader', { name: 'Level' });
+
+        // The same fault key on the next gateway, whose read is still out.
+        mockGetFaultWithEnvironmentData.mockReturnValue(new Promise(() => {}));
+        storeState = { ...storeState, serverUrl: 'http://robot-b:8080' };
+        rerender(<FaultsDashboard />);
+        fireEvent.click(groupOf('app_a').getByText('LIDAR_RANGE_INVALID'));
+
+        expect(await screen.findByText('Reading the fault…')).toBeInTheDocument();
+        expect(screen.queryByRole('rowheader', { name: 'Level' })).not.toBeInTheDocument();
+    });
 });
 
 describe('FaultsDashboard list', () => {
-    it('lists each fault under its entity name, and groups them on request', () => {
+    it('groups the faults under their entity from the start, and lists them flat on request', () => {
         render(<FaultsDashboard />);
-        expect(screen.getByText('app_a').tagName).toBe('B');
-
-        fireEvent.click(screen.getByRole('switch', { name: /group by entity/i }));
 
         // Under a heading the entity goes without saying: once a group.
         expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['app_a', 'app_b']);
-        expect(screen.getAllByText('LIDAR_RANGE_INVALID')).toHaveLength(2);
+        expect(groupOf('app_a').getByText('LIDAR_RANGE_INVALID')).toBeInTheDocument();
+        expect(groupOf('app_b').getByText('LIDAR_RANGE_INVALID')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('switch', { name: /group by entity/i }));
+
+        // Flat, each line says whose fault it is.
+        expect(screen.queryByRole('heading', { level: 3 })).not.toBeInTheDocument();
+        const lines = screen.getAllByRole('listitem');
+        expect(lines.map((line) => within(line).getByText(/^app_/).textContent)).toEqual(['app_a', 'app_b']);
+    });
+
+    it('shows on each line how bad it is, what it says, and when it came', () => {
+        render(<FaultsDashboard />);
+
+        const line = groupOf('app_a').getByRole('listitem');
+        expect(within(line).getByText('error')).toBeInTheDocument();
+        expect(within(line).getByText('range invalid on app_a')).toBeInTheDocument();
+        expect(line.querySelector('time')?.getAttribute('datetime')).toBe('2026-08-20T10:00:00Z');
+        expect(line.querySelector('time')?.textContent).not.toBe('');
+    });
+
+    it('counts the open faults by severity beside the tabs, and none it could not check', () => {
+        storeState.faults = [
+            fault('app_a'),
+            fault('app_b'),
+            { ...fault('app_c'), severity: 'warning', status: 'pending' },
+            { ...fault('app_d'), severity: 'critical', status: 'healed' },
+        ];
+        const { rerender } = render(<FaultsDashboard />);
+
+        expect(screen.getByText('2 errors')).toBeInTheDocument();
+        expect(screen.getByText('1 warning')).toBeInTheDocument();
+        // A healed fault is not open, and a severity nothing has is not shown.
+        expect(screen.queryByText(/critical/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/info/)).not.toBeInTheDocument();
+
+        storeState = { ...storeState, faultsError: 'Failed to get faults' };
+        rerender(<FaultsDashboard />);
+        expect(screen.queryByText('2 errors')).not.toBeInTheDocument();
+    });
+
+    it('filters by severity, and says so when the filters hide every fault', async () => {
+        const user = userEvent.setup();
+        storeState.faults = [fault('app_a'), { ...fault('app_b'), severity: 'warning' }];
+        render(<FaultsDashboard />);
+
+        // The open menu hides the page from assistive tech: each check comes after it closes.
+        await user.click(screen.getByRole('button', { name: /Severity/ }));
+        await user.click(screen.getByRole('menuitemcheckbox', { name: 'Warning' }));
+        await user.keyboard('{Escape}');
+        expect(screen.queryByRole('group', { name: 'app_b' })).not.toBeInTheDocument();
+        expect(screen.getByRole('group', { name: 'app_a' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Severity/ })).toHaveTextContent('3/4');
+
+        await user.click(screen.getByRole('button', { name: /Severity/ }));
+        await user.click(screen.getByRole('menuitemcheckbox', { name: 'Error' }));
+        await user.keyboard('{Escape}');
+
+        expect(listedCodes()).toEqual([]);
+        expect(screen.getByText('Adjust filters to see more faults')).toBeInTheDocument();
+        expect(screen.queryByText('System is operating normally')).not.toBeInTheDocument();
+    });
+
+    it('filters by the statuses of the tab it is on', async () => {
+        const user = userEvent.setup();
+        storeState.faults = [
+            fault('app_a'),
+            { ...fault('app_b'), status: 'pending' },
+            { ...fault('app_c'), status: 'healed' },
+            { ...fault('app_d'), status: 'cleared' },
+        ];
+        render(<FaultsDashboard />);
+
+        await user.click(screen.getByRole('button', { name: /Status/ }));
+        expect(screen.getAllByRole('menuitemcheckbox').map((item) => item.textContent)).toEqual(['Active', 'Pending']);
+        await user.click(screen.getByRole('menuitemcheckbox', { name: 'Pending' }));
+        await user.keyboard('{Escape}');
+        expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['app_a']);
+
+        await user.click(screen.getByRole('button', { name: 'History' }));
+        await user.click(screen.getByRole('button', { name: /Status/ }));
+        expect(screen.getAllByRole('menuitemcheckbox').map((item) => item.textContent)).toEqual(['Healed', 'Cleared']);
+        await user.click(screen.getByRole('menuitemcheckbox', { name: 'Cleared' }));
+        await user.keyboard('{Escape}');
+        expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['app_c']);
+    });
+
+    it('never says the system is fine while the list could not be refreshed', () => {
+        storeState.faults = [{ ...fault('app_a'), status: 'healed' }];
+        storeState.faultsError = 'Failed to get faults: ListFaults service not available';
+        render(<FaultsDashboard />);
+
+        expect(screen.queryByText('System is operating normally')).not.toBeInTheDocument();
+        expect(screen.getAllByText('Fault status unknown').length).toBeGreaterThan(0);
+    });
+
+    it('says the system is operating normally with no fault at all', () => {
+        storeState.faults = [];
+        render(<FaultsDashboard />);
+        expect(screen.getByText('System is operating normally')).toBeInTheDocument();
     });
 
     it('keeps ended faults out of Now and lists them in History', () => {
@@ -173,5 +457,43 @@ describe('FaultsDashboard list', () => {
         expect(screen.getAllByText('LIDAR_RANGE_INVALID')).toHaveLength(1);
         expect(screen.getByText('app_b')).toBeInTheDocument();
         expect(screen.queryByText('app_a')).not.toBeInTheDocument();
+    });
+
+    it("reads an ended fault's details again on Refresh when they could not be read", async () => {
+        storeState.faults = [{ ...fault('app_a'), status: 'healed' }];
+        mockGetFaultWithEnvironmentData.mockResolvedValue(null);
+        render(<FaultsDashboard />);
+        fireEvent.click(screen.getByRole('button', { name: 'History' }));
+        fireEvent.click(screen.getByText('LIDAR_RANGE_INVALID'));
+        expect(await screen.findByText("This fault's details could not be read.")).toBeInTheDocument();
+        expect(mockGetFaultWithEnvironmentData).toHaveBeenCalledTimes(1);
+
+        fireEvent.click(screen.getByTitle('Refresh faults'));
+
+        await waitFor(() => expect(mockGetFaultWithEnvironmentData).toHaveBeenCalledTimes(2));
+        expect(mockFetchFaults).toHaveBeenCalledWith({ force: true });
+    });
+
+    it('lists History by newest report first, and finds faults by entity, code or words', () => {
+        const ended = (entityId: string, code: string, lastOccurred: number): Fault => ({
+            ...fault(entityId),
+            code,
+            status: 'healed',
+            parameters: { last_occurred: lastOccurred, occurrence_count: 1 },
+        });
+        storeState.faults = [
+            ended('app_a', 'OLDER', 1756636800),
+            ended('app_b', 'NEWEST', 1756640000),
+            ended('app_c', 'MIDDLE', 1756638000),
+        ];
+        render(<FaultsDashboard />);
+        fireEvent.click(screen.getByRole('button', { name: 'History' }));
+
+        expect(listedCodes()).toEqual(['NEWEST', 'MIDDLE', 'OLDER']);
+
+        fireEvent.change(screen.getByRole('searchbox', { name: 'Search faults' }), { target: { value: 'app_c' } });
+        expect(listedCodes()).toEqual(['MIDDLE']);
+        fireEvent.change(screen.getByRole('searchbox', { name: 'Search faults' }), { target: { value: 'older' } });
+        expect(listedCodes()).toEqual(['OLDER']);
     });
 });

@@ -15,7 +15,9 @@ import {
     Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ResourceReadError } from '@/components/ResourceReadError';
 import { RowGrid } from '@/components/RowGrid';
+import { SectionHeading } from '@/components/SectionHeading';
 import { SegmentedSwitch } from '@/components/SegmentedSwitch';
 import { Textarea } from '@/components/ui/textarea';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -210,13 +212,16 @@ function OperationRow({
     return (
         <Collapsible open={isExpanded} onOpenChange={setIsExpanded} className="bg-white">
             <div>
-                {/* Operation header - simplified, no button */}
+                {/* The row opens and closes the operation: a button, so the keyboard reaches it */}
                 <CollapsibleTrigger asChild>
-                    <div className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition-colors hover:bg-canvas">
-                        <KindIcon className="w-4 h-4 text-faint shrink-0" />
+                    <button
+                        type="button"
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-left outline-none transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-solid focus-visible:outline-ring"
+                    >
+                        <KindIcon className="w-4 h-4 text-faint shrink-0" aria-hidden />
 
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
+                        <span className="block flex-1 min-w-0">
+                            <span className="flex items-center gap-1.5">
                                 <span className="mr-0.5 truncate font-mono text-[13px] font-medium text-foreground">
                                     {operation.name}
                                 </span>
@@ -227,14 +232,15 @@ function OperationRow({
                                         {history.length} call{history.length > 1 ? 's' : ''}
                                     </span>
                                 )}
-                            </div>
-                            <p className="text-xs text-faint truncate">{operation.type}</p>
-                        </div>
+                            </span>
+                            <span className="block text-xs text-faint truncate">{operation.type}</span>
+                        </span>
 
                         <ChevronDown
                             className={cn('w-4 h-4 text-faint transition-transform', isExpanded && 'rotate-180')}
+                            aria-hidden
                         />
-                    </div>
+                    </button>
                 </CollapsibleTrigger>
 
                 {/* Expanded content */}
@@ -418,10 +424,11 @@ function OperationRow({
 }
 
 export function OperationsPanel({ entityId, highlightOperation, entityType = 'components' }: OperationsPanelProps) {
-    const { operations, isLoadingOperations, fetchOperations, createExecution } = useAppStore(
+    const { operations, isLoadingOperations, readError, fetchOperations, createExecution } = useAppStore(
         useShallow((state: AppState) => ({
             operations: state.operations,
             isLoadingOperations: state.isLoadingOperations,
+            readError: state.operationsErrors.get(entityId),
             fetchOperations: state.fetchOperations,
             createExecution: state.createExecution,
         }))
@@ -461,7 +468,8 @@ export function OperationsPanel({ entityId, highlightOperation, entityType = 'co
         { label: 'Actions', icon: Clock, items: actions },
     ].filter((section) => section.items.length > 0);
 
-    // The tab says these are operations: here how many of each, and a refresh
+    // No heading: the Operations tab (or, on an operation's own page, the toolbar) says what these
+    // are; here how many of each, and a refresh
     return (
         <section className="space-y-3">
             <div className="flex items-center gap-1.5">
@@ -479,7 +487,9 @@ export function OperationsPanel({ entityId, highlightOperation, entityType = 'co
                     <RefreshCw className={`w-4 h-4 ${isLoadingOperations ? 'animate-spin' : ''}`} />
                 </Button>
             </div>
-            {entityOperations.length === 0 ? (
+            {entityOperations.length === 0 && readError ? (
+                <ResourceReadError what="operations" reason={readError} onRetry={handleRefresh} />
+            ) : entityOperations.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                     <Zap className="w-10 h-10 mb-3 opacity-30" />
                     <p className="text-sm font-medium">No operations available</p>
@@ -489,10 +499,10 @@ export function OperationsPanel({ entityId, highlightOperation, entityType = 'co
                 <div className="space-y-5">
                     {sections.map(({ label, icon: Icon, items }) => (
                         <div key={label} className="space-y-2">
-                            <h4 className="flex items-center gap-2 font-sans text-[13px] font-semibold tracking-normal text-foreground">
-                                <Icon className="w-4 h-4 text-faint" />
+                            <SectionHeading as="h4">
+                                <Icon className="w-4 h-4 text-faint" aria-hidden />
                                 {label}
-                            </h4>
+                            </SectionHeading>
                             <RowGrid columns={1}>
                                 {items.map((op) => (
                                     <OperationRow

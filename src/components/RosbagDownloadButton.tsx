@@ -4,35 +4,14 @@ import { useShallow } from 'zustand/shallow';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAppStore } from '@/lib/store';
+import { parseBulkDataUri, saveBlob } from '@/lib/bulk-data';
 import { formatBytes, formatDuration } from '@/lib/utils';
-import type { SovdResourceEntityType } from '@/lib/types';
 import type { RosbagSnapshot } from '@/lib/types';
 
 interface RosbagDownloadButtonProps {
     snapshot: RosbagSnapshot;
     variant?: 'default' | 'outline' | 'ghost';
     size?: 'default' | 'sm' | 'icon';
-}
-
-/**
- * Parse a bulk_data_uri like "/apps/motor/bulk-data/rosbags/FAULT_CODE"
- * into { entityType, entityId, category, id } for the downloadBulkData API.
- */
-function parseBulkDataUri(uri: string): {
-    entityType: SovdResourceEntityType;
-    entityId: string;
-    category: string;
-    id: string;
-} | null {
-    // Pattern: /<entityType>/<entityId>/bulk-data/<category>/<id>
-    const match = uri.match(/^\/(apps|components|areas|functions)\/([^/]+)\/bulk-data\/([^/]+)\/(.+)$/);
-    if (!match) return null;
-    return {
-        entityType: match[1]! as SovdResourceEntityType,
-        entityId: match[2]!,
-        category: match[3]!,
-        id: match[4]!,
-    };
 }
 
 export function RosbagDownloadButton({ snapshot, variant = 'outline', size = 'sm' }: RosbagDownloadButtonProps) {
@@ -54,24 +33,16 @@ export function RosbagDownloadButton({ snapshot, variant = 'outline', size = 'sm
         try {
             const parsed = parseBulkDataUri(snapshot.bulk_data_uri);
             if (!parsed) {
-                throw new Error('Invalid bulk_data_uri format');
+                throw new Error("This recording's address could not be read");
             }
 
             const result = await downloadBulkData(parsed.entityType, parsed.entityId, parsed.category, parsed.id);
 
             if (!result) {
-                throw new Error('Download failed');
+                throw new Error('The gateway did not hand over this recording');
             }
 
-            // Create object URL and trigger download
-            const url = URL.createObjectURL(result.blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = result.filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
+            saveBlob(result.blob, result.filename);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Download failed');
         } finally {
@@ -91,31 +62,42 @@ export function RosbagDownloadButton({ snapshot, variant = 'outline', size = 'sm
     const accessibleName = snapshot.name ? `${label} - ${snapshot.name}` : label;
 
     return (
-        <Tooltip>
-            <TooltipTrigger asChild>
-                <Button
-                    variant={variant}
-                    size={size}
-                    onClick={handleDownload}
-                    disabled={isDownloading}
-                    aria-label={accessibleName}
-                    className={error ? 'border-destructive' : ''}
-                >
-                    {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                    {size !== 'icon' && <span className="ml-2">{isDownloading ? 'Downloading...' : label}</span>}
-                </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-                {error ? (
-                    <p className="text-destructive">{error}</p>
-                ) : (
-                    <div className="space-y-1">
-                        <p className="font-medium">{snapshot.name}</p>
-                        {snapshot.duration_sec && <p>Duration: {formatDuration(snapshot.duration_sec)}</p>}
-                        {snapshot.format && <p>Format: {snapshot.format}</p>}
-                    </div>
-                )}
-            </TooltipContent>
-        </Tooltip>
+        <>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        variant={variant}
+                        size={size}
+                        onClick={handleDownload}
+                        disabled={isDownloading}
+                        aria-label={accessibleName}
+                        className={error ? 'border-destructive' : ''}
+                    >
+                        {isDownloading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                            <Download className="h-4 w-4" />
+                        )}
+                        {size !== 'icon' && <span className="ml-2">{isDownloading ? 'Downloading...' : label}</span>}
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                    {error ? (
+                        <p className="text-destructive">{error}</p>
+                    ) : (
+                        <div className="space-y-1">
+                            <p className="font-medium">{snapshot.name}</p>
+                            {snapshot.duration_sec && <p>Duration: {formatDuration(snapshot.duration_sec)}</p>}
+                            {snapshot.format && <p>Format: {snapshot.format}</p>}
+                        </div>
+                    )}
+                </TooltipContent>
+            </Tooltip>
+            {/* On the page as well: a tooltip opens neither on a touch screen nor by itself. There
+                from the start (out of the layout while empty), so a screen reader hears it change. */}
+            <span role="status" className={error ? 'ml-2 text-xs text-destructive' : 'sr-only'}>
+                {error && `Download failed: ${error}`}
+            </span>
+        </>
     );
 }

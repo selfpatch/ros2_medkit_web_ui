@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 // This browser remembers whether the sidebar is folded away
 const FOLD_KEY = 'ros2_medkit_web_ui_sidebar_folded';
@@ -14,30 +14,41 @@ function readFolded(): boolean {
     }
 }
 
+/** Whether the window is wide enough now for the sidebar to sit beside the view, for handlers outside React */
+export function isDesktopNow(): boolean {
+    return window.matchMedia(DESKTOP_QUERY).matches;
+}
+
 /**
  * Whether the sidebar is folded away for more room, toggled by its button or Cmd/Ctrl+\,
- * and remembered by this browser.
+ * and remembered by this browser. Below md the sidebar is a menu over the view and does not
+ * fold, so the shortcut does nothing there rather than flip a setting no one can see.
+ * `onToggle` hears which way it goes (true: folding away) before it goes, while focus is still
+ * where the user left it.
  */
-export function useSidebarFold(): [boolean, () => void] {
+export function useSidebarFold(onToggle?: (folding: boolean) => void): [boolean, () => void] {
     const [folded, setFolded] = useState(readFolded);
+    // The fold now, for a toggle that has to know which way it goes before the state moves
+    const foldedRef = useRef(folded);
 
     const toggle = useCallback(() => {
-        setFolded((now) => {
-            try {
-                localStorage.setItem(FOLD_KEY, now ? '0' : '1');
-            } catch {
-                // A browser that keeps nothing still folds for this visit
-            }
-            return !now;
-        });
-    }, []);
+        const next = !foldedRef.current;
+        foldedRef.current = next;
+        onToggle?.(next);
+        try {
+            localStorage.setItem(FOLD_KEY, next ? '1' : '0');
+        } catch {
+            // A browser that keeps nothing still folds for this visit
+        }
+        setFolded(next);
+    }, [onToggle]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.code === 'Backslash') {
-                e.preventDefault();
-                toggle();
-            }
+            if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.code !== 'Backslash') return;
+            if (!isDesktopNow()) return;
+            e.preventDefault();
+            toggle();
         };
 
         document.addEventListener('keydown', handleKeyDown);
@@ -51,7 +62,7 @@ export function useSidebarFold(): [boolean, () => void] {
  * Whether the window is wide enough for the sidebar to sit beside the view
  */
 export function useIsDesktop(): boolean {
-    const [desktop, setDesktop] = useState(() => window.matchMedia(DESKTOP_QUERY).matches);
+    const [desktop, setDesktop] = useState(isDesktopNow);
 
     useEffect(() => {
         const list = window.matchMedia(DESKTOP_QUERY);

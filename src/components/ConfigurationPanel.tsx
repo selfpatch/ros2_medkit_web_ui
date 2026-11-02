@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/shallow';
 import { Loader2, RefreshCw, Lock, Save, X, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ResourceReadError } from '@/components/ResourceReadError';
 import { RowGrid } from '@/components/RowGrid';
 import { useAppStore, type AppState } from '@/lib/store';
 import type { Parameter, ParameterType } from '@/lib/types';
@@ -184,7 +185,7 @@ function ParameterRow({
                             'h-8 truncate rounded-lg border px-2.5 py-1.5 font-mono text-[13px] leading-[18px]',
                             param.read_only
                                 ? 'cursor-not-allowed border-transparent bg-canvas text-muted-foreground'
-                                : 'cursor-pointer border-graphite/12 bg-white text-foreground hover:border-graphite/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+                                : 'cursor-pointer border-graphite/12 bg-white text-foreground hover:border-graphite/30 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring'
                         )}
                         onClick={startEditing}
                         onKeyDown={(e) => {
@@ -270,6 +271,7 @@ export function ConfigurationPanel({ entityId, highlightParam, entityType = 'com
     const {
         configurations,
         isLoadingConfigurations,
+        readError,
         fetchConfigurations,
         setParameter,
         resetParameter,
@@ -278,6 +280,7 @@ export function ConfigurationPanel({ entityId, highlightParam, entityType = 'com
         useShallow((state: AppState) => ({
             configurations: state.configurations,
             isLoadingConfigurations: state.isLoadingConfigurations,
+            readError: state.configurationsErrors.get(entityId),
             fetchConfigurations: state.fetchConfigurations,
             setParameter: state.setParameter,
             resetParameter: state.resetParameter,
@@ -333,7 +336,8 @@ export function ConfigurationPanel({ entityId, highlightParam, entityType = 'com
         );
     }
 
-    // The tab says these are the configuration: here how many, and its actions
+    // No heading: the Config tab (or, on a parameter's own page, the toolbar) says what these are;
+    // here how many, and the actions on all of them
     return (
         <section className="space-y-3">
             <div className="flex items-center gap-1.5">
@@ -364,7 +368,9 @@ export function ConfigurationPanel({ entityId, highlightParam, entityType = 'com
                     <RefreshCw className={`w-4 h-4 ${isLoadingConfigurations ? 'animate-spin' : ''}`} />
                 </Button>
             </div>
-            {parameters.length === 0 ? (
+            {parameters.length === 0 && readError ? (
+                <ResourceReadError what="parameters" reason={readError} onRetry={handleRefresh} />
+            ) : parameters.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">
                     No parameters available for this component.
                 </p>

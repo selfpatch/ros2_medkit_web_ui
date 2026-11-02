@@ -97,9 +97,9 @@ function getEntityColor(type: string, isSelected?: boolean): string {
 function getLampClass(status: string | undefined): string {
     switch (status) {
         case 'ready':
-            return 'rounded-full bg-emerald-500';
+            return 'rounded-full bg-state-ok';
         case 'notReady':
-            return 'rounded-full border-2 border-amber-500 bg-transparent';
+            return 'rounded-full border-2 border-state-warn bg-transparent';
         default:
             return 'rounded-sm bg-muted-foreground/40';
     }
@@ -196,7 +196,7 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
                 tabIndex={0}
                 className={cn(
                     'flex items-center gap-1 py-1.5 px-2 rounded-lg cursor-pointer text-body transition-colors',
-                    'outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
+                    'outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring',
                     isSelected ? 'raised text-foreground font-medium' : 'hover:bg-graphite/5 hover:text-foreground'
                 )}
                 style={{ paddingLeft: `${depth * 16 + 8}px` }}
@@ -260,8 +260,8 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
                         className="flex items-center gap-0.5 mr-1"
                         title={`${topicData.isPublisher ? 'Publishes' : ''}${topicData.isPublisher && topicData.isSubscriber ? ' & ' : ''}${topicData.isSubscriber ? 'Subscribes' : ''}`}
                     >
-                        {topicData.isPublisher && <ArrowUp className="w-3 h-3 text-green-500" />}
-                        {topicData.isSubscriber && <ArrowDown className="w-3 h-3 text-blue-500" />}
+                        {topicData.isPublisher && <ArrowUp className="w-3 h-3 text-faint" />}
+                        {topicData.isSubscriber && <ArrowDown className="w-3 h-3 text-faint" />}
                     </div>
                 )}
 
@@ -299,7 +299,7 @@ export function EntityTreeNode({ node, depth }: EntityTreeNodeProps) {
                                   className="flex items-center gap-2 py-1.5 px-2 text-muted-foreground italic text-sm select-none"
                                   style={{ paddingLeft: `${(depth + 1) * 16 + 8}px` }}
                               >
-                                  <span className="text-xs">—</span>
+                                  <span className="text-xs">-</span>
                                   <span>Empty</span>
                               </div>
                           )}

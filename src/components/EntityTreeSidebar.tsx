@@ -6,6 +6,7 @@ import { SidebarToggle } from '@/components/SidebarToggle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EntityTreeNode } from '@/components/EntityTreeNode';
+import type { ViewMode } from '@/components/EntityDetailPanel';
 import { EntityTreeSkeleton } from '@/components/EntityTreeSkeleton';
 import { FaultsCountBadge } from '@/components/FaultsDashboard';
 import { useAppStore, type TreeViewMode } from '@/lib/store';
@@ -14,7 +15,7 @@ import type { EntityTreeNode as EntityTreeNodeType } from '@/lib/types';
 
 interface EntityTreeSidebarProps {
     /** The view the main pane shows, so its place in the sidebar reads as the current one */
-    viewMode?: 'entity' | 'faults-dashboard' | 'updates-dashboard';
+    viewMode?: ViewMode;
     onSettingsClick: () => void;
     /** Closes the sidebar where it lies over the view (a phone) */
     onClose?: () => void;
@@ -99,7 +100,7 @@ export function EntityTreeSidebar({
 
     const navItemClass = (active: boolean) =>
         cn(
-            'flex h-[34px] items-center gap-[11px] rounded-lg px-2.5 text-sm font-medium outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-[18px] [&_svg]:stroke-[1.8]',
+            'flex h-[34px] items-center gap-[11px] rounded-lg px-2.5 text-sm font-medium outline-none transition-colors focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring [&_svg]:size-[18px] [&_svg]:stroke-[1.8]',
             active
                 ? 'raised text-foreground [&_svg]:text-foreground'
                 : 'text-body hover:bg-graphite/5 hover:text-foreground [&_svg]:text-muted-foreground'
@@ -107,13 +108,14 @@ export function EntityTreeSidebar({
 
     const segmentClass = (active: boolean) =>
         cn(
-            'flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 [&_svg]:size-3.5',
+            'flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium outline-none transition-colors focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring disabled:opacity-50 [&_svg]:size-3.5',
             active ? 'raised text-foreground' : 'text-muted-foreground hover:text-foreground'
         );
 
     return (
         <aside className="flex h-full w-72 flex-col bg-canvas pr-2 pb-2 pl-2.5">
-            {/* The brand; on a phone also the way back to the view */}
+            {/* The brand, then from md up the fold button, or on a phone, where the sidebar lies over
+                the view, the button that closes it */}
             <div className="flex h-14 shrink-0 items-center pl-2">
                 <Brand />
                 <SidebarToggle className="ml-auto hidden md:grid" />
@@ -245,7 +247,7 @@ export function EntityTreeSidebar({
                     type="button"
                     onClick={onSettingsClick}
                     title={isConnected ? 'Server settings' : 'Connect to a gateway'}
-                    className="flex min-h-11 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-graphite/5 focus-visible:outline-2 focus-visible:outline-ring"
+                    className="flex min-h-11 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-graphite/5 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring"
                 >
                     <span className="grid size-7 shrink-0 place-items-center rounded-[8.5px] bg-white text-muted-foreground shadow-[0_0_0_1px_rgb(18_20_19/0.08),0_1px_2px_rgb(18_20_19/0.06)]">
                         <Server className="size-4" aria-hidden />
@@ -271,7 +273,7 @@ export function EntityTreeSidebar({
                     <button
                         type="button"
                         className={cn(
-                            'flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-4 [&_svg]:stroke-[1.8]',
+                            'flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium outline-none transition-colors focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring [&_svg]:size-4 [&_svg]:stroke-[1.8]',
                             viewMode === 'updates-dashboard'
                                 ? 'raised text-foreground'
                                 : 'text-muted-foreground hover:bg-graphite/5 hover:text-foreground'

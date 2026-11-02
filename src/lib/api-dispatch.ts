@@ -205,24 +205,29 @@ export function getEntityDataItem(
     client: MedkitClient,
     entityType: SovdResourceEntityType,
     entityId: string,
-    dataId: string
+    dataId: string,
+    signal?: AbortSignal
 ) {
     switch (entityType) {
         case 'apps':
             return client.GET('/apps/{app_id}/data/{data_id}', {
                 params: { path: { app_id: entityId, data_id: dataId } },
+                signal,
             });
         case 'components':
             return client.GET('/components/{component_id}/data/{data_id}', {
                 params: { path: { component_id: entityId, data_id: dataId } },
+                signal,
             });
         case 'areas':
             return client.GET('/areas/{area_id}/data/{data_id}', {
                 params: { path: { area_id: entityId, data_id: dataId } },
+                signal,
             });
         case 'functions':
             return client.GET('/functions/{function_id}/data/{data_id}', {
                 params: { path: { function_id: entityId, data_id: dataId } },
+                signal,
             });
     }
 }

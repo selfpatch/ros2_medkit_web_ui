@@ -52,18 +52,12 @@ function ReadonlyField({ name, value, depth = 0 }: ReadonlyFieldProps) {
             <div style={{ marginLeft: indent }} className="flex items-center gap-3 py-0.5">
                 <span className="text-sm font-medium min-w-[100px] text-muted-foreground">{name}</span>
                 <span className="font-mono text-sm">
-                    {value === null ? (
-                        <span className="text-muted-foreground italic">null</span>
-                    ) : value === undefined ? (
-                        <span className="text-muted-foreground italic">undefined</span>
-                    ) : typeof value === 'boolean' ? (
-                        <span className="text-foreground">{String(value)}</span>
-                    ) : typeof value === 'number' ? (
-                        <span className="text-foreground">{value}</span>
-                    ) : typeof value === 'string' ? (
-                        <span className="text-foreground">"{value}"</span>
+                    {value === null || value === undefined ? (
+                        <span className="text-muted-foreground italic">{String(value)}</span>
                     ) : (
-                        String(value)
+                        <span className="text-foreground">
+                            {typeof value === 'string' ? `"${value}"` : String(value)}
+                        </span>
                     )}
                 </span>
             </div>
