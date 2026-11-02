@@ -169,6 +169,41 @@ describe('readingRows', () => {
         expect(labels).toEqual(['Speed (Left status)', 'Speed (Right status)']);
     });
 
+    it('keeps the same reading of two topics apart even when they read the same, and reads both again', () => {
+        const frames = [
+            frame('/left/status', 'std_msgs/msg/String', { data: '{"temperature": 41.0}' }, '2026-11-01T21:30:42.678Z'),
+            frame(
+                '/right/status',
+                'std_msgs/msg/String',
+                { data: '{"temperature": 41.0}' },
+                '2026-11-01T21:30:42.700Z'
+            ),
+        ];
+        const rows = readingRows(frames, new Map(), '');
+        expect(rows.map((row) => row.label)).toEqual(['Temperature (Left status)', 'Temperature (Right status)']);
+        expect(rows.map((row) => row.then.topic)).toEqual(['/left/status', '/right/status']);
+    });
+
+    it('says whose each reading is when two topics of one shape give it the same context', () => {
+        const frames = [
+            frame(
+                '/left/diag',
+                'std_msgs/msg/String',
+                { data: '{"motor": {"temperature": 41}}' },
+                '2026-11-01T21:30:42.678Z'
+            ),
+            frame(
+                '/right/diag',
+                'std_msgs/msg/String',
+                { data: '{"motor": {"temperature": 44}}' },
+                '2026-11-01T21:30:42.700Z'
+            ),
+        ];
+        const labels = readingRows(frames, new Map(), '').map((row) => row.label);
+        expect(new Set(labels).size).toBe(2);
+        expect(labels.every((label) => /left diag|right diag/i.test(label))).toBe(true);
+    });
+
     it('marks the readings of a disconnected entity as last known', () => {
         const plc: FreezeFrameSnapshot = {
             type: 'freeze_frame',

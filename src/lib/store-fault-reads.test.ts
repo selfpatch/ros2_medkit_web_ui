@@ -219,6 +219,50 @@ describe("the fault list takes up a change of the fault's times", () => {
         expect(toast.warning).toHaveBeenCalledTimes(1);
     });
 
+    it('raises no toast for an open fault that only counts on in its message', async () => {
+        // M1-2's anomaly detector writes how long it has been stuck into the message.
+        const { toast } = await import('react-toastify');
+        const fault: Fault = { ...transformFault(raw()), message: 'No navigation progress for 28.1s' };
+        useAppStore.setState({ faults: [fault] } as never);
+        vi.mocked(toast.warning).mockClear();
+
+        useAppStore
+            .getState()
+            .applyFaultStreamEvent('fault_updated', { ...fault, message: 'No navigation progress for 34.1s' });
+
+        expect(toast.warning).not.toHaveBeenCalled();
+        expect(useAppStore.getState().faults[0]?.message).toBe('No navigation progress for 34.1s');
+    });
+
+    it('raises a toast for a fault that comes back after it healed', async () => {
+        const { toast } = await import('react-toastify');
+        const fault: Fault = transformFault(raw());
+        useAppStore.setState({ faults: [{ ...fault, status: 'healed' }] } as never);
+        vi.mocked(toast.warning).mockClear();
+
+        useAppStore.getState().applyFaultStreamEvent('fault_confirmed', fault);
+
+        expect(toast.warning).toHaveBeenCalledTimes(1);
+    });
+
+    it('raises no toast while the faults dashboard is on screen: its list shows the fault', async () => {
+        const { toast } = await import('react-toastify');
+        useAppStore.setState({ faults: [] } as never);
+        vi.mocked(toast.warning).mockClear();
+
+        const stopShowing = useAppStore.getState().showingFaults();
+        useAppStore.getState().applyFaultStreamEvent('fault_confirmed', transformFault(raw()));
+        expect(toast.warning).not.toHaveBeenCalled();
+        expect(useAppStore.getState().faults).toHaveLength(1);
+
+        stopShowing();
+        stopShowing();
+        useAppStore
+            .getState()
+            .applyFaultStreamEvent('fault_confirmed', transformFault(raw({ fault_code: 'MOTOR_OVERHEAT' })));
+        expect(toast.warning).toHaveBeenCalledTimes(1);
+    });
+
     it('leaves the list alone for a stream event that changed nothing', () => {
         const fault: Fault = transformFault(raw());
         useAppStore.setState({ faults: [fault] } as never);

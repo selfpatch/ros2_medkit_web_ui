@@ -19,6 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { toast } from 'react-toastify';
 import {
     useAppStore,
     FAULT_APPS_REREAD_MS,
@@ -121,6 +122,67 @@ describe('subscribeFaultStream', () => {
         expect(useAppStore.getState().faultStreamCleanup).not.toBeNull();
 
         await vi.waitFor(() => expect(useAppStore.getState().faultStreamCleanup).toBeNull());
+    });
+
+    /** A client whose fault stream yields `events` and then stays open. */
+    function streaming(events: unknown[]) {
+        return {
+            ...clientReturning([]),
+            streams: {
+                faults: () => ({
+                    close: vi.fn(),
+                    async *[Symbol.asyncIterator]() {
+                        yield* events;
+                        await new Promise(() => {});
+                    },
+                }),
+            },
+        };
+    }
+
+    function confirmedAt(seconds: number, overrides: Record<string, unknown> = {}) {
+        return {
+            event: 'fault_confirmed',
+            data: { event_type: 'fault_confirmed', fault: raw(overrides), timestamp: seconds },
+        };
+    }
+
+    it('lists what the gateway replays on connect without a toast for each old event', async () => {
+        vi.mocked(toast.warning).mockClear();
+        const anHourAgo = Date.now() / 1000 - 3600;
+        // The buffer a fresh page receives: one fault that came and went, twice.
+        connected(
+            streaming([
+                confirmedAt(anHourAgo),
+                {
+                    event: 'fault_cleared',
+                    data: { fault: raw({ status: 'HEALED' }), timestamp: anHourAgo + 60 },
+                },
+                confirmedAt(anHourAgo + 120),
+            ])
+        );
+
+        useAppStore.getState().subscribeFaultStream();
+
+        await vi.waitFor(() =>
+            expect(useAppStore.getState().faults.map((f) => f.code)).toEqual(['LIDAR_RANGE_INVALID'])
+        );
+        useAppStore.getState().unsubscribeFaultStream();
+        expect(toast.warning).not.toHaveBeenCalled();
+    });
+
+    it('raises one toast per fault for what happens once the stream is open', async () => {
+        vi.mocked(toast.warning).mockClear();
+        connected(streaming([confirmedAt(Date.now() / 1000)]));
+
+        useAppStore.getState().subscribeFaultStream();
+
+        await vi.waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
+        useAppStore.getState().unsubscribeFaultStream();
+        // Keyed by the fault, so a second toast for it while the first shows is dropped.
+        expect(vi.mocked(toast.warning).mock.calls[0]![1]).toMatchObject({
+            toastId: expect.stringContaining('LIDAR_RANGE_INVALID'),
+        });
     });
 });
 
@@ -1142,5 +1204,43 @@ describe('placing faults on the apps the gateway lists', () => {
                 'lane-navigator:pending',
             ])
         );
+    });
+});
+
+describe('a list read while the stream reports an open fault', () => {
+    it('lands, and keeps the newer report the stream brought meanwhile', async () => {
+        const { client, release } = deferredClient();
+        connected(client);
+        useAppStore.setState({ faults: [transformFault(raw() as RawFaultItem)], faultsLoaded: true } as never);
+
+        const read = useAppStore.getState().fetchFaults();
+        await vi.waitFor(() => expect(faultReads(client)).toBe(1));
+        // A confirmed fault sends an update for every report of it, moving only its times.
+        useAppStore
+            .getState()
+            .applyFaultStreamEvent('fault_updated', transformFault(raw({ last_occurred: 1756636900 }) as RawFaultItem));
+        // The read was answered before that report, and knows a fault the stream never sent.
+        release([raw(), raw({ fault_code: 'MOTOR_OVERHEAT', status: 'HEALED' })]);
+        await read;
+
+        const faults = useAppStore.getState().faults;
+        expect(faults.map((f) => f.code)).toEqual(['LIDAR_RANGE_INVALID', 'MOTOR_OVERHEAT']);
+        expect(faults[0]!.parameters?.last_occurred).toBe(1756636900);
+    });
+
+    it('still gives way to an event that changed a row', async () => {
+        const { client, release } = deferredClient();
+        connected(client);
+        useAppStore.setState({ faults: [transformFault(raw() as RawFaultItem)], faultsLoaded: true } as never);
+
+        const read = useAppStore.getState().fetchFaults();
+        await vi.waitFor(() => expect(faultReads(client)).toBe(1));
+        useAppStore
+            .getState()
+            .applyFaultStreamEvent('fault_cleared', transformFault(raw({ status: 'HEALED' }) as RawFaultItem));
+        release([raw()]);
+        await read;
+
+        expect(useAppStore.getState().faults).toEqual([]);
     });
 });

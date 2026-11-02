@@ -35,8 +35,11 @@ describe('SnapshotCard', () => {
 
         renderWithTooltip(<SnapshotCard snapshot={freezeFrame} index={0} />);
 
-        expect(screen.getByText('Snapshot #1')).toBeInTheDocument();
-        expect(screen.getByText('Freeze Frame')).toBeInTheDocument();
+        // Named by its topic: the topic says which frame it is, the icon that it is one.
+        expect(screen.getByText('/motor/temp')).toBeInTheDocument();
+        expect(screen.getByText('sensor_msgs/msg/Temperature')).toBeInTheDocument();
+        expect(screen.queryByText('Snapshot #1')).not.toBeInTheDocument();
+        expect(screen.queryByText(/Freeze Frame/)).not.toBeInTheDocument();
         expect(screen.getByText(/Data.*2 fields/)).toBeInTheDocument();
         expect(screen.getByText(/"rpm": 3000/).textContent).toBe('{\n  "temperature": 85.5,\n  "rpm": 3000\n}');
     });
@@ -130,9 +133,27 @@ describe('SnapshotCard', () => {
             },
         };
 
-        renderWithTooltip(<SnapshotCard snapshot={snapshot} index={0} />);
+        const { container } = renderWithTooltip(<SnapshotCard snapshot={snapshot} index={0} />);
 
-        // Check that timestamp is rendered (format depends on locale)
-        expect(screen.getByText(/2026/)).toBeInTheDocument();
+        // In the page's words ("Feb 4", "Tue 14:20", "11:55"), the whole date on hover.
+        const time = container.querySelector('time');
+        expect(time?.getAttribute('datetime')).toBe('2026-02-04T10:00:00.000Z');
+        expect(time?.getAttribute('title')).toMatch(/2026/);
+        expect(time?.textContent).not.toBe('');
+    });
+
+    it("keeps a list of plain values on one line, so a scan's ranges do not run a line a number", () => {
+        const scan: FreezeFrameSnapshot = {
+            type: 'freeze_frame',
+            name: 'scan',
+            data: { angle_min: -3.14, ranges: [0.96, 0.97, null], header: { frame_id: 'base_scan' } },
+            'x-medkit': { topic: '/scan', message_type: 'sensor_msgs/msg/LaserScan' },
+        };
+
+        renderWithTooltip(<SnapshotCard snapshot={scan} index={0} />);
+
+        expect(screen.getByText(/"ranges"/).textContent).toBe(
+            '{\n  "angle_min": -3.14,\n  "ranges": [0.96, 0.97, null],\n  "header": {"frame_id": "base_scan"}\n}'
+        );
     });
 });

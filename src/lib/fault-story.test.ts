@@ -118,6 +118,16 @@ describe('fault story', () => {
         expect(rows[0]?.title).toBe('lane-navigator stopped reporting it.');
     });
 
+    it('dates a healed fault reported once by its capture, and does not guess how long it lasted', () => {
+        // lane-navigator reports a block once; medkit captures a moment after that report.
+        const fault = laneBlocked({ status: 'healed' }, { last_occurred: CAME / 1000 });
+        const times = faultTimes(fault, CAME + 1_000);
+
+        expect(times.came).toBe(CAME + 1_000);
+        // Not "Healed after 5 d 8 h", counted from its first report days earlier.
+        expect(statusWords(fault, times, CAME + 60 * MINUTE)).toBe('Healed');
+    });
+
     it('says only "Healed" when it cannot tell how long', () => {
         const fault = laneBlocked({ status: 'healed', timestamp: '' }, { last_occurred: undefined });
         expect(statusWords(fault, faultTimes(fault, null), CAME)).toBe('Healed');

@@ -105,6 +105,7 @@ beforeEach(() => {
         clearFault: mockClearFault,
         getFaultWithEnvironmentData: mockGetFaultWithEnvironmentData,
         readFaultTopic: mockReadFaultTopic,
+        showingFaults: () => () => {},
         isConnected: true,
     };
 });
@@ -361,8 +362,39 @@ describe('FaultsDashboard list', () => {
         const line = groupOf('app_a').getByRole('listitem');
         expect(within(line).getByText('error')).toBeInTheDocument();
         expect(within(line).getByText('range invalid on app_a')).toBeInTheDocument();
-        expect(line.querySelector('time')?.getAttribute('datetime')).toBe('2026-08-20T10:00:00Z');
+        expect(line.querySelector('time')?.getAttribute('datetime')).toBe(
+            new Date('2026-08-20T10:00:00Z').toISOString()
+        );
         expect(line.querySelector('time')?.textContent).not.toBe('');
+    });
+
+    it('dates a fault that came back the way its page does once its details are in', async () => {
+        // First reported on the 20th; medkit captured its newest coming on the 21st.
+        mockGetFaultWithEnvironmentData.mockResolvedValue({
+            environment_data: {
+                snapshots: [
+                    {
+                        type: 'freeze_frame',
+                        name: '/scan',
+                        data: {},
+                        'x-medkit': { topic: '/scan', captured_at: '2026-08-21T09:30:00Z' },
+                    },
+                ],
+            },
+        });
+        render(<FaultsDashboard />);
+
+        fireEvent.click(groupOf('app_a').getByText('LIDAR_RANGE_INVALID'));
+
+        await waitFor(() =>
+            expect(groupOf('app_a').getByRole('listitem').querySelector('time')?.getAttribute('datetime')).toBe(
+                new Date('2026-08-21T09:30:00Z').toISOString()
+            )
+        );
+        // A fault whose details are not read keeps its first report.
+        expect(groupOf('app_b').getByRole('listitem').querySelector('time')?.getAttribute('datetime')).toBe(
+            new Date('2026-08-20T10:00:00Z').toISOString()
+        );
     });
 
     it('counts the open faults by severity beside the tabs, and none it could not check', () => {
