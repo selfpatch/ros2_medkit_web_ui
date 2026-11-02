@@ -50,8 +50,11 @@ function clock(ms: number): string {
     return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-/** "21:30" today, "Yesterday 21:30", "Mon 21:30" within the last six days, else "Oct 27" */
-export function whenWords(ms: number, now: number): string {
+/**
+ * "21:30" today, "Yesterday 21:30", "Mon 21:30" within the last six days, else "Oct 27"
+ * ("Oct 27 21:30" with `withClock`).
+ */
+export function whenWords(ms: number, now: number, withClock = false): string {
     const day = new Date(ms);
     const today = new Date(now);
     today.setHours(0, 0, 0, 0);
@@ -61,7 +64,8 @@ export function whenWords(ms: number, now: number): string {
     if (daysAgo <= 0) return clock(ms);
     if (daysAgo === 1) return `Yesterday ${clock(ms)}`;
     if (daysAgo < 7) return `${day.toLocaleDateString([], { weekday: 'short' })} ${clock(ms)}`;
-    return day.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const date = day.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return withClock ? `${date} ${clock(ms)}` : date;
 }
 
 /** A fault's newest report, in ms, else when it was first reported; null with neither */
@@ -70,9 +74,11 @@ export function lastReportedAt(fault: Fault): number | null {
 }
 
 export interface FaultTimes {
-    /** When this time came: medkit's capture of it, else when it was first reported or last passed */
+    /** When this time came: medkit's capture of it, else when it was first reported */
     came: number | null;
-    /** When it ended: a healed fault's last report; null while open, and for a cleared fault, whose clear is not dated */
+    /** Whether `came` is a capture, which dates this time; else it is the first report */
+    cameAtCapture: boolean;
+    /** When it ended: the later of a healed fault's last report and `came`; null while open, and for a cleared fault, whose clear is not dated */
     ended: number | null;
     /** When the gateway first heard of it; a fault reported again after a clear starts over */
     first: number | null;
@@ -92,15 +98,20 @@ export interface FaultTimes {
  * when it came: a node that keeps reporting moves the newest report along, and every
  * PASSED report moves the last pass, also while the fault stays confirmed.
  *
- * So a healed fault ended with its last FAILED report. Nothing dates a clear.
+ * So a healed fault ended at the later of its last FAILED report and when it came. Nothing
+ * dates a clear. A capture of a
+ * closed fault is this time's unless it is from well before its first report: a later time
+ * needs a later FAILED report, which moves the newest one.
  */
 export function faultTimes(fault: Fault, capture: number | null): FaultTimes {
     const lastReport = toMs(fault.parameters?.last_occurred);
     const first = toMs(fault.timestamp);
     if (isOpen(fault)) {
         const earlier = capture !== null && first !== null && capture < first - MINUTE;
+        const own = capture !== null && !earlier;
         return {
-            came: capture !== null && !earlier ? capture : first,
+            came: own ? capture : first,
+            cameAtCapture: own,
             ended: null,
             first,
             lastReport,
@@ -110,14 +121,16 @@ export function faultTimes(fault: Fault, capture: number | null): FaultTimes {
     const ended = fault.status === 'healed' ? lastReport : null;
     // medkit takes its frames within seconds of the report that confirmed the fault, so a
     // node that reported it once has its last report just before the capture: still this
-    // time's. One from well after the end is of a later time.
-    const came = capture !== null && (ended === null || capture <= ended + 10 * SECOND) ? capture : first;
+    // time's.
+    const own = capture !== null && (first === null || capture >= first - MINUTE);
+    const came = own ? capture : first;
     return {
         came,
+        cameAtCapture: own,
         ended: ended !== null && came !== null ? Math.max(ended, came) : ended,
         first,
         lastReport,
-        captureIsEarlier: false,
+        captureIsEarlier: capture !== null && !own,
     };
 }
 
@@ -129,8 +142,11 @@ export function statusWords(fault: Fault, times: FaultTimes, now: number): strin
         case 'pending':
             return times.came === null ? 'Pending' : `Pending ${spanWords(now - times.came)}`;
         case 'healed':
-            // A node that reported it once stopped as it came: how long it lasted is not known.
-            return times.came !== null && times.ended !== null && times.ended - times.came >= 5 * SECOND
+            // How long it lasted is told only from a capture of when it came.
+            return times.cameAtCapture &&
+                times.came !== null &&
+                times.ended !== null &&
+                times.ended - times.came >= 5 * SECOND
                 ? `Healed after ${spanWords(times.ended - times.came)}`
                 : 'Healed';
         case 'cleared':

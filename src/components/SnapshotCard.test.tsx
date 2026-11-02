@@ -142,6 +142,30 @@ describe('SnapshotCard', () => {
         expect(time?.textContent).not.toBe('');
     });
 
+    it('tells the clock of a capture older than six days as well as its date', () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date('2026-02-20T12:00:00Z'));
+        try {
+            const old: FreezeFrameSnapshot = {
+                type: 'freeze_frame',
+                name: 'test',
+                data: {},
+                'x-medkit': {
+                    topic: '/test',
+                    message_type: 'std_msgs/msg/String',
+                    full_data: {},
+                    captured_at: '2026-02-04T10:00:00Z',
+                },
+            };
+
+            const { container } = renderWithTooltip(<SnapshotCard snapshot={old} index={0} />);
+
+            expect(container.querySelector('time')?.textContent).toMatch(/Feb 4.*\d{1,2}:\d{2}/);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("keeps a list of plain values on one line, so a scan's ranges do not run a line a number", () => {
         const scan: FreezeFrameSnapshot = {
             type: 'freeze_frame',

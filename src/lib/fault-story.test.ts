@@ -144,10 +144,30 @@ describe('fault story', () => {
         expect(rows[0]).toMatchObject({ key: 'ended', when: '', title: 'It was cleared.' });
     });
 
-    it('takes a closed fault as come when first reported when its capture is from after it ended', () => {
+    it('takes the capture of a closed fault as come, also when it is from after the last report', () => {
+        // A later time would need a later report, which would have moved the last one.
         const stopped = CAME + 9 * MINUTE;
         const fault = laneBlocked({ status: 'healed' }, { last_occurred: stopped / 1000 });
-        expect(faultTimes(fault, stopped + MINUTE).came).toBe(Date.parse('2026-10-27T13:20:32Z'));
+        const times = faultTimes(fault, stopped + MINUTE);
+
+        expect(times.came).toBe(stopped + MINUTE);
+        expect(times.cameAtCapture).toBe(true);
+    });
+
+    it('says only "Healed" for a fault first reported days ago unless a capture dates this time', () => {
+        const first = Date.parse('2026-10-27T13:20:32Z');
+        const fault = laneBlocked({ status: 'healed' }, { last_occurred: CAME / 1000 });
+        const say = (capture: number | null) => {
+            const times = faultTimes(fault, capture);
+            return { came: times.came, words: statusWords(fault, times, CAME + 60 * MINUTE) };
+        };
+
+        // Five days before the first report: an earlier time, not this one.
+        expect(say(first - 5 * 24 * 60 * MINUTE)).toEqual({ came: first, words: 'Healed' });
+        expect(faultTimes(fault, first - 5 * 24 * 60 * MINUTE).captureIsEarlier).toBe(true);
+        // Eleven seconds after the only report: this time's.
+        expect(say(CAME + 11_000)).toEqual({ came: CAME + 11_000, words: 'Healed' });
+        expect(say(null)).toEqual({ came: first, words: 'Healed' });
     });
 
     it('says how often a fault came back after being cleared, which is what its count counts', () => {
