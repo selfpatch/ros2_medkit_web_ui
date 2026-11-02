@@ -245,12 +245,28 @@ describe("the fault list takes up a change of the fault's times", () => {
         expect(toast.warning).toHaveBeenCalledTimes(1);
     });
 
-    it('raises no toast while the faults dashboard is on screen: its list shows the fault', async () => {
+    it('adds the row of a fault_updated for a fault the list does not hold, and raises no toast', async () => {
         const { toast } = await import('react-toastify');
         useAppStore.setState({ faults: [] } as never);
         vi.mocked(toast.warning).mockClear();
 
-        const stopShowing = useAppStore.getState().showingFaults();
+        useAppStore.getState().applyFaultStreamEvent('fault_updated', transformFault(raw()));
+
+        expect(useAppStore.getState().faults.map((f) => f.code)).toEqual(['LANE_BLOCKED']);
+        expect(toast.warning).not.toHaveBeenCalled();
+
+        useAppStore
+            .getState()
+            .applyFaultStreamEvent('fault_confirmed', transformFault(raw({ fault_code: 'MOTOR_OVERHEAT' })));
+        expect(toast.warning).toHaveBeenCalledTimes(1);
+    });
+
+    it('raises no toast for a fault a list on screen shows', async () => {
+        const { toast } = await import('react-toastify');
+        useAppStore.setState({ faults: [] } as never);
+        vi.mocked(toast.warning).mockClear();
+
+        const stopShowing = useAppStore.getState().showingFaults(() => true);
         useAppStore.getState().applyFaultStreamEvent('fault_confirmed', transformFault(raw()));
         expect(toast.warning).not.toHaveBeenCalled();
         expect(useAppStore.getState().faults).toHaveLength(1);

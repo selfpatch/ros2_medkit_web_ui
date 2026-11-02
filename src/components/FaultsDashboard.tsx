@@ -372,6 +372,8 @@ function FaultsPage() {
     const askedAbout = useRef<AskedAbout>(null);
     const [, setAnswered] = useState(0);
     const [pane, paneLaidOut] = useMeasured<HTMLDivElement, boolean>(isLaidOut, false);
+    // Stands true while the list is not drawn, so an absent list is not taken as hidden.
+    const [listRef, listLaidOut] = useMeasured<HTMLElement, boolean>(isLaidOut, true);
 
     // Use shared faults state from store
     const {
@@ -403,9 +405,6 @@ function FaultsPage() {
     // Refreshes are shared with every other mounted fault view, so the gateway sees
     // one request per refresh no matter how many of them are on screen.
     useFaultPolling();
-
-    // The list is in front of the user: a fault needs no toast to be seen.
-    useEffect(() => showingFaults(), [showingFaults]);
 
     // Clear fault handler
     const handleClear = useCallback(
@@ -515,9 +514,22 @@ function FaultsPage() {
     const shown = picks ?? (paneLaidOut ? (items[0] ?? null) : null);
     const shownKey = shown ? faultKey(shown) : null;
     const showingDetail = picked && shown !== null;
+    // A narrow screen swaps the list for the fault picked.
+    const listHidden = showingDetail && !listLaidOut;
     // A pane the layout hides draws nothing and reads nothing.
     const drawn = shown !== null && (paneLaidOut || showingDetail) ? shown : null;
     const shownOpen = shown ? isOpen(shown) : false;
+
+    // A fault the list in front of the user shows needs no toast to be seen.
+    const showsFault = (fault: Fault) =>
+        tab === 'now' &&
+        !listHidden &&
+        isOpen(fault) &&
+        severityFilters.has(fault.severity) &&
+        statusFilters.has(fault.status);
+    const showsFaultRef = useRef(showsFault);
+    showsFaultRef.current = showsFault;
+    useEffect(() => showingFaults((fault) => showsFaultRef.current(fault)), [showingFaults]);
 
     // Hold the fault on screen: a newer one coming on top of the list does not take its place.
     useEffect(() => {
@@ -709,6 +721,7 @@ function FaultsPage() {
         body = (
             <div className="min-h-0 flex-1 overflow-y-auto @2xl:grid @2xl:grid-cols-[184px_minmax(0,1fr)] @2xl:grid-rows-[minmax(0,1fr)] @2xl:overflow-hidden">
                 <nav
+                    ref={listRef}
                     aria-label={tab === 'now' ? 'Faults now' : 'Fault history'}
                     className={cn(
                         'grid content-start gap-3 px-1.5 py-3 sm:px-3.5 @2xl:min-h-0 @2xl:overflow-y-auto @2xl:border-r @2xl:border-hairline',

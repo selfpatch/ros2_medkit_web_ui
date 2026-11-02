@@ -422,8 +422,8 @@ function numbersIn(text: string): number[] {
 /**
  * The table of readings: one row a reading of the newest capture, beside the same reading
  * now. Readings whose number the fault's own words quote come first, then known measures
- * and states, then measured numbers, then the rest. A reading two topics both carry with
- * one value shows once; readings of one name and different values each say whose they are.
+ * and states, then measured numbers, then the rest. A value one message carries twice, once
+ * at its top and once inside an object, shows once; readings of one name each say whose they are.
  */
 export function readingRows(
     frames: FreezeFrameSnapshot[],
@@ -453,27 +453,38 @@ export function readingRows(
     // it shows once. The same name on two topics is two readings, each read again live.
     const shown: typeof rows = [];
     for (const row of rows) {
-        const same = shown.filter((one) => one.label === row.label && one.then.topic === row.then.topic);
+        const same = shown.filter(
+            (one) =>
+                one.label === row.label && one.then.topic === row.then.topic && (!one.then.context || !row.then.context)
+        );
         if (!same.some((one) => formatReading(one.then) === formatReading(row.then))) shown.push(row);
     }
     const clashes = (labels: string[]) => new Set(labels.filter((label, i, all) => all.indexOf(label) !== i));
-    const clashing = clashes(shown.map((row) => row.label));
-    const named = shown
-        .sort((a, b) => a.rank - b.rank)
-        .map((row) => ({
-            row,
-            label: !clashing.has(row.label)
-                ? row.label
-                : row.then.context
-                  ? `${row.then.context} ${row.label.toLowerCase()}`
-                  : `${row.label} (${words(row.then.topic)})`,
-        }));
-    // Two topics of one shape give the same context too: their topic tells them apart.
-    const stillClashing = clashes(named.map((one) => one.label));
-    return named.map(({ row, label }) => ({
-        key: row.key,
-        label: stillClashing.has(label) && row.then.context ? `${label} (${words(row.then.topic)})` : label,
-        then: row.then,
-        now: row.now,
-    }));
+    // Topics that read alike in words are told apart by their names.
+    const topicWords = new Map<string, Set<string>>();
+    for (const { then } of shown) {
+        topicWords.set(words(then.topic), (topicWords.get(words(then.topic)) ?? new Set()).add(then.topic));
+    }
+    const topicSaid = (topic: string) => (topicWords.get(words(topic))!.size > 1 ? topic : words(topic));
+    // From the plainest name to the most exact; a name that clashes takes the next one.
+    const names = (row: (typeof shown)[number]): string[] => {
+        const { label, then } = row;
+        const path = then.key.slice(then.topic.length + 1).split('.');
+        const parents = words(path.slice(0, -1).join('.'));
+        const byContext = then.context
+            ? `${then.context} ${label.toLowerCase()}`
+            : `${label} (${topicSaid(then.topic)})`;
+        const byPath = then.context ? `${parents} ${label.toLowerCase()}` : byContext;
+        const byTopic = then.context ? `${byPath} (${topicSaid(then.topic)})` : byContext;
+        return [label, byContext, byPath, byTopic, then.key];
+    };
+    const sorted = [...shown].sort((a, b) => a.rank - b.rank);
+    const options = sorted.map(names);
+    let labels = options.map((one) => one[0]!);
+    for (let level = 1; level < 5; level += 1) {
+        const clashing = clashes(labels);
+        if (clashing.size === 0) break;
+        labels = labels.map((label, i) => (clashing.has(label) ? options[i]![level]! : label));
+    }
+    return sorted.map((row, i) => ({ key: row.key, label: labels[i]!, then: row.then, now: row.now }));
 }

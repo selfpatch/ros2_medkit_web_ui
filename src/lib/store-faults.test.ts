@@ -371,7 +371,7 @@ describe('fetchFaults against a moving connection', () => {
             entity_id: 'lidar_front',
             entity_type: 'app',
         };
-        useAppStore.setState({ faults: [fromStream] } as never);
+        useAppStore.getState().applyFaultStreamEvent('fault_confirmed', fromStream);
         release([raw({ fault_code: 'FROM_THE_POLL' })]);
         await pending;
 
@@ -1216,9 +1216,13 @@ describe('a list read while the stream reports an open fault', () => {
         const read = useAppStore.getState().fetchFaults();
         await vi.waitFor(() => expect(faultReads(client)).toBe(1));
         // A confirmed fault sends an update for every report of it, moving only its times.
+        // The robot counts in its description, so the report moves the message too.
         useAppStore
             .getState()
-            .applyFaultStreamEvent('fault_updated', transformFault(raw({ last_occurred: 1756636900 }) as RawFaultItem));
+            .applyFaultStreamEvent(
+                'fault_updated',
+                transformFault(raw({ last_occurred: 1756636900, description: 'Stuck for 34.1s' }) as RawFaultItem)
+            );
         // The read was answered before that report, and knows a fault the stream never sent.
         release([raw(), raw({ fault_code: 'MOTOR_OVERHEAT', status: 'HEALED' })]);
         await read;
@@ -1226,6 +1230,23 @@ describe('a list read while the stream reports an open fault', () => {
         const faults = useAppStore.getState().faults;
         expect(faults.map((f) => f.code)).toEqual(['LIDAR_RANGE_INVALID', 'MOTOR_OVERHEAT']);
         expect(faults[0]!.parameters?.last_occurred).toBe(1756636900);
+        expect(faults[0]!.message).toBe('Stuck for 34.1s');
+    });
+
+    it('gives way to a clear of a fault it knows, also when the list held no row for it', async () => {
+        const { client, release } = deferredClient();
+        connected(client);
+        useAppStore.setState({ faults: [], faultsLoaded: true } as never);
+
+        const read = useAppStore.getState().fetchFaults();
+        await vi.waitFor(() => expect(faultReads(client)).toBe(1));
+        useAppStore
+            .getState()
+            .applyFaultStreamEvent('fault_cleared', transformFault(raw({ status: 'CLEARED' }) as RawFaultItem));
+        release([raw()]);
+        await read;
+
+        expect(useAppStore.getState().faults).toEqual([]);
     });
 
     it('still gives way to an event that changed a row', async () => {

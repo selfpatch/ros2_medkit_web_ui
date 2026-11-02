@@ -89,7 +89,7 @@ export function SnapshotCard({ snapshot, index }: SnapshotCardProps) {
                                 title={new Date(at).toLocaleString()}
                                 className="text-xs text-faint tabular-nums"
                             >
-                                {whenWords(at, Date.now())}
+                                {whenWords(at, Date.now(), true)}
                             </time>
                         )}
                     </div>

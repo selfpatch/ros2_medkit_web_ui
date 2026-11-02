@@ -204,6 +204,40 @@ describe('readingRows', () => {
         expect(labels.every((label) => /left diag|right diag/i.test(label))).toBe(true);
     });
 
+    it('keeps one value of two objects as two readings, each read again live', () => {
+        const message = (right: number) => ({ data: JSON.stringify({ left: { speed: 0 }, right: { speed: right } }) });
+        const frames = [frame('/drive/status', 'std_msgs/msg/String', message(0), '2026-11-01T21:30:42.678Z')];
+        const live = new Map([['/drive/status', message(0.3)]]);
+
+        const rows = readingRows(frames, live, '');
+
+        expect(rows.map((row) => row.label)).toEqual(['Left speed', 'Right speed']);
+        expect(rows[1] && formatReading(rows[1].now!)).toBe('0.3 m/s');
+    });
+
+    it('gives no two readings one label', () => {
+        const nested = frame(
+            '/drive/status',
+            'std_msgs/msg/String',
+            { data: '{"left": {"limits": {"max": 1}}, "right": {"limits": {"max": 2}}}' },
+            '2026-11-01T21:30:42.678Z'
+        );
+        const labels = readingRows([nested], new Map(), '').map((row) => row.label);
+        expect(labels).toHaveLength(2);
+        expect(new Set(labels).size).toBe(2);
+        expect(labels[0]).toMatch(/left/i);
+        expect(labels[1]).toMatch(/right/i);
+
+        // Two topics that read alike in words are still two topics.
+        const twins = [
+            frame('/front_scan', 'std_msgs/msg/String', { data: '{"temperature": 41}' }, '2026-11-01T21:30:42.678Z'),
+            frame('/front/scan', 'std_msgs/msg/String', { data: '{"temperature": 41}' }, '2026-11-01T21:30:42.700Z'),
+        ];
+        const twinLabels = readingRows(twins, new Map(), '').map((row) => row.label);
+        expect(twinLabels).toHaveLength(2);
+        expect(new Set(twinLabels).size).toBe(2);
+    });
+
     it('marks the readings of a disconnected entity as last known', () => {
         const plc: FreezeFrameSnapshot = {
             type: 'freeze_frame',
