@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+    captureTime,
     changeOf,
     formatReading,
+    isStartupCapture,
     newestCapture,
     readingRows,
     readingsOf,
     shortNumber,
+    snapshotTime,
     unwrapMessage,
     words,
 } from './fault-readings';
@@ -67,6 +70,78 @@ describe('readingsOf', () => {
         expect(readingsOf('/tf', 'tf2_msgs/msg/TFMessage', { transforms: [] })).toEqual([]);
         expect(readingsOf('/safety/field', 'geometry_msgs/msg/PolygonStamped', { polygon: {} })).toEqual([]);
     });
+
+    it('gives a unit only where the whole word of a name says one', () => {
+        const readings = readingsOf('/robot/status', 'robot_msgs/msg/Status', {
+            retry_attempts: 3,
+            battery_voltage: 24.1,
+            battery: 82,
+            obstacle_count: 2,
+            queue_length: 5,
+            range_errors: 1,
+            angular_velocity: 0.4,
+            linear_velocity: 0.5,
+            motor_temperature: 61,
+            free_width: 1.4,
+            total_distance: 12.5,
+            distance_error: 0.3,
+        });
+        const said = Object.fromEntries(readings.map((r) => [r.label, formatReading(r)]));
+        expect(said).toEqual({
+            'Retry attempts': '3',
+            'Battery voltage': '24.1 V',
+            Battery: '82%',
+            'Obstacle count': '2',
+            'Queue length': '5',
+            'Range errors': '1',
+            'Angular velocity': '0.4 rad/s',
+            'Linear velocity': '0.5 m/s',
+            'Motor temperature': '61°C',
+            'Free width': '1.4 m',
+            'Total distance': '12.5 m',
+            'Distance error': '0.3 m',
+        });
+    });
+
+    it('knows a message kind by its full type, so a custom one of the same name shows its own fields', () => {
+        const custom = readingsOf('/motor/temp', 'motor_msgs/msg/Temperature', { celsius: 61 });
+        expect(custom.map((r) => [r.label, formatReading(r)])).toEqual([['Celsius', '61']]);
+
+        const known = readingsOf('/motor/temp', 'sensor_msgs/msg/Temperature', { temperature: 61, variance: 0 });
+        expect(known.map((r) => [r.label, formatReading(r)])).toEqual([['Temperature', '61°C']]);
+
+        // A custom shape-named message is a message of fields, not a shape.
+        expect(readingsOf('/goal', 'robot_msgs/msg/Pose', { x: 1.5 }).map((r) => r.label)).toEqual(['X']);
+    });
+
+    it('shows the fields of a known kind it cannot read, and "none" for one that measured nothing', () => {
+        const unreadable = readingsOf('/motor/temp', 'sensor_msgs/msg/Temperature', { kelvin: 334 });
+        expect(unreadable.map((r) => r.label)).toEqual(['Kelvin']);
+
+        const [nothing] = readingsOf('/scan', 'sensor_msgs/msg/LaserScan', {
+            range_min: 0.12,
+            range_max: 3.5,
+            ranges: [Infinity, 0.01],
+        });
+        expect(nothing?.label).toBe('Closest obstacle');
+        expect(formatReading(nothing!)).toBe('none');
+    });
+});
+
+describe('snapshotTime', () => {
+    it('is the time a snapshot was taken, and null for none, nonsense or the epoch', () => {
+        const at = (captured_at?: string): Snapshot => ({
+            type: 'freeze_frame',
+            name: 'scan',
+            data: {},
+            'x-medkit': { topic: '/scan', message_type: '', captured_at },
+        });
+        expect(snapshotTime(at('2026-11-01T21:30:42.678Z'))).toBe(Date.parse('2026-11-01T21:30:42.678Z'));
+        expect(snapshotTime(at(undefined))).toBeNull();
+        expect(snapshotTime(at('not a time'))).toBeNull();
+        expect(snapshotTime(at('1970-01-01T00:00:00Z'))).toBeNull();
+        expect(snapshotTime({ type: 'freeze_frame', name: 'scan', data: {} })).toBeNull();
+    });
 });
 
 describe('readingRows', () => {
@@ -84,6 +159,33 @@ describe('readingRows', () => {
         // One reading two places carry with one value shows once.
         expect(rows.filter((row) => row.label.endsWith('learance'))).toHaveLength(1);
     });
+
+    it('says whose each of two same-named readings is, not just the later one', () => {
+        const frames = [
+            frame('/left/status', 'std_msgs/msg/String', { data: '{"speed": 0.4}' }, '2026-11-01T21:30:42.678Z'),
+            frame('/right/status', 'std_msgs/msg/String', { data: '{"speed": 0.9}' }, '2026-11-01T21:30:42.700Z'),
+        ];
+        const labels = readingRows(frames, new Map(), '').map((row) => row.label);
+        expect(labels).toEqual(['Speed (Left status)', 'Speed (Right status)']);
+    });
+
+    it('marks the readings of a disconnected entity as last known', () => {
+        const plc: FreezeFrameSnapshot = {
+            type: 'freeze_frame',
+            name: 'plc',
+            data: '{"pressure": 4.2}',
+            'x-medkit': {
+                topic: '',
+                message_type: '',
+                full_data: { pressure: 4.2 },
+                captured_at: '2026-11-01T21:30:42.678Z',
+                connected: false,
+            },
+        };
+        const [row] = readingRows([plc], new Map(), '');
+        expect(row?.then.lastKnown).toBe(true);
+        expect(row?.then.topic).toBe('plc');
+    });
 });
 
 describe('newestCapture', () => {
@@ -99,6 +201,43 @@ describe('newestCapture', () => {
             ['/scan', '2026-11-01T21:46:42.550Z'],
             ['/odom', '2026-11-01T21:46:42.365Z'],
         ]);
+    });
+
+    it("keeps each entity's frame: entity frames carry no topic, only their name", () => {
+        const entity = (name: string): FreezeFrameSnapshot => ({
+            type: 'freeze_frame',
+            name,
+            data: '{}',
+            'x-medkit': { topic: '', message_type: '', full_data: {}, captured_at: '2026-11-01T21:46:42.365Z' },
+        });
+        expect(newestCapture([entity('plc_a'), entity('plc_b')]).map((f) => f.name)).toEqual(['plc_a', 'plc_b']);
+    });
+});
+
+describe('captureTime', () => {
+    const at = (captured_at: string, startup = false): FreezeFrameSnapshot => ({
+        type: 'freeze_frame',
+        name: 'plc',
+        data: '{}',
+        'x-medkit': {
+            topic: '',
+            message_type: '',
+            full_data: {},
+            captured_at,
+            ...(startup ? { capture_origin: 'startup' } : {}),
+        },
+    });
+
+    it('leaves out frames read at gateway start: they say when the gateway started, not when the fault came', () => {
+        const frames = [at('2026-11-01T09:00:00Z', true), at('2026-11-01T21:46:42Z')];
+        expect(captureTime(frames)).toBe(Date.parse('2026-11-01T21:46:42Z'));
+        expect(captureTime([at('2026-11-01T09:00:00Z', true)])).toBeNull();
+    });
+
+    it('tells a capture of nothing but gateway-start frames', () => {
+        expect(isStartupCapture([at('2026-11-01T09:00:00Z', true)])).toBe(true);
+        expect(isStartupCapture([at('2026-11-01T09:00:00Z', true), at('2026-11-01T21:46:42Z')])).toBe(false);
+        expect(isStartupCapture([])).toBe(false);
     });
 });
 

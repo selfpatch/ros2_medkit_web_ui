@@ -81,11 +81,14 @@ async function mount(ui: ReactElement): Promise<RenderResult> {
     return result;
 }
 
-/** Lets everything already scheduled run: timers due now, and the promises they start. */
+/** The codes the fault list shows, in its order. Some must show: [] equals [] in any order. */
 function renderedCodes(container: HTMLElement): (string | null)[] {
-    return Array.from(container.querySelectorAll('.font-mono.text-sm')).map((el) => el.textContent);
+    const codes = Array.from(container.querySelectorAll('nav li button code')).map((el) => el.textContent);
+    expect(codes.length).toBeGreaterThan(0);
+    return codes;
 }
 
+/** Lets everything already scheduled run: timers due now, and the promises they start. */
 async function settle() {
     await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
@@ -313,8 +316,8 @@ describe('FaultsDashboard refresh behaviour', () => {
         expect(container.textContent).toContain('ListFaults service not available');
         expect(container.textContent).not.toContain('System is operating normally');
         expect(container.textContent).not.toContain('No faults detected');
-        // "All Clear" is a statement about the system, and the page cannot make it here.
-        expect(container.textContent).not.toContain('All Clear');
+        // It says it cannot tell, which is not the same as reporting none.
+        expect(container.textContent).toContain('Fault list unavailable');
     });
 
     it('stops refreshing while Auto-refresh is off, badge included', async () => {
@@ -608,11 +611,7 @@ describe('FaultsDashboard refresh behaviour', () => {
             await vi.advanceTimersByTimeAsync(0);
         });
 
-        // The list is flat until asked to group by entity.
-        await act(async () => {
-            (container.querySelector('#group-by') as HTMLElement).click();
-            await vi.advanceTimersByTimeAsync(0);
-        });
+        // The list is grouped by entity from the start.
 
         // One name, two entities: two groups, each labelled with its own type.
         const groupLabels = Array.from(container.querySelectorAll('.font-medium.text-sm')).map((el) => el.textContent);

@@ -21,8 +21,9 @@ export function SidebarToggle({ className }: { className?: string }) {
             aria-label={label}
             title={`${label} (${SHORTCUT})`}
             aria-keyshortcuts={KEYS}
+            data-sidebar-toggle=""
             className={cn(
-                'grid size-[30px] shrink-0 place-items-center rounded-lg text-muted-foreground outline-none hover:bg-graphite/6 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring',
+                'grid size-[30px] shrink-0 place-items-center rounded-lg text-muted-foreground outline-none hover:bg-graphite/6 hover:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring',
                 className
             )}
         >

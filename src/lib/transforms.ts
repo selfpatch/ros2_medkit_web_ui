@@ -143,7 +143,8 @@ export interface RawFaultItem {
      *  `transformFault` normalises all of these to an ISO timestamp. */
     first_occurred?: number | string | null;
     last_occurred?: number | string | null;
-    /** When the fault last passed (healed), in the same forms as the times above. */
+    /** The newest PASSED report, whatever the fault's status was then: not when it healed.
+     *  In the same forms as the times above. */
     last_passed?: number | string | null;
     occurrence_count?: number;
     reporting_sources?: string[];

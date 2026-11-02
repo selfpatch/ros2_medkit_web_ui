@@ -155,7 +155,8 @@ test.describe('faults dashboard refresh', () => {
 
         expect(await skeletonSeen()).toBe(false);
         await expect(dashboard.getByText('Fault list unavailable')).toBeVisible();
-        await expect(dashboard.getByText('All Clear')).toBeHidden();
+        await expect(dashboard.getByText('System is operating normally')).toBeHidden();
+        await expect(dashboard.getByText('No faults detected')).toBeHidden();
     });
 
     test('the fallback poll asks once per interval, not once per mounted view', async ({ page }) => {

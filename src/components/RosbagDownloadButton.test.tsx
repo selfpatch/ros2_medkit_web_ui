@@ -94,6 +94,29 @@ describe('RosbagDownloadButton', () => {
         });
     });
 
+    it('says why a download failed in text on the page, not only in a tooltip', async () => {
+        mockDownloadBulkData.mockResolvedValue(null);
+        renderWithTooltip(<RosbagDownloadButton snapshot={mockSnapshot} />);
+
+        // The status is there before anything failed, so a screen reader hears it change.
+        expect(screen.getByRole('status')).toBeEmptyDOMElement();
+        fireEvent.click(screen.getByRole('button'));
+
+        await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Download failed'));
+        expect(screen.getByRole('status')).not.toHaveClass('sr-only');
+    });
+
+    it('fetches nothing for a recording whose address it cannot read', async () => {
+        const saved = vi.spyOn(URL, 'createObjectURL');
+        renderWithTooltip(<RosbagDownloadButton snapshot={{ ...mockSnapshot, bulk_data_uri: '/robots/motor/rb-1' }} />);
+
+        fireEvent.click(screen.getByRole('button'));
+
+        await waitFor(() => expect(screen.getByRole('button')).toHaveClass('border-destructive'));
+        expect(mockDownloadBulkData).not.toHaveBeenCalled();
+        expect(saved).not.toHaveBeenCalled();
+    });
+
     it('renders as icon button when size="icon"', () => {
         renderWithTooltip(<RosbagDownloadButton snapshot={mockSnapshot} size="icon" />);
 

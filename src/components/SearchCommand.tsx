@@ -53,26 +53,6 @@ function getEntityIcon(type: string) {
     }
 }
 
-/**
- * Get color class for entity type
- */
-function getEntityColorClass(type: string): string {
-    switch (type) {
-        case 'area':
-        case 'subarea':
-            return 'text-cyan-500';
-        case 'component':
-        case 'subcomponent':
-            return 'text-indigo-500';
-        case 'app':
-            return 'text-emerald-500';
-        case 'function':
-            return 'text-violet-500';
-        default:
-            return 'text-muted-foreground';
-    }
-}
-
 interface SearchCommandProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -175,7 +155,7 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
                                         onSelect={() => handleSelect(entity.path)}
                                         className="cursor-pointer"
                                     >
-                                        <EntityIcon className={`mr-2 h-4 w-4 ${getEntityColorClass(entity.type)}`} />
+                                        <EntityIcon className="mr-2 h-4 w-4 text-faint" />
                                         <div className="flex flex-col">
                                             <span>{entity.name}</span>
                                             <span className="text-xs text-muted-foreground font-mono">

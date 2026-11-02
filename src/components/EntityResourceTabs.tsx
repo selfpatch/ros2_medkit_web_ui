@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useShallow } from 'zustand/shallow';
 import { Database, Loader2, MessageSquare } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { badgeVariants } from '@/components/ui/badge';
 import { DataValuePreview } from '@/components/DataValuePreview';
 import { ResourceTabBar } from '@/components/ResourceTabBar';
 import { useAppStore } from '@/lib/store';
+import { cn } from '@/lib/utils';
 import { RESOURCE_TABS, renderResourceTabContent, type ResourceTabId } from '@/components/ResourceTabs';
 import type { SovdResourceEntityType } from '@/lib/types';
 import type { ComponentTopic, Operation, Fault } from '@/lib/types';
@@ -204,7 +205,7 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
                         <Card>
                             <CardHeader className="pb-3">
                                 <CardTitle className="text-base flex items-center gap-2">
-                                    <Database className="w-4 h-4 text-blue-500" />
+                                    <Database className="w-4 h-4 text-faint" />
                                     Data Items
                                 </CardTitle>
                                 <CardDescription>Aggregated data from child entities</CardDescription>
@@ -218,9 +219,10 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
                                 ) : (
                                     <div className="space-y-2 max-h-80 overflow-y-auto">
                                         {data.map((item, idx) => (
-                                            <div
+                                            <button
+                                                type="button"
                                                 key={`${item.topic}-${idx}`}
-                                                className="flex items-center gap-3 p-2.5 rounded-lg border hover:bg-accent/30 cursor-pointer"
+                                                className="flex w-full items-center gap-3 p-2.5 rounded-lg border text-left hover:bg-accent/30 cursor-pointer"
                                                 onClick={() => {
                                                     // Use basePath for tree navigation, fallback to API path format
                                                     const navPath = basePath
@@ -229,15 +231,20 @@ export function EntityResourceTabs({ entityId, entityType, basePath, onNavigate 
                                                     handleNavigate(navPath);
                                                 }}
                                             >
-                                                <MessageSquare className="w-4 h-4 text-blue-500 shrink-0" />
+                                                <MessageSquare className="w-4 h-4 text-faint shrink-0" aria-hidden />
                                                 <span className="font-mono text-xs truncate flex-1">{item.topic}</span>
                                                 <DataValuePreview topic={item} />
                                                 {item.type && (
-                                                    <Badge variant="outline" className="text-xs shrink-0">
+                                                    <span
+                                                        className={cn(
+                                                            badgeVariants({ variant: 'outline' }),
+                                                            'text-xs shrink-0'
+                                                        )}
+                                                    >
                                                         {item.type.split('/').pop()}
-                                                    </Badge>
+                                                    </span>
                                                 )}
-                                            </div>
+                                            </button>
                                         ))}
                                     </div>
                                 )}

@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { toast } from 'react-toastify';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { EntityDetailPanel } from './EntityDetailPanel';
+
+vi.mock('react-toastify', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 
 // Mock heavy child components - we only care about the top-level routing
 // (header + tab bar + tab content selection) for these tests.
@@ -209,5 +212,111 @@ describe('EntityDetailPanel - scripts tab gating (component view)', () => {
         fireEvent.click(scriptsButton);
 
         expect(await screen.findByTestId('tab-content-scripts')).toBeInTheDocument();
+    });
+});
+
+function renderPanel() {
+    return render(
+        <TooltipProvider>
+            <EntityDetailPanel onConnectClick={() => {}} />
+        </TooltipProvider>
+    );
+}
+
+describe('EntityDetailPanel - Refresh and Copy JSON', () => {
+    const realClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const realExecCommand = document.execCommand;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockPrefetchResourceCounts.mockResolvedValue({ data: 0, operations: 0, configurations: 0, faults: 0 });
+        mockFetchEntityData.mockResolvedValue([]);
+    });
+
+    afterEach(() => {
+        if (realClipboard) Object.defineProperty(navigator, 'clipboard', realClipboard);
+        else delete (navigator as { clipboard?: unknown }).clipboard;
+        document.execCommand = realExecCommand;
+    });
+
+    it('offers them on a view without a panel of its own, and refreshes the entity', async () => {
+        setStore({
+            selectedPath: '/server/area1/component1',
+            selectedEntity: { id: 'component1', name: 'component1', type: 'component' },
+        });
+        renderPanel();
+
+        fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }));
+        expect(mockRefreshSelectedEntity).toHaveBeenCalled();
+        expect(screen.getByRole('button', { name: 'Copy JSON' })).toBeInTheDocument();
+    });
+
+    it.each([
+        ['app', '/server/area1/component1/talker'],
+        ['area', '/server/area1'],
+        ['function', '/server/navigation'],
+        ['server', '/server'],
+    ])('leaves them out on the %s view, whose panel has its own', async (type, path) => {
+        setStore({ selectedPath: path, selectedEntity: { id: 'x', name: 'x', type } });
+        renderPanel();
+
+        await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('x'));
+        expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Copy JSON' })).not.toBeInTheDocument();
+    });
+
+    it('copies the entity through the Clipboard API and says so', async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+        const entity = { id: 'component1', name: 'component1', type: 'component' };
+        setStore({ selectedPath: '/server/area1/component1', selectedEntity: entity });
+        renderPanel();
+
+        fireEvent.click(await screen.findByRole('button', { name: 'Copy JSON' }));
+
+        await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Copied component1 as JSON'));
+        expect(writeText).toHaveBeenCalledWith(JSON.stringify(entity, null, 2));
+    });
+
+    it('copies on a plain-http page, where the Clipboard API is missing, and says when nothing could', async () => {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+        document.execCommand = vi.fn(() => true);
+        setStore({
+            selectedPath: '/server/area1/component1',
+            selectedEntity: { id: 'component1', name: 'component1', type: 'component' },
+        });
+        renderPanel();
+
+        fireEvent.click(await screen.findByRole('button', { name: 'Copy JSON' }));
+        await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Copied component1 as JSON'));
+        expect(document.execCommand).toHaveBeenCalledWith('copy');
+
+        document.execCommand = vi.fn(() => false);
+        fireEvent.click(screen.getByRole('button', { name: 'Copy JSON' }));
+        await waitFor(() =>
+            expect(toast.error).toHaveBeenCalledWith('Could not copy component1: the browser did not allow it')
+        );
+    });
+});
+
+describe('EntityDetailPanel - component data rows', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockPrefetchResourceCounts.mockResolvedValue({ data: 0, operations: 0, configurations: 0, faults: 0 });
+    });
+
+    it('opens a data item from its row, by the topic without its leading slash', async () => {
+        mockFetchEntityData.mockResolvedValue([
+            { topic: '/powertrain/rpm', type: 'std_msgs/msg/Float64', uniqueKey: 'rpm' },
+        ]);
+        setStore({
+            selectedPath: '/server/area1/engine',
+            selectedEntity: { id: 'engine', name: 'engine', type: 'component' },
+        });
+        renderPanel();
+
+        fireEvent.click(await screen.findByRole('button', { name: /powertrain\/rpm/ }));
+        expect(mockSelectEntity).toHaveBeenCalledWith('/server/area1/engine/data/powertrain%2Frpm');
+        expect(screen.getByText('std_msgs/msg/Float64')).toBeInTheDocument();
     });
 });

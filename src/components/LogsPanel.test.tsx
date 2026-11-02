@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LogsPanel } from './LogsPanel';
 import type { LogsFetchResult } from '@/lib/types';
@@ -163,6 +163,34 @@ describe('LogsPanel', () => {
 
         expect(screen.getByText(/checkTemp/)).toBeInTheDocument();
         expect(screen.getByText(/temp_sensor\.cpp:42/)).toBeInTheDocument();
+    });
+
+    it('shows the node and the whole message in the expanded row, for a pane too narrow for those columns', async () => {
+        const long = `Planner gave up: ${'no path around the obstacle at the loading dock, '.repeat(4)}retrying`;
+        mockFetchEntityLogs.mockResolvedValue({
+            items: [
+                {
+                    id: 'log_long',
+                    timestamp: '2026-04-10T12:34:56.789000000Z',
+                    severity: 'error',
+                    message: long,
+                    context: { node: 'navigation/planner' },
+                },
+            ],
+        });
+        const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+        render(<LogsPanel entityId="navigation" entityType="components" />);
+
+        const row = await screen.findByRole('button', { expanded: false });
+        await user.click(row);
+
+        const details = document.getElementById(row.getAttribute('aria-controls') ?? '');
+        if (!details) throw new Error('the expanded row names no details');
+        expect(within(details).getByText(long)).toHaveClass('whitespace-pre-wrap');
+        // Long unbroken paths wrap too instead of running out of the cell
+        expect(within(details).getByText('navigation/planner').closest('.break-words')).not.toBeNull();
+        expect(within(details).getByText('navigation/planner')).toBeInTheDocument();
+        expect(within(details).getByText(/No source location/)).toBeInTheDocument();
     });
 
     it('formats nanosecond ISO timestamps as HH:MM:SS.sss in the Time column', async () => {

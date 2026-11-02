@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import { Download, Loader2, RefreshCw, ScrollText, Search, Settings, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -29,11 +29,10 @@ interface LogsPanelProps {
 
 /** The toolbar's selects, as the design's fields: white on a hairline */
 const FIELD =
-    'h-8 rounded-lg border border-graphite/12 bg-white px-2 text-xs outline-none focus-visible:outline-2 focus-visible:outline-ring';
+    'h-8 rounded-lg border border-graphite/12 bg-white px-2 text-xs outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring';
 
-/** The toolbar's icon buttons, as the design's outline buttons */
-const ICON_BUTTON =
-    'h-8 w-8 inline-flex items-center justify-center rounded-lg border border-graphite/12 bg-white text-muted-foreground shadow-[0_1px_1px_rgb(18_20_19/0.04)] hover:border-graphite/30 hover:text-foreground';
+/** The toolbar's icon buttons: the design's outline buttons, quiet until pointed at */
+const ICON_BUTTON = 'size-8 text-muted-foreground hover:text-foreground';
 
 /** A log line's severity in its colour; debug stays quiet */
 const SEVERITY_CHIP: Record<LogSeverity, string> = {
@@ -77,6 +76,7 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
 
     const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
     const [refreshIntervalMs, setRefreshIntervalMs] = useState(5000);
+    const detailsIdPrefix = useId();
     const [isDocumentVisible, setIsDocumentVisible] = useState(
         typeof document === 'undefined' ? true : document.visibilityState === 'visible'
     );
@@ -302,9 +302,15 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                     className="h-8 w-48 border-graphite/12 bg-white text-xs pl-7"
                 />
             </div>
-            <button type="button" onClick={() => void doFetch()} aria-label="Refresh" className={ICON_BUTTON}>
+            <Button
+                variant="outline"
+                size="icon"
+                onClick={() => void doFetch()}
+                aria-label="Refresh"
+                className={ICON_BUTTON}
+            >
                 <RefreshCw className="w-3.5 h-3.5" />
-            </button>
+            </Button>
             <label className="flex items-center gap-1.5 text-xs">
                 <span className="text-muted-foreground">Auto-refresh</span>
                 <Switch
@@ -328,21 +334,28 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                 </select>
             </label>
             {lastRefreshFailed && <span className="text-xs text-destructive">Last refresh failed</span>}
-            <button type="button" onClick={handleClear} aria-label="Clear" className={ICON_BUTTON}>
+            <Button variant="outline" size="icon" onClick={handleClear} aria-label="Clear" className={ICON_BUTTON}>
                 <Trash2 className="w-3.5 h-3.5" />
-            </button>
-            <button
-                type="button"
+            </Button>
+            <Button
+                variant="outline"
+                size="icon"
                 onClick={handleDownload}
                 aria-label="Download"
-                className={cn(ICON_BUTTON, 'disabled:opacity-50 disabled:pointer-events-none')}
+                className={ICON_BUTTON}
                 disabled={displayedEntries.length === 0}
             >
                 <Download className="w-3.5 h-3.5" />
-            </button>
-            <button type="button" onClick={() => void toggleConfig()} aria-label="Settings" className={ICON_BUTTON}>
+            </Button>
+            <Button
+                variant="outline"
+                size="icon"
+                onClick={() => void toggleConfig()}
+                aria-label="Settings"
+                className={ICON_BUTTON}
+            >
                 <Settings className="w-3.5 h-3.5" />
-            </button>
+            </Button>
         </div>
     );
 
@@ -396,22 +409,34 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                     </div>
                 )}
                 <div className="max-h-[60vh] overflow-y-auto">
+                    {/* Below 36rem of room the Node column goes, so the message keeps at least 12rem; an
+                        expanded row always shows the node and the whole message */}
                     <table className="w-full table-fixed text-sm">
+                        {/* An expanded row spans four columns. With the Node column gone that span adds a
+                            fourth column of its own, which a fixed table would give half the message's
+                            width: the last column takes no width there. */}
+                        <colgroup>
+                            <col />
+                            <col />
+                            <col />
+                            <col className="@max-[36rem]:w-0" />
+                        </colgroup>
                         <thead className="text-xs font-medium text-faint border-b border-hairline sticky top-0 bg-canvas z-10">
                             <tr>
                                 <th className="text-left px-3 py-2 w-28">Time</th>
                                 <th className="text-left px-3 py-2 w-20">Severity</th>
-                                <th className="text-left px-3 py-2 w-48">Node</th>
+                                <th className="hidden text-left px-3 py-2 w-48 @min-[36rem]:table-cell">Node</th>
                                 <th className="text-left px-3 py-2">Message</th>
                             </tr>
                         </thead>
                         <tbody>
                             {displayedEntries.map((entry) => {
                                 const isExpanded = expandedIds.has(entry.id);
+                                const detailsId = `${detailsIdPrefix}-${entry.id}`;
                                 return (
                                     <Fragment key={entry.id}>
                                         <tr
-                                            className="border-b border-hairline hover:bg-canvas cursor-pointer focus:outline-none focus-visible:bg-canvas"
+                                            className="border-b border-hairline hover:bg-canvas cursor-pointer outline-none focus-visible:bg-canvas focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-solid focus-visible:outline-ring"
                                             onClick={() => toggleExpand(entry.id)}
                                             onKeyDown={(e) => {
                                                 if (e.key === 'Enter' || e.key === ' ') {
@@ -422,6 +447,7 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                                             role="button"
                                             tabIndex={0}
                                             aria-expanded={isExpanded}
+                                            aria-controls={isExpanded ? detailsId : undefined}
                                         >
                                             <td className="px-3 py-1.5 font-mono text-xs whitespace-nowrap">
                                                 {formatTime(entry.timestamp)}
@@ -437,7 +463,7 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                                                 </span>
                                             </td>
                                             <td
-                                                className="px-3 py-1.5 font-mono text-xs truncate max-w-48"
+                                                className="hidden px-3 py-1.5 font-mono text-xs truncate max-w-48 @min-[36rem]:table-cell"
                                                 title={entry.context.node}
                                             >
                                                 {entry.context.node}
@@ -447,37 +473,43 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
                                             </td>
                                         </tr>
                                         {isExpanded && (
-                                            <tr className="border-b border-hairline bg-canvas/60">
+                                            <tr id={detailsId} className="border-b border-hairline bg-canvas/60">
                                                 <td colSpan={4} className="px-6 py-2 text-xs text-muted-foreground">
-                                                    {entry.context.function || entry.context.file ? (
-                                                        <div className="space-y-1">
-                                                            {entry.context.function && (
-                                                                <div>
-                                                                    Function:{' '}
-                                                                    <span className="font-mono">
-                                                                        {entry.context.function}
-                                                                    </span>
-                                                                </div>
-                                                            )}
-                                                            {entry.context.file && (
-                                                                <div>
-                                                                    Location:{' '}
-                                                                    <span className="font-mono">
-                                                                        {entry.context.file}
-                                                                        {entry.context.line
-                                                                            ? `:${entry.context.line}`
-                                                                            : ''}
-                                                                    </span>
-                                                                </div>
-                                                            )}
+                                                    <div className="space-y-1 break-words">
+                                                        <p className="whitespace-pre-wrap text-foreground">
+                                                            {entry.message}
+                                                        </p>
+                                                        {entry.context.node && (
                                                             <div>
-                                                                Full timestamp:{' '}
-                                                                <span className="font-mono">{entry.timestamp}</span>
+                                                                Node:{' '}
+                                                                <span className="font-mono">{entry.context.node}</span>
                                                             </div>
+                                                        )}
+                                                        {entry.context.function && (
+                                                            <div>
+                                                                Function:{' '}
+                                                                <span className="font-mono">
+                                                                    {entry.context.function}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                        {entry.context.file && (
+                                                            <div>
+                                                                Location:{' '}
+                                                                <span className="font-mono">
+                                                                    {entry.context.file}
+                                                                    {entry.context.line ? `:${entry.context.line}` : ''}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                        {!entry.context.function && !entry.context.file && (
+                                                            <div>No source location</div>
+                                                        )}
+                                                        <div>
+                                                            Full timestamp:{' '}
+                                                            <span className="font-mono">{entry.timestamp}</span>
                                                         </div>
-                                                    ) : (
-                                                        <div>No source location</div>
-                                                    )}
+                                                    </div>
                                                 </td>
                                             </tr>
                                         )}
@@ -503,7 +535,7 @@ export function LogsPanel({ entityId, entityType }: LogsPanelProps) {
     }
 
     return (
-        <div className="space-y-3">
+        <div className="@container space-y-3">
             {toolbar}
             {configOpen && (
                 <div className="rounded-lg bg-canvas p-3 ring-1 ring-graphite/8 flex items-center gap-3 flex-wrap">

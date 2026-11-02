@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { RowGrid } from '@/components/RowGrid';
 import { SnapshotCard } from '@/components/SnapshotCard';
+import { isOpen } from '@/lib/fault-story';
 import { cn } from '@/lib/utils';
-import type { Fault, FaultResponse, FaultSeverity, FaultStatus } from '@/lib/types';
+import type { Fault, FaultResponse, FaultSeverity, FaultStatusValue } from '@/lib/types';
 
 const CHIP = 'inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[11px] font-semibold';
 
@@ -18,7 +19,7 @@ const SEVERITY_CHIP: Record<FaultSeverity, string> = {
 
 // An open fault is outlined in its colour, as on the selfpatch platform's timeline; an
 // ended one says how it ended: healed on its own (acid) or cleared by someone (green).
-const STATUS_CHIP: Record<FaultStatus, string> = {
+const STATUS_CHIP: Record<FaultStatusValue, string> = {
     active: 'bg-white text-state-fault-text shadow-[inset_0_0_0_1.5px_var(--color-state-fault)]',
     pending: 'bg-white text-state-warn-text shadow-[inset_0_0_0_1.5px_var(--color-state-warn)]',
     healed: 'bg-acid text-state-healed-text',
@@ -26,7 +27,7 @@ const STATUS_CHIP: Record<FaultStatus, string> = {
 };
 
 // The same states as a small square, for a line too short for a chip.
-const STATUS_SWATCH: Record<FaultStatus, string> = {
+const STATUS_SWATCH: Record<FaultStatusValue, string> = {
     active: 'bg-state-fault-bg shadow-[inset_0_0_0_1.5px_var(--color-state-fault)]',
     pending: 'bg-state-warn-bg shadow-[inset_0_0_0_1.5px_var(--color-state-warn)]',
     healed: 'bg-acid shadow-[inset_0_0_0_1px_rgb(18_20_19/0.14)]',
@@ -34,7 +35,7 @@ const STATUS_SWATCH: Record<FaultStatus, string> = {
 };
 
 /** How a fault stands, as a small square in its state's colour; its words are the title */
-export function StatusSwatch({ status, className }: { status: FaultStatus; className?: string }) {
+export function StatusSwatch({ status, className }: { status: FaultStatusValue; className?: string }) {
     return (
         <i
             role="img"
@@ -59,12 +60,10 @@ export function FaultList({ className, children }: { className?: string; childre
     );
 }
 
+// A time the way this browser writes one; a timestamp it cannot read stays as it came.
 function formatTimestamp(timestamp: string): string {
-    try {
-        return new Date(timestamp).toLocaleString();
-    } catch {
-        return timestamp;
-    }
+    const date = new Date(timestamp);
+    return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
 }
 
 interface FaultRowProps {
@@ -91,8 +90,11 @@ export function FaultRow({
     environmentData,
     isLoadingDetails,
 }: FaultRowProps) {
-    const canClear = fault.status === 'active' || fault.status === 'pending';
-    const records = environmentData?.extended_data_records;
+    // The gateway sends both records empty when it has none.
+    const records = [
+        { label: 'First Occurrence', value: environmentData?.extended_data_records?.first_occurrence },
+        { label: 'Last Occurrence', value: environmentData?.extended_data_records?.last_occurrence },
+    ].filter((record): record is { label: string; value: string } => Boolean(record.value));
     const snapshots = environmentData?.snapshots ?? [];
 
     return (
@@ -123,7 +125,7 @@ export function FaultRow({
                         </div>
                     </div>
 
-                    {canClear && (
+                    {isOpen(fault) && (
                         <Button
                             variant="ghost"
                             size="icon"
@@ -148,25 +150,20 @@ export function FaultRow({
                             <Loader2 className="w-4 h-4 animate-spin" />
                             Loading environment data...
                         </div>
-                    ) : records || snapshots.length > 0 ? (
+                    ) : records.length > 0 || snapshots.length > 0 ? (
                         <>
-                            {records && (
+                            {records.length > 0 && (
                                 <section className="space-y-2">
                                     <h5 className="text-xs font-medium text-faint">Extended Data Records</h5>
                                     <RowGrid as="dl">
-                                        {[
-                                            { label: 'First Occurrence', value: records.first_occurrence },
-                                            { label: 'Last Occurrence', value: records.last_occurrence },
-                                        ]
-                                            .filter(({ value }) => value)
-                                            .map(({ label, value }) => (
-                                                <div key={label} className="bg-white px-3 py-2">
-                                                    <dt className="text-xs text-faint">{label}</dt>
-                                                    <dd className="font-mono text-xs text-foreground">
-                                                        {new Date(value).toLocaleString()}
-                                                    </dd>
-                                                </div>
-                                            ))}
+                                        {records.map(({ label, value }) => (
+                                            <div key={label} className="bg-white px-3 py-2">
+                                                <dt className="text-xs text-faint">{label}</dt>
+                                                <dd className="font-mono text-xs text-foreground">
+                                                    {formatTimestamp(value)}
+                                                </dd>
+                                            </div>
+                                        ))}
                                     </RowGrid>
                                 </section>
                             )}

@@ -280,7 +280,7 @@ export function ScriptUploadDialog({ open, onOpenChange, entityId, entityType, o
                                 }}
                                 aria-invalid={!!error}
                                 aria-describedby={error ? 'script-upload-error' : undefined}
-                                className="border-input file:text-foreground flex h-9 w-full min-w-0 rounded-md border bg-transparent text-sm shadow-xs outline-none file:mr-3 file:h-full file:border-0 file:bg-muted file:px-3 file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
+                                className="border-input file:text-foreground flex h-9 w-full min-w-0 rounded-md border bg-transparent text-sm shadow-xs outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-ring file:mr-3 file:h-full file:border-0 file:bg-muted file:px-3 file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
                             />
                         </div>
                     ) : (

@@ -1,21 +1,39 @@
-import { Fragment, useState, useCallback, useEffect, useMemo, useRef, type RefCallback } from 'react';
+import { Fragment, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useShallow } from 'zustand/shallow';
-import { AlertOctagon, AlertTriangle, CheckCircle, RefreshCw, Search } from 'lucide-react';
+import {
+    AlertOctagon,
+    AlertTriangle,
+    CheckCircle,
+    ChevronDown,
+    Filter,
+    Loader2,
+    RefreshCw,
+    Search,
+    Trash2,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+    DropdownMenu,
+    DropdownMenuCheckboxItem,
+    DropdownMenuContent,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { EntityToolbar } from '@/components/EntityToolbar';
 import { FaultDetail } from '@/components/FaultDetail';
-import { StatusSwatch } from '@/components/FaultRow';
+import { SeverityChip, StatusSwatch } from '@/components/FaultRow';
+import { SEGMENT_GROUP, segmentClass } from '@/components/SegmentedSwitch';
 import { useAppStore } from '@/lib/store';
 import { useFaultPolling } from '@/hooks/useFaultPolling';
-import { isOpen, toMs } from '@/lib/fault-story';
-import type { Fault, FaultSeverity, FaultResponse } from '@/lib/types';
+import { useMeasured } from '@/hooks/useMeasured';
+import { isOpen, lastReportedAt, toMs, whenWords } from '@/lib/fault-story';
+import type { Fault, FaultSeverity, FaultResponse, FaultStatusValue } from '@/lib/types';
 import { cn, faultKey, mapFaultEntityTypeToResourceType } from '@/lib/utils';
 
 type Tab = 'now' | 'history';
 
-/** Worst first, then most recent, then by identity so equal rows never swap places. */
+/** How bad each severity is, worst highest */
 const DISPLAY_SEVERITY_RANK: Record<FaultSeverity, number> = {
     critical: 3,
     error: 2,
@@ -23,6 +41,7 @@ const DISPLAY_SEVERITY_RANK: Record<FaultSeverity, number> = {
     info: 0,
 };
 
+/** Now: worst first, then most recent, then by identity so equal rows never swap places */
 function compareFaultsForDisplay(a: Fault, b: Fault): number {
     const bySeverity = DISPLAY_SEVERITY_RANK[b.severity] - DISPLAY_SEVERITY_RANK[a.severity];
     if (bySeverity !== 0) return bySeverity;
@@ -31,60 +50,65 @@ function compareFaultsForDisplay(a: Fault, b: Fault): number {
     return faultKey(a).localeCompare(faultKey(b));
 }
 
-/** History: the newest end first */
-function compareByEnd(a: Fault, b: Fault): number {
-    const ended = (fault: Fault) => toMs(fault.parameters?.last_passed) ?? toMs(fault.parameters?.last_occurred) ?? 0;
-    return ended(b) - ended(a) || faultKey(a).localeCompare(faultKey(b));
+/** History: the newest report first, then by identity */
+function compareByLastReport(a: Fault, b: Fault): number {
+    return (lastReportedAt(b) ?? 0) - (lastReportedAt(a) ?? 0) || faultKey(a).localeCompare(faultKey(b));
 }
 
 // A fault's details are read again when it comes or ends, not on every report of it: a node
-// that keeps reporting moves its newest report along every few seconds.
-const versionOf = (fault: Fault) => `${fault.status}|${String(fault.parameters?.last_passed ?? '')}`;
+// that keeps reporting moves its newest report along every few seconds, and every PASSED
+// report moves the last pass, also while the fault stays confirmed. An open fault's new
+// recordings come with its 30 s read below; an ended one changed once its newest report
+// moved (it was reported again and ended again between two reads of the list).
+const versionOf = (fault: Fault) =>
+    isOpen(fault) ? fault.status : `${fault.status}|${String(fault.parameters?.last_occurred ?? '')}`;
 
 // An open fault's details are read again now and then: its recording is written some
 // seconds after it came.
 const OPEN_DETAILS_EVERY_MS = 30_000;
 
+const SEVERITIES: { value: FaultSeverity; label: string }[] = [
+    { value: 'critical', label: 'Critical' },
+    { value: 'error', label: 'Error' },
+    { value: 'warning', label: 'Warning' },
+    { value: 'info', label: 'Info' },
+];
+
+// The statuses each tab lists: Now the open ones, History the ended ones.
+const TAB_STATUSES: Record<Tab, { value: FaultStatusValue; label: string }[]> = {
+    now: [
+        { value: 'active', label: 'Active' },
+        { value: 'pending', label: 'Pending' },
+    ],
+    history: [
+        { value: 'healed', label: 'Healed' },
+        { value: 'cleared', label: 'Cleared' },
+    ],
+};
+
 /**
- * Whether an element is laid out: a pane the layout hides (display: none) is not. A fault
- * is picked for a pane only once the pane shows, so a phone-wide list reads nothing it
- * does not show. A callback ref: the pane comes and goes with the list.
+ * Whether the layout shows an element: one it hides (display: none) has no box. A fault is
+ * picked for the pane only once the pane shows, so a phone-wide list reads nothing it does
+ * not show.
  */
-function useLaidOut<T extends HTMLElement>(): [RefCallback<T>, boolean] {
-    const [laidOut, setLaidOut] = useState(false);
-    const watching = useRef<ResizeObserver | null>(null);
-    const ref = useCallback((node: T | null) => {
-        watching.current?.disconnect();
-        watching.current = null;
-        if (!node) {
-            setLaidOut(false);
-            return;
-        }
-        const sized = new ResizeObserver(() => setLaidOut(node.getClientRects().length > 0));
-        sized.observe(node);
-        watching.current = sized;
-    }, []);
-    return [ref, laidOut];
-}
+const isLaidOut = (node: HTMLElement) => node.getClientRects().length > 0;
 
 /** The two halves of the page, as a segmented switch: what is open now, and what ended */
+const TABS: { id: Tab; label: string }[] = [
+    { id: 'now', label: 'Now' },
+    { id: 'history', label: 'History' },
+];
+
 function TabSwitch({ tab, onChange, openCount }: { tab: Tab; onChange: (tab: Tab) => void; openCount: number }) {
-    const tabs: { id: Tab; label: string }[] = [
-        { id: 'now', label: 'Now' },
-        { id: 'history', label: 'History' },
-    ];
     return (
-        <div className="inline-flex gap-px rounded-[9px] bg-canvas-2 p-0.5">
-            {tabs.map(({ id, label }) => (
+        <div className={SEGMENT_GROUP}>
+            {TABS.map(({ id, label }) => (
                 <button
                     key={id}
                     type="button"
                     aria-pressed={tab === id}
                     onClick={() => onChange(id)}
-                    className={cn(
-                        'flex h-7 items-center gap-1.5 rounded-[7px] px-2.5 text-[13px] font-medium outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring',
-                        tab === id ? 'raised text-foreground' : 'text-muted-foreground hover:text-foreground'
-                    )}
+                    className={segmentClass(tab === id, 'md')}
                 >
                     {label}
                     {id === 'now' && openCount > 0 && (
@@ -96,6 +120,82 @@ function TabSwitch({ tab, onChange, openCount }: { tab: Tab; onChange: (tab: Tab
             ))}
         </div>
     );
+}
+
+/** How many open faults there are of each severity, worst first; a severity none has is left out */
+function SeverityCounts({ faults }: { faults: Fault[] }) {
+    return (
+        <span className="flex flex-wrap items-center gap-1">
+            {SEVERITIES.map(({ value }) => {
+                const count = faults.filter((f) => f.severity === value).length;
+                if (count === 0) return null;
+                const word = value === 'info' || count === 1 ? value : `${value}s`;
+                return (
+                    <SeverityChip key={value} severity={value}>
+                        {count} {word}
+                    </SeverityChip>
+                );
+            })}
+        </span>
+    );
+}
+
+/** A filter of the list: a menu of checkboxes, every one on until someone turns it off */
+function FilterMenu<T extends string>({
+    label,
+    options,
+    chosen,
+    onToggle,
+}: {
+    label: string;
+    options: { value: T; label: string }[];
+    chosen: ReadonlySet<T>;
+    onToggle: (value: T) => void;
+}) {
+    const on = options.filter((option) => chosen.has(option.value)).length;
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <button
+                    type="button"
+                    className={cn(
+                        'flex h-7 items-center gap-1 rounded-[7px] px-1.5 text-xs font-medium outline-none hover:bg-canvas focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring',
+                        on < options.length ? 'text-foreground' : 'text-muted-foreground'
+                    )}
+                >
+                    <Filter aria-hidden className="size-3.5" />
+                    {label}
+                    {on < options.length && (
+                        <span className="tabular-nums">
+                            {on}/{options.length}
+                        </span>
+                    )}
+                    <ChevronDown aria-hidden className="size-3.5" />
+                </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+                {options.map((option) => (
+                    <DropdownMenuCheckboxItem
+                        key={option.value}
+                        checked={chosen.has(option.value)}
+                        onCheckedChange={() => onToggle(option.value)}
+                        // Stays open: one filter is often several boxes.
+                        onSelect={(event) => event.preventDefault()}
+                    >
+                        {option.label}
+                    </DropdownMenuCheckboxItem>
+                ))}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+}
+
+/** The set with `value` turned on if it was off, off if it was on */
+function toggled<T>(set: ReadonlySet<T>, value: T): Set<T> {
+    const next = new Set(set);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    return next;
 }
 
 // A code may break after its underscores, never inside a word; its text stays the code.
@@ -113,46 +213,85 @@ function breakable(code: string) {
 }
 
 /**
- * A fault in the list: its entity in bold with how it stands as a small square, and its
- * code under it. Under an entity's heading the entity goes without saying.
+ * A fault in the list: how it stands as a small square, its entity in bold (under an
+ * entity's heading the entity goes without saying) and its code, what it says on one line,
+ * how bad it is and when it came. An open fault has its Clear beside it.
  */
 function ListItem({
     fault,
     selected,
     withEntity,
+    now,
     onPick,
+    onClear,
+    isClearing,
 }: {
     fault: Fault;
     selected: boolean;
     withEntity: boolean;
+    now: number;
     onPick: () => void;
+    onClear: () => void;
+    isClearing: boolean;
 }) {
+    const open = isOpen(fault);
+    const came = toMs(fault.timestamp);
+    const code = (
+        <code className="min-w-0 font-mono text-xs leading-snug [overflow-wrap:anywhere] text-body">
+            {breakable(fault.code)}
+        </code>
+    );
     return (
-        <li>
+        <li className="relative">
             <button
                 type="button"
                 aria-current={selected ? 'true' : undefined}
                 onClick={onPick}
                 className={cn(
-                    'grid w-full gap-0.5 rounded-[9px] px-2.5 py-1.5 text-left outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+                    'grid w-full gap-0.5 rounded-[9px] py-1.5 pl-2.5 text-left outline-none transition-colors focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring',
+                    open ? 'pr-9' : 'pr-2.5',
                     selected ? 'raised' : 'hover:bg-canvas'
                 )}
             >
-                {withEntity && (
-                    <span className="flex min-w-0 items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5">
+                    <StatusSwatch status={fault.status} />
+                    {withEntity ? (
                         <b className="truncate text-[13px] leading-snug font-semibold text-foreground">
                             {fault.entity_id}
                         </b>
-                        <StatusSwatch status={fault.status} />
-                    </span>
-                )}
-                <span className="flex min-w-0 items-center justify-between gap-2">
-                    <span className="min-w-0 font-mono text-xs leading-snug [overflow-wrap:anywhere] text-body">
-                        {breakable(fault.code)}
-                    </span>
-                    {!withEntity && <StatusSwatch status={fault.status} />}
+                    ) : (
+                        code
+                    )}
+                </span>
+                {withEntity && code}
+                {fault.message && <span className="truncate text-xs text-muted-foreground">{fault.message}</span>}
+                <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
+                    <SeverityChip severity={fault.severity} />
+                    {came !== null && (
+                        <time dateTime={fault.timestamp} className="truncate text-[11px] text-faint tabular-nums">
+                            {whenWords(came, now)}
+                        </time>
+                    )}
                 </span>
             </button>
+            {/* Beside the pick, not in it: a button holds no other button. */}
+            {open && (
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onClear}
+                    disabled={isClearing}
+                    aria-label={`Clear fault ${fault.code}`}
+                    title="Clear fault"
+                    className="absolute top-1 right-1 size-7 text-muted-foreground hover:text-destructive"
+                >
+                    {isClearing ? (
+                        <Loader2 aria-hidden className="size-3.5 animate-spin" />
+                    ) : (
+                        <Trash2 aria-hidden className="size-3.5" />
+                    )}
+                </Button>
+            )}
         </li>
     );
 }
@@ -176,10 +315,11 @@ function DashboardSkeleton() {
 /**
  * Faults Dashboard - every fault the gateway knows, as the selfpatch platform's fault page
  *
- * Three panes on a wide screen: the faults (Now: open; History: ended), the picked fault's
- * life moment by moment, and the fault itself (how it stands, what is wrong in words, what
- * the robot read when it came and now, its recordings). Narrower, the list and the fault
- * take turns.
+ * Three panes on a wide screen: the faults (Now: open; History: ended; filtered by
+ * severity and status, grouped by entity unless asked not to), the picked fault's life
+ * moment by moment, and the fault itself (how it stands, what is wrong in words, what the
+ * robot read when it came and now, its recordings). Narrower, the list and the fault take
+ * turns.
  *
  * Uses shared faults state from useAppStore to avoid duplicate API calls
  * when both FaultsDashboard and FaultsCountBadge are visible.
@@ -191,28 +331,41 @@ export function FaultsDashboard() {
     return <FaultsPage key={serverUrl ?? ''} />;
 }
 
+/**
+ * What was asked of the gateway about the fault on the page once the list dropped it: a
+ * read of the whole list, its answer still out or in. Once the answer is in, a fault still
+ * missing from the list is gone; a clear someone asked for counts as such an answer.
+ */
+type AskedAbout = { key: string; answered: boolean } | null;
+
 function FaultsPage() {
     const [isRefreshing, setIsRefreshing] = useState(false);
     // Keyed by faultKey, not by code: one code can be reported by two entities.
     const [clearingCodes, setClearingCodes] = useState<Set<string>>(new Set());
-    // What the gateway keeps of each fault; null once it answered with nothing.
+    // What the gateway keeps of each fault; null when it could not be read.
     const [faultDetails, setFaultDetails] = useState<Map<string, FaultResponse | null>>(new Map());
     const requested = useRef(new Map<string, string>());
 
     const [tab, setTab] = useState<Tab>('now');
     const [query, setQuery] = useState('');
-    const [groupByEntity, setGroupByEntity] = useState(false);
+    const [groupByEntity, setGroupByEntity] = useState(true);
+    const [severityFilters, setSeverityFilters] = useState<ReadonlySet<FaultSeverity>>(
+        () => new Set(SEVERITIES.map(({ value }) => value))
+    );
+    // Both tabs' statuses: each tab offers and applies its own.
+    const [statusFilters, setStatusFilters] = useState<ReadonlySet<FaultStatusValue>>(
+        () => new Set([...TAB_STATUSES.now, ...TAB_STATUSES.history].map(({ value }) => value))
+    );
     // The fault on the page, and whether someone picked it (which a narrow screen follows).
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [picked, setPicked] = useState(false);
     // The fault picked on Now stays in its list when it ends while someone watches it.
     const [watchedKey, setWatchedKey] = useState<string | null>(null);
-    // The fault on the page as last listed, and the one whose fate a read was asked for
-    // (`<key>#read` once it answered).
+    // The fault on the page as last listed, and what was asked about it (see AskedAbout).
     const lastShown = useRef<Fault | null>(null);
-    const askedAbout = useRef<string | null>(null);
+    const askedAbout = useRef<AskedAbout>(null);
     const [, setAnswered] = useState(0);
-    const [pane, paneLaidOut] = useLaidOut<HTMLDivElement>();
+    const [pane, paneLaidOut] = useMeasured<HTMLDivElement, boolean>(isLaidOut, false);
 
     // Use shared faults state from store
     const {
@@ -243,14 +396,6 @@ function FaultsPage() {
     // one request per refresh no matter how many of them are on screen.
     useFaultPolling();
 
-    // Manual refresh handler
-    const handleRefresh = useCallback(async () => {
-        setIsRefreshing(true);
-        // Forced: pressing refresh must start a read, not wait out one already running.
-        await fetchFaults({ force: true });
-        setIsRefreshing(false);
-    }, [fetchFaults]);
-
     // Clear fault handler
     const handleClear = useCallback(
         // The whole Fault, not its code: two entities can report the same code,
@@ -259,8 +404,10 @@ function FaultsPage() {
         async (fault: Fault) => {
             const key = faultKey(fault);
             setClearingCodes((prev) => new Set([...prev, key]));
-            // Gone after a clear is what was asked for: no read to find out why.
-            askedAbout.current = `${key}#read`;
+            // The fault on the page gone after a clear is what was asked for: no read to find out why.
+            if (lastShown.current && faultKey(lastShown.current) === key) {
+                askedAbout.current = { key, answered: true };
+            }
 
             try {
                 // Map the fault's entity_type to the correct resource type for the API
@@ -305,31 +452,39 @@ function FaultsPage() {
         [getFaultWithEnvironmentData]
     );
 
-    // Each tab's faults in a fixed order. Rows arrive in whatever order the gateway or the
-    // stream produced them, and a row that moves while the pointer is on its way to it is
-    // a row that opens the wrong fault.
-    const openCount = useMemo(() => faults.filter(isOpen).length, [faults]);
+    const openFaults = useMemo(() => faults.filter(isOpen), [faults]);
+    const openCount = openFaults.length;
     // The gateway's stream says "cleared" for a fault that healed as well, and the list
     // drops it. The fault on the page stays as it was until a read of the whole list says
     // how it ended, or that it is gone.
     const last = lastShown.current;
+    const asked = askedAbout.current;
     const dropped =
-        last && askedAbout.current !== `${faultKey(last)}#read` && !faults.some((f) => faultKey(f) === faultKey(last))
+        last &&
+        !(asked?.key === faultKey(last) && asked.answered) &&
+        !faults.some((f) => faultKey(f) === faultKey(last))
             ? last
             : null;
+    // Each tab's faults, filtered, in a fixed order. Rows arrive in whatever order the
+    // gateway or the stream produced them, and a row that moves while the pointer is on its
+    // way to it is a row that opens the wrong fault.
     const items = useMemo(() => {
-        const listed = dropped ? [...faults, dropped] : faults;
+        const listed = (dropped ? [...faults, dropped] : faults).filter((f) => severityFilters.has(f.severity));
         if (tab === 'now') {
-            return listed.filter((f) => isOpen(f) || faultKey(f) === watchedKey).sort(compareFaultsForDisplay);
+            // An ended fault stays only while someone watches it, whatever the statuses say.
+            return listed
+                .filter((f) => (isOpen(f) ? statusFilters.has(f.status) : faultKey(f) === watchedKey))
+                .sort(compareFaultsForDisplay);
         }
         const q = query.trim().toLowerCase();
         return listed
-            .filter((f) => !isOpen(f))
+            .filter((f) => !isOpen(f) && statusFilters.has(f.status))
             .filter((f) => !q || [f.entity_id, f.code, f.message].some((text) => text.toLowerCase().includes(q)))
-            .sort(compareByEnd);
-    }, [faults, dropped, tab, watchedKey, query]);
+            .sort(compareByLastReport);
+    }, [faults, dropped, tab, watchedKey, query, severityFilters, statusFilters]);
 
-    // Group faults by entity, in the order their worst fault comes in the list.
+    // Group faults by entity. A group comes where its entity's first fault comes in the
+    // list: its worst one on Now, its newest one on History.
     const groupedFaults = useMemo(() => {
         const groups = new Map<string, { entityId: string; entityType: string; faults: Fault[] }>();
         for (const fault of items) {
@@ -367,10 +522,10 @@ function FaultsPage() {
             return;
         }
         const key = faultKey(dropped);
-        if (askedAbout.current === key) return;
-        askedAbout.current = key;
+        if (askedAbout.current?.key === key) return;
+        askedAbout.current = { key, answered: false };
         void fetchFaults({ force: true }).finally(() => {
-            askedAbout.current = `${key}#read`;
+            askedAbout.current = { key, answered: true };
             setAnswered((n) => n + 1);
         });
     }, [dropped, last, faults, fetchFaults]);
@@ -394,6 +549,16 @@ function FaultsPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [shownKey, drawn !== null, shownOpen, loadDetails]);
 
+    // Refresh reads the list again, and the fault on the page whose details could not be
+    // read: an ended fault is not read again on its own.
+    const handleRefresh = async () => {
+        setIsRefreshing(true);
+        if (drawn && faultDetails.get(faultKey(drawn)) === null) void loadDetails(drawn, true);
+        // Forced: pressing refresh must start a read, not wait out one already running.
+        await fetchFaults({ force: true });
+        setIsRefreshing(false);
+    };
+
     const pick = (fault: Fault) => {
         setSelectedKey(faultKey(fault));
         setPicked(true);
@@ -416,8 +581,9 @@ function FaultsPage() {
     }
 
     const isBusy = isRefreshing || isLoadingFaults;
+    const now = Date.now();
 
-    // The page's line on top: its name, Now and History, and keeping it fresh
+    // The page's line on top: its name, Now and History, how many are open, and keeping it fresh
     const toolbar = (
         <EntityToolbar
             title="Faults Dashboard"
@@ -426,8 +592,10 @@ function FaultsPage() {
                     <TabSwitch tab={tab} onChange={switchTab} openCount={faultsError ? 0 : openCount} />
                     {faultsError ? (
                         <span className="text-sm text-faint">Fault status unknown</span>
+                    ) : openCount === 0 ? (
+                        <span className="text-sm text-faint">No faults detected</span>
                     ) : (
-                        openCount === 0 && <span className="text-sm text-faint">No faults detected</span>
+                        <SeverityCounts faults={openFaults} />
                     )}
                 </>
             }
@@ -480,8 +648,17 @@ function FaultsPage() {
                 </Button>
             </div>
         );
-    } else if (tab === 'now' && items.length === 0) {
-        body = (
+    } else if (tab === 'now' && items.length === 0 && openCount === 0) {
+        // Nothing open in the last list. Only a list that is current says the system is fine.
+        body = faultsError ? (
+            <div className="flex flex-col items-start px-4 py-6 text-muted-foreground sm:px-6">
+                <AlertTriangle className="mb-3 size-8 text-state-warn" />
+                <p className="font-medium text-foreground">Fault status unknown</p>
+                <p className="max-w-md text-sm">
+                    The last list held no open fault, but the gateway is not answering for faults now.
+                </p>
+            </div>
+        ) : (
             <div className="flex flex-col items-start px-4 py-6 text-muted-foreground sm:px-6">
                 <CheckCircle className="mb-3 size-8 text-state-ok" />
                 <p className="font-medium text-foreground">No faults to display</p>
@@ -496,8 +673,11 @@ function FaultsPage() {
                         key={faultKey(fault)}
                         fault={fault}
                         withEntity={withEntity}
+                        now={now}
                         selected={drawn !== null && faultKey(drawn) === faultKey(fault)}
                         onPick={() => pick(fault)}
+                        onClear={() => handleClear(fault)}
+                        isClearing={clearingCodes.has(faultKey(fault))}
                     />
                 ))}
             </ul>
@@ -505,6 +685,9 @@ function FaultsPage() {
         const sharedIds = new Set(
             groupedFaults.map(([, group]) => group.entityId).filter((id, i, all) => all.indexOf(id) !== i)
         );
+        // Whether the tab has faults the filters hide, rather than none at all.
+        const filteredOut =
+            tab === 'now' ? openCount > 0 : faults.some((f) => !isOpen(f)) || (dropped !== null && !isOpen(dropped));
         body = (
             <div className="min-h-0 flex-1 overflow-y-auto @2xl:grid @2xl:grid-cols-[184px_minmax(0,1fr)] @2xl:grid-rows-[minmax(0,1fr)] @2xl:overflow-hidden">
                 <nav
@@ -532,25 +715,54 @@ function FaultsPage() {
                             />
                         </label>
                     )}
-                    <div className="flex items-center gap-2 px-2.5">
-                        <Switch size="sm" checked={groupByEntity} onCheckedChange={setGroupByEntity} id="group-by" />
-                        <label htmlFor="group-by" className="cursor-pointer text-xs text-muted-foreground">
-                            Group by entity
-                        </label>
+                    <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5 px-1">
+                        <FilterMenu
+                            label="Severity"
+                            options={SEVERITIES}
+                            chosen={severityFilters}
+                            onToggle={(value) => setSeverityFilters((was) => toggled(was, value))}
+                        />
+                        <FilterMenu
+                            label="Status"
+                            options={TAB_STATUSES[tab]}
+                            chosen={statusFilters}
+                            onToggle={(value) => setStatusFilters((was) => toggled(was, value))}
+                        />
+                        <span className="flex items-center gap-2 px-1.5">
+                            <Switch
+                                size="sm"
+                                checked={groupByEntity}
+                                onCheckedChange={setGroupByEntity}
+                                id="group-by"
+                            />
+                            <label htmlFor="group-by" className="cursor-pointer text-xs text-muted-foreground">
+                                Group by entity
+                            </label>
+                        </span>
                     </div>
                     {items.length === 0 ? (
                         <p className="px-2.5 py-4 text-[13px] text-faint">
-                            {query.trim()
+                            {query.trim() && tab === 'history'
                                 ? `No fault matches “${query.trim()}”.`
-                                : faults.length > 0
-                                  ? 'Every fault is open now.'
-                                  : 'No faults yet.'}
+                                : filteredOut
+                                  ? 'Adjust filters to see more faults'
+                                  : faults.length > 0
+                                    ? 'Every fault is open now.'
+                                    : 'No faults yet.'}
                         </p>
                     ) : groupByEntity ? (
                         groupedFaults.map(([groupKey, { entityId, entityType, faults: entityFaults }]) => (
-                            <div key={groupKey} className="grid gap-0.5">
+                            <div
+                                key={groupKey}
+                                role="group"
+                                aria-labelledby={`faults-of-${groupKey}`}
+                                className="grid gap-0.5"
+                            >
                                 <div className="flex items-baseline gap-1.5 px-2.5 pt-1">
-                                    <h3 className="truncate font-sans text-sm font-medium tracking-normal text-foreground">
+                                    <h3
+                                        id={`faults-of-${groupKey}`}
+                                        className="truncate font-sans text-sm font-medium tracking-normal text-foreground"
+                                    >
                                         {entityId}
                                     </h3>
                                     {sharedIds.has(entityId) && (

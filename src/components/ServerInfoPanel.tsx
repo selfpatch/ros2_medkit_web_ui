@@ -100,7 +100,7 @@ export function ServerInfoPanel() {
             <Card>
                 <CardContent className="pt-6">
                     <div className="text-center text-muted-foreground">
-                        <Info className="w-8 h-8 mx-auto mb-2 text-amber-500" />
+                        <Info className="w-8 h-8 mx-auto mb-2 text-state-warn" />
                         <p className="text-sm">Could not load server information.</p>
                         <p className="text-xs text-muted-foreground mt-1">{error}</p>
                     </div>
@@ -126,7 +126,7 @@ export function ServerInfoPanel() {
                                 {sovdInfo?.vendor_info?.name || capabilities?.server_name || 'ros2_medkit Gateway'}
                             </CardTitle>
                             <CardDescription className="flex items-center gap-2 flex-wrap">
-                                <Badge variant="outline" className="text-green-600 border-green-300">
+                                <Badge variant="outline" className="text-state-fixed-text border-state-ok/40">
                                     <CheckCircle2 className="w-3 h-3 mr-1" />
                                     Connected
                                 </Badge>
@@ -171,7 +171,7 @@ export function ServerInfoPanel() {
                 <Card>
                     <CardHeader className="pb-3">
                         <CardTitle className="text-base flex items-center gap-2">
-                            <CheckCircle2 className="w-4 h-4 text-green-500" />
+                            <CheckCircle2 className="w-4 h-4 text-faint" />
                             Supported Features
                         </CardTitle>
                         <CardDescription>Capabilities available on this server</CardDescription>
@@ -193,7 +193,7 @@ export function ServerInfoPanel() {
                 <Card>
                     <CardHeader className="pb-3">
                         <CardTitle className="text-base flex items-center gap-2">
-                            <ExternalLink className="w-4 h-4 text-blue-500" />
+                            <ExternalLink className="w-4 h-4 text-faint" />
                             API Entry Points
                         </CardTitle>
                         <CardDescription>Available resource collections</CardDescription>

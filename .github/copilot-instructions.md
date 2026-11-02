@@ -8,27 +8,47 @@ React 19 + Vite + TypeScript SPA for browsing SOVD (Service-Oriented Vehicle Dia
 
 ```
 src/
+├── App.tsx                  # The shell: sidebar (folds away on wide windows), the view pane, dialogs
 ├── components/              # React components
 │   ├── ui/                  # shadcn/ui primitives (Button, Card, Dialog, etc.)
-│   ├── EntityTreeSidebar.tsx      # Main navigation tree with collapsible nodes
+│   ├── EntityTreeSidebar.tsx      # Brand, Faults Dashboard, tree with search; the gateway and Updates at the foot
 │   ├── EntityTreeNode.tsx         # Tree node component with expand/collapse
-│   ├── EntityDetailPanel.tsx      # Entity details view (dispatch to type-specific panels)
+│   ├── EntityDetailPanel.tsx      # Entity details view (dispatch to type-specific panels); exports ViewMode
+│   ├── EntityToolbar.tsx          # The line on top of a view: breadcrumb, title, kind, actions
+│   ├── SidebarToggle.tsx          # The sidebar's fold button, and the line holding it in views without a toolbar
+│   ├── ResourceTabBar.tsx         # An entity's resource tabs as one segmented control
+│   ├── SegmentedSwitch.tsx        # Small segmented switch; SEGMENT_GROUP and segmentClass for the others
+│   ├── RowGrid.tsx                # Rows in one hairline grid
+│   ├── DataRow.tsx                # A data item's row that opens it; topicPathOf
+│   ├── SectionHeading.tsx         # A section's heading inside a view
+│   ├── ResourceReadError.tsx      # "Could not load ...: reason" with Retry, where a list would be
 │   ├── EntityResourceTabs.tsx     # Tabbed interface for data/operations/configs/faults
 │   ├── ServerInfoPanel.tsx        # Server connection info and capabilities
 │   ├── OperationsPanel.tsx        # ROS 2 service/action invocation
 │   ├── ConfigurationPanel.tsx     # ROS 2 parameter management
-│   ├── FaultsDashboard.tsx        # System-wide faults view with filtering
+│   ├── LogsPanel.tsx              # An entity's logs, filters and log configuration
+│   ├── FaultsDashboard.tsx        # Gateway-wide faults: Now/History, severity and status filters, counts, grouping, Clear
+│   ├── FaultDetail.tsx            # A fault's page: its story, readings then and now, recordings
 │   ├── FaultsPanel.tsx            # Entity-specific faults
 │   ├── SearchCommand.tsx          # Ctrl+K command palette for entity search
 │   └── ServerConnectionDialog.tsx # Server URL input dialog
+├── hooks/
+│   ├── useFaultPolling.ts         # One shared poll of the fault list
+│   ├── useLiveFaultReadings.ts    # An open fault's topics re-read every 5 s while the tab is visible
+│   └── useSidebarFold.ts          # Sidebar fold, Cmd/Ctrl+\, md breakpoint (isDesktopNow, useIsDesktop)
 ├── lib/
-│   ├── sovd-api.ts          # Typed HTTP client for gateway REST API
+│   ├── api-dispatch.ts      # Typed gateway paths per entity type for the generated client
 │   ├── store.ts             # Zustand state management (entity tree, selection, faults)
+│   ├── transforms.ts        # Gateway responses into the UI's types
 │   ├── types.ts             # TypeScript interfaces for API types
+│   ├── fault-story.ts       # A fault's life in plain words
+│   ├── fault-readings.ts    # A fault's readings, then and now
+│   ├── clipboard.ts         # Copy text, with a fallback for plain-http pages
 │   ├── schema-utils.ts      # JSON Schema utilities for form generation
 │   └── utils.ts             # Utility functions
 └── test/
-    └── setup.ts             # Vitest setup
+    ├── setup.ts             # Vitest setup
+    └── window-width.ts      # matchMedia stand-in for tests that need a window width
 ```
 
 ## Entity Model
@@ -111,29 +131,19 @@ handleOperationSelection(ctx); // Show operation invocation
 
 ### API Client
 
+There is no hand-written client: calls go through the generated openapi-fetch client from
+`@selfpatch/ros2-medkit-client-ts`, created on connect and kept in the store as `client`.
+The generated paths are per entity type, so `src/lib/api-dispatch.ts` picks the typed path:
+
 ```typescript
-// src/lib/sovd-api.ts
-export class SovdApiClient {
-    constructor(private baseUrl: string) {}
-
-    // Entity listing
-    async getAreas(): Promise<Area[]>;
-    async getComponents(): Promise<Component[]>;
-    async getApps(): Promise<App[]>;
-    async getFunctions(): Promise<SovdFunction[]>;
-
-    // Entity resources
-    async getEntityData(entityType, entityId): Promise<ComponentTopic[]>;
-    async listOperations(entityId, entityType): Promise<Operation[]>;
-    async listConfigurations(entityId, entityType): Promise<ConfigurationResponse>;
-    async listEntityFaults(entityType, entityId): Promise<FaultsResponse>;
-
-    // Operations (SOVD Execution Model)
-    async createExecution(entityId, operationName, request): Promise<CreateExecutionResponse>;
-    async getExecutionStatus(entityId, operationName, executionId): Promise<Execution>;
-    async cancelExecution(entityId, operationName, executionId): Promise<void>;
-}
+// src/lib/api-dispatch.ts
+getEntityData(client, 'apps', 'talker'); // GET /apps/{app_id}/data
+getEntityOperations(client, entityType, entityId); // GET /{components|apps|areas|functions}/{id}/operations
+deleteEntityFault(client, entityType, entityId, code); // DELETE .../faults/{fault_code}
 ```
+
+Components do not call the client themselves: they use the store's actions (`fetchEntityData`,
+`fetchEntityOperations`, `listEntityFaults`, ...).
 
 ## Conventions
 

@@ -38,6 +38,7 @@ describe('SnapshotCard', () => {
         expect(screen.getByText('Snapshot #1')).toBeInTheDocument();
         expect(screen.getByText('Freeze Frame')).toBeInTheDocument();
         expect(screen.getByText(/Data.*2 fields/)).toBeInTheDocument();
+        expect(screen.getByText(/"rpm": 3000/).textContent).toBe('{\n  "temperature": 85.5,\n  "rpm": 3000\n}');
     });
 
     it('renders rosbag snapshot with download button', () => {
@@ -81,7 +82,39 @@ describe('SnapshotCard', () => {
 
         expect(screen.getByText('/navigation/status')).toBeInTheDocument();
         expect(screen.getByText('Data (text)')).toBeInTheDocument();
-        expect(screen.getByText(/"mode": "held"/)).toBeInTheDocument();
+        // Laid out: the text as it came would hold the same words on one line.
+        expect(screen.getByText(/"mode": "held"/).textContent).toBe('{\n  "mode": "held",\n  "free_width": 1.4\n}');
+    });
+
+    it('shows text that is not JSON as it came', () => {
+        const log: FreezeFrameSnapshot = {
+            type: 'freeze_frame',
+            name: 'log',
+            data: 'lane held {for 4 s',
+            'x-medkit': { topic: '/log', message_type: 'std_msgs/msg/String', captured_at: '2026-11-01T20:09:41Z' },
+        };
+
+        renderWithTooltip(<SnapshotCard snapshot={log} index={0} />);
+
+        expect(screen.getByText('lane held {for 4 s')).toBeInTheDocument();
+    });
+
+    it('puts no time on a snapshot that carries none, nor the epoch the gateway writes for one', () => {
+        const unparsed: FreezeFrameSnapshot = {
+            type: 'freeze_frame',
+            name: 'scan',
+            data: '{"ranges": [',
+            'x-medkit': { topic: '/scan', message_type: 'sensor_msgs/msg/LaserScan', parse_error: 'unexpected end' },
+        };
+        const epoch: FreezeFrameSnapshot = {
+            ...unparsed,
+            'x-medkit': { topic: '/scan', message_type: '', captured_at: '1970-01-01T00:00:00Z' },
+        };
+
+        const { container } = renderWithTooltip(<SnapshotCard snapshot={unparsed} index={0} />);
+        expect(container.textContent).not.toMatch(/N\/A|1970|Invalid Date/);
+        renderWithTooltip(<SnapshotCard snapshot={epoch} index={1} />);
+        expect(document.body.textContent).not.toMatch(/1970|Invalid Date/);
     });
 
     it('displays captured_at from x-medkit', () => {

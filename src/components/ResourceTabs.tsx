@@ -15,6 +15,7 @@
 import type { ReactNode } from 'react';
 import { AlertTriangle, Database, ScrollText, Settings, Terminal, Zap } from 'lucide-react';
 import { ConfigurationPanel } from '@/components/ConfigurationPanel';
+import type { ResourceTabBarTab } from '@/components/ResourceTabBar';
 import { FaultsPanel } from '@/components/FaultsPanel';
 import { LogsPanel } from '@/components/LogsPanel';
 import { OperationsPanel } from '@/components/OperationsPanel';
@@ -39,13 +40,7 @@ import type { SovdResourceEntityType } from '@/lib/types';
 
 export type ResourceTabId = 'data' | 'operations' | 'configurations' | 'faults' | 'logs' | 'scripts';
 
-export interface ResourceTabConfig {
-    id: ResourceTabId;
-    label: string;
-    icon: typeof Database;
-}
-
-export const RESOURCE_TABS: ResourceTabConfig[] = [
+export const RESOURCE_TABS: ResourceTabBarTab<ResourceTabId>[] = [
     { id: 'data', label: 'Data', icon: Database },
     { id: 'operations', label: 'Operations', icon: Zap },
     { id: 'configurations', label: 'Config', icon: Settings },
@@ -58,7 +53,7 @@ export const RESOURCE_TABS: ResourceTabConfig[] = [
  * and the tab additionally requires the gateway to report capabilities.scripts.
  * Panels append it themselves.
  */
-export const SCRIPTS_TAB: ResourceTabConfig = { id: 'scripts', label: 'Scripts', icon: Terminal };
+export const SCRIPTS_TAB: ResourceTabBarTab<ResourceTabId> = { id: 'scripts', label: 'Scripts', icon: Terminal };
 
 export function isResourceTabId(id: string): id is ResourceTabId {
     return (

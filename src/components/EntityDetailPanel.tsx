@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type ReactNode } from 'react';
 import { useShallow } from 'zustand/shallow';
-import { Copy, Radio, ChevronRight, ArrowUp, ArrowDown, Database, RefreshCw } from 'lucide-react';
+import { toast } from 'react-toastify';
+import { Copy, Radio, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/EmptyState';
@@ -20,19 +21,16 @@ import { EntityToolbar } from '@/components/EntityToolbar';
 import { SidebarLine } from '@/components/SidebarToggle';
 import { ResourceTabBar } from '@/components/ResourceTabBar';
 import { RowGrid } from '@/components/RowGrid';
+import { DataRow, topicPathOf } from '@/components/DataRow';
+import { SectionHeading } from '@/components/SectionHeading';
+import { copyText } from '@/lib/clipboard';
 import { useAppStore, findNode, type AppState } from '@/lib/store';
 import type { ComponentTopic, Parameter, SovdResourceEntityType } from '@/lib/types';
 
+/** What the main pane shows: the selected entity, or one of the gateway-wide dashboards */
+export type ViewMode = 'entity' | 'faults-dashboard' | 'updates-dashboard';
+
 type ComponentTab = ResourceTabId;
-
-interface TabConfig {
-    id: ComponentTab;
-    label: string;
-    icon: typeof Database;
-    description?: string;
-}
-
-const BASE_COMPONENT_TABS: TabConfig[] = RESOURCE_TABS;
 
 /**
  * Determine entity type for API calls based on entity type
@@ -111,33 +109,10 @@ interface DataTabContentProps {
     topicsData: ComponentTopic[] | null;
 }
 
-/** A data row's narrowest column: its topic and message type read whole */
+/** The narrowest a data column gets: room for most topic names and message types, longer ones are cut */
 const DATA_COLUMN = '20rem';
 
-function DataRow({ name, type, onSelect }: { name: string; type?: string; onSelect: () => void }) {
-    return (
-        <button
-            type="button"
-            onClick={onSelect}
-            className="group flex min-w-0 items-center gap-3 bg-white px-4 py-2.5 text-left outline-none transition-colors hover:bg-canvas focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
-        >
-            <Radio className="size-4 shrink-0 text-faint" aria-hidden />
-            <span className="min-w-0 flex-1">
-                <span className="block truncate font-mono text-[13px] text-foreground">{name}</span>
-                {type !== undefined && <span className="block truncate text-xs text-faint">{type}</span>}
-            </span>
-            <ChevronRight
-                className="size-4 shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100"
-                aria-hidden
-            />
-        </button>
-    );
-}
-
-function topicPathOf(selectedPath: string, topic: string): string {
-    const cleanName = topic.startsWith('/') ? topic.slice(1) : topic;
-    return `${selectedPath}/data/${encodeURIComponent(cleanName)}`;
-}
+const TOPIC_ICON = <Radio className="size-4 shrink-0 text-faint" aria-hidden />;
 
 function DataTabContent({
     selectedPath,
@@ -168,6 +143,7 @@ function DataTabContent({
                         key={topic.uniqueKey || topic.topic}
                         name={topic.topic}
                         type={topic.type || 'Unknown Type'}
+                        lead={TOPIC_ICON}
                         onSelect={() => selectEntity(topicPathOf(selectedPath, topic.topic))}
                     />
                 ))}
@@ -185,16 +161,17 @@ function DataTabContent({
             <div className="space-y-5">
                 {sections.map(({ label, icon: Icon, items }) => (
                     <section key={label} className="space-y-2">
-                        <h3 className="flex items-center gap-2 font-sans text-[13px] font-semibold tracking-normal text-foreground">
+                        <SectionHeading>
                             <Icon className="size-4 text-faint" aria-hidden />
                             {label}
                             <span className="text-xs font-normal tabular-nums text-faint">{items.length}</span>
-                        </h3>
+                        </SectionHeading>
                         <RowGrid minColumn={DATA_COLUMN}>
                             {items.map((topic: string) => (
                                 <DataRow
                                     key={topic}
                                     name={topic}
+                                    lead={TOPIC_ICON}
                                     onSelect={() => selectEntity(topicPathOf(selectedPath, topic))}
                                 />
                             ))}
@@ -255,9 +232,19 @@ function ParameterDetailCard({ entity, entityId, entityType }: ParameterDetailCa
     );
 }
 
+/** A view with no toolbar of its own: the way back to a folded sidebar on top, then the content */
+function PlainView({ children }: { children: ReactNode }) {
+    return (
+        <main className="flex-1 overflow-y-auto bg-background">
+            <SidebarLine />
+            <div className="max-w-6xl p-6">{children}</div>
+        </main>
+    );
+}
+
 interface EntityDetailPanelProps {
     onConnectClick: () => void;
-    viewMode?: 'entity' | 'faults-dashboard' | 'updates-dashboard';
+    viewMode?: ViewMode;
     onEntitySelect?: () => void;
 }
 
@@ -306,7 +293,7 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
     );
 
     const componentTabs = useMemo(
-        () => (scriptsSupported ? [...BASE_COMPONENT_TABS, SCRIPTS_TAB] : BASE_COMPONENT_TABS),
+        () => (scriptsSupported ? [...RESOURCE_TABS, SCRIPTS_TAB] : RESOURCE_TABS),
         [scriptsSupported]
     );
 
@@ -407,8 +394,11 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
     }, [selectedEntity, prefetchResourceCounts, fetchEntityData]);
 
     const handleCopyEntity = async () => {
-        if (selectedEntity) {
-            await navigator.clipboard.writeText(JSON.stringify(selectedEntity, null, 2));
+        if (!selectedEntity) return;
+        if (await copyText(JSON.stringify(selectedEntity, null, 2))) {
+            toast.success(`Copied ${selectedEntity.name} as JSON`);
+        } else {
+            toast.error(`Could not copy ${selectedEntity.name}: the browser did not allow it`);
         }
     };
 
@@ -437,36 +427,27 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
     // Updates Dashboard view
     if (viewMode === 'updates-dashboard' && !selectedPath) {
         return (
-            <main className="flex-1 overflow-y-auto bg-background">
-                <SidebarLine />
-                <div className="max-w-6xl p-6">
-                    <UpdatesDashboard />
-                </div>
-            </main>
+            <PlainView>
+                <UpdatesDashboard />
+            </PlainView>
         );
     }
 
     // No selection - show server info
     if (!selectedPath) {
         return (
-            <main className="flex-1 overflow-y-auto bg-background">
-                <SidebarLine />
-                <div className="max-w-6xl p-6">
-                    <ServerInfoPanel />
-                </div>
-            </main>
+            <PlainView>
+                <ServerInfoPanel />
+            </PlainView>
         );
     }
 
     // Loading
     if (isLoadingDetails) {
         return (
-            <main className="flex-1 overflow-y-auto bg-background">
-                <SidebarLine />
-                <div className="max-w-6xl p-6">
-                    <EntityDetailSkeleton />
-                </div>
-            </main>
+            <PlainView>
+                <EntityDetailSkeleton />
+            </PlainView>
         );
     }
 
@@ -681,11 +662,8 @@ export function EntityDetailPanel({ onConnectClick, viewMode = 'entity', onEntit
 
     // Fallback - show server info while loading
     return (
-        <main className="flex-1 overflow-y-auto bg-background">
-            <SidebarLine />
-            <div className="max-w-6xl p-6">
-                <ServerInfoPanel />
-            </div>
-        </main>
+        <PlainView>
+            <ServerInfoPanel />
+        </PlainView>
     );
 }

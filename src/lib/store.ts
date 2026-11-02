@@ -26,7 +26,7 @@ import type {
     StartScriptExecutionRequest,
 } from './types';
 import { createMedkitClient, normalizeBaseUrl, type MedkitClient } from '@selfpatch/ros2-medkit-client-ts';
-import type { SovdResourceEntityType } from './types';
+import type { FaultTopicRead, SovdResourceEntityType } from './types';
 import { faultKey } from './utils';
 import {
     transformFaultsResponse,
@@ -134,10 +134,14 @@ export interface AppState {
     // Configurations state (ROS 2 Parameters)
     configurations: Map<string, Parameter[]>; // entityId -> parameters
     isLoadingConfigurations: boolean;
+    /** Why an entity's parameters could not be read, until a read of them succeeds */
+    configurationsErrors: Map<string, string>;
 
     // Operations state (ROS 2 Services & Actions)
     operations: Map<string, Operation[]>; // entityId -> operations
     isLoadingOperations: boolean;
+    /** Why an entity's operations could not be read, until a read of them succeeds */
+    operationsErrors: Map<string, string>;
 
     // Active executions (for monitoring async actions) - SOVD Execution Model
     activeExecutions: Map<string, TrackedExecution>; // executionId -> tracked execution with metadata
@@ -298,7 +302,9 @@ export interface AppState {
     subscribeFaultStream: () => void;
     unsubscribeFaultStream: () => void;
 
-    // Component-facing actions (replace direct client usage in components)
+    // Component-facing actions (replace direct client usage in components). The three reads
+    // below reject when the gateway answers with an error, with its own words, and give an
+    // empty result only when there is no gateway to ask.
     fetchEntityData: (
         entityType: SovdResourceEntityType,
         entityId: string,
@@ -331,8 +337,13 @@ export interface AppState {
         entityId: string,
         faultCode: string
     ) => Promise<unknown>;
-    /** A topic's message now, read through the app that reports a fault; null when it cannot be read */
-    readFaultTopic: (entityType: SovdResourceEntityType, entityId: string, topic: string) => Promise<unknown>;
+    /** A topic's message now, read through the app that reports a fault, or why there is none */
+    readFaultTopic: (
+        entityType: SovdResourceEntityType,
+        entityId: string,
+        topic: string,
+        signal?: AbortSignal
+    ) => Promise<FaultTopicRead>;
     publishToEntityData: (
         entityType: SovdResourceEntityType,
         entityId: string,
@@ -944,12 +955,29 @@ const statusWatchers = new Map<string, number>();
 const statusEpochs = new Map<string, number>();
 
 /**
+ * Whether two copies of a fault tell the same story: the fault page says when it was last
+ * reported, how long it took to heal and how often it came back from these.
+ */
+function sameFaultTimes(a: Fault, b: Fault): boolean {
+    return (
+        a.parameters?.last_occurred === b.parameters?.last_occurred &&
+        a.parameters?.last_passed === b.parameters?.last_passed &&
+        a.parameters?.occurrence_count === b.parameters?.occurrence_count
+    );
+}
+
+/**
  * Everything a fault row shows, so an answer that changed any of it is not mistaken
  * for the list already on screen. The entity is part of it because one fault code
  * can be reported by two entities and the clear action targets the one displayed.
  */
 function faultRowKey(fault: Fault): string {
-    return `${faultKey(fault)}:${fault.status}:${fault.severity}:${fault.message}:${fault.timestamp}`;
+    // And the times the fault page tells its story from: a node that keeps reporting a
+    // fault moves only its newest report, and a heal and return between two reads only
+    // its last pass and count.
+    const { last_occurred, last_passed, occurrence_count } = fault.parameters ?? {};
+    const times = `${String(last_occurred)}:${String(last_passed)}:${String(occurrence_count)}`;
+    return `${faultKey(fault)}:${fault.status}:${fault.severity}:${fault.message}:${fault.timestamp}:${times}`;
 }
 
 /** The first reporting source a fault carries, if it carries one. */
@@ -975,10 +1003,10 @@ function sameStreamedFault(row: Fault, event: Fault): boolean {
  * the part naming the cause (a service that is not running, say) in `parameters.details`.
  * The page shows both, rather than an empty list that would read as "no faults".
  */
-function describeGatewayError(error: unknown): string {
-    if (!error || typeof error !== 'object') return 'Failed to load faults';
+function describeGatewayError(error: unknown, fallback = 'Failed to load faults'): string {
+    if (!error || typeof error !== 'object') return fallback;
     const { message, parameters } = error as { message?: string; parameters?: { details?: string } };
-    const summary = message || 'Failed to load faults';
+    const summary = message || fallback;
     const details = parameters?.details;
     return details ? `${summary}: ${details}` : summary;
 }
@@ -1312,10 +1340,12 @@ export const useAppStore = create<AppState>()(
             // Configurations state
             configurations: new Map(),
             isLoadingConfigurations: false,
+            configurationsErrors: new Map(),
 
             // Operations state
             operations: new Map(),
             isLoadingOperations: false,
+            operationsErrors: new Map(),
 
             // Active executions state - SOVD Execution model
             activeExecutions: new Map(),
@@ -2062,11 +2092,15 @@ export const useAppStore = create<AppState>()(
                         signal
                     );
                     if (signal?.aborted) return;
-                    if (fetchError) throw new Error(fetchError.message || 'Failed to load configurations');
+                    if (fetchError) {
+                        throw new Error(describeGatewayError(fetchError, 'Failed to load configurations'));
+                    }
                     const result = transformConfigurationsResponse(data, entityId);
                     const newConfigs = new Map(configurations);
                     newConfigs.set(entityId, result.parameters);
-                    set({ configurations: newConfigs, isLoadingConfigurations: false });
+                    const configurationsErrors = new Map(get().configurationsErrors);
+                    configurationsErrors.delete(entityId);
+                    set({ configurations: newConfigs, configurationsErrors, isLoadingConfigurations: false });
                 } catch (error) {
                     if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
                         set({ isLoadingConfigurations: false });
@@ -2075,7 +2109,9 @@ export const useAppStore = create<AppState>()(
                     const message = error instanceof Error ? error.message : 'Unknown error';
                     console.error('[store]', error);
                     toast.error(`Failed to load configurations: ${message}`);
-                    set({ isLoadingConfigurations: false });
+                    // Kept, so the panel says it could not read them instead of "no parameters".
+                    const configurationsErrors = new Map(get().configurationsErrors).set(entityId, message);
+                    set({ configurationsErrors, isLoadingConfigurations: false });
                 }
             },
 
@@ -2218,16 +2254,20 @@ export const useAppStore = create<AppState>()(
 
                 try {
                     const { data, error: fetchError } = await getEntityOperations(client, entityType, entityId);
-                    if (fetchError) throw new Error(fetchError.message || 'Failed to load operations');
+                    if (fetchError) throw new Error(describeGatewayError(fetchError, 'Failed to load operations'));
                     const result = transformOperationsResponse(data);
                     const newOps = new Map(operations);
                     newOps.set(entityId, result);
-                    set({ operations: newOps, isLoadingOperations: false });
+                    const operationsErrors = new Map(get().operationsErrors);
+                    operationsErrors.delete(entityId);
+                    set({ operations: newOps, operationsErrors, isLoadingOperations: false });
                 } catch (error) {
                     const message = error instanceof Error ? error.message : 'Unknown error';
                     console.error('[store]', error);
                     toast.error(`Failed to load operations: ${message}`);
-                    set({ isLoadingOperations: false });
+                    // Kept, so the panel says it could not read them instead of "no operations".
+                    const operationsErrors = new Map(get().operationsErrors).set(entityId, message);
+                    set({ operationsErrors, isLoadingOperations: false });
                 }
             },
 
@@ -2992,13 +3032,13 @@ export const useAppStore = create<AppState>()(
                 const existingIndex = faults.findIndex(isAboutRow);
                 if (existingIndex >= 0) {
                     const existing = faults[existingIndex]!;
-                    if (
+                    const sameFault =
                         existing.entity_id === fault.entity_id &&
                         existing.status === fault.status &&
                         existing.severity === fault.severity &&
                         existing.message === fault.message &&
-                        existing.timestamp === fault.timestamp
-                    ) {
+                        existing.timestamp === fault.timestamp;
+                    if (sameFault && sameFaultTimes(existing, fault)) {
                         readAgainAfterFailure();
                         return;
                     }
@@ -3010,6 +3050,12 @@ export const useAppStore = create<AppState>()(
                             return isAboutRow(f) ? [] : [f];
                         }),
                     });
+                    // A confirmed fault sends an update for every report of it, FAILED or
+                    // PASSED; one that only moved its times is news to the page, not to the user.
+                    if (sameFault) {
+                        readAgainAfterFailure();
+                        return;
+                    }
                 } else {
                     set({ faults: [...faults, fault] });
                 }
@@ -3127,7 +3173,8 @@ export const useAppStore = create<AppState>()(
                 const { client } = get();
                 if (!client) return [];
                 const { data, error: fetchError } = await getEntityData(client, entityType, entityId, signal);
-                if (fetchError) return [];
+                // An error answer is not an entity without topics: the panel says it could not tell.
+                if (fetchError) throw new Error(describeGatewayError(fetchError, 'Failed to load topics'));
                 return transformDataResponse(data);
             },
 
@@ -3139,7 +3186,7 @@ export const useAppStore = create<AppState>()(
                 const { client } = get();
                 if (!client) return [];
                 const { data, error: fetchError } = await getEntityOperations(client, entityType, entityId, signal);
-                if (fetchError) return [];
+                if (fetchError) throw new Error(describeGatewayError(fetchError, 'Failed to load operations'));
                 return transformOperationsResponse(data);
             },
 
@@ -3147,7 +3194,8 @@ export const useAppStore = create<AppState>()(
                 const { client } = get();
                 if (!client) return { items: [], count: 0 };
                 const { data, error: fetchError } = await getEntityFaults(client, entityType, entityId, signal);
-                if (fetchError) return { items: [], count: 0 };
+                // Not "no faults": a fault manager that is down must not read as a healthy entity.
+                if (fetchError) throw new Error(describeGatewayError(fetchError));
                 // An answer from a gateway we have left is placed without the index:
                 // reading that gateway's apps would cost the current one its index.
                 const index = get().client === client ? await faultAppsFor(client, rawFaultItems(data)) : undefined;
@@ -3236,15 +3284,39 @@ export const useAppStore = create<AppState>()(
                 return null;
             },
 
-            readFaultTopic: async (entityType: SovdResourceEntityType, entityId: string, topic: string) => {
+            readFaultTopic: async (
+                entityType: SovdResourceEntityType,
+                entityId: string,
+                topic: string,
+                signal?: AbortSignal
+            ): Promise<FaultTopicRead> => {
                 const { client } = get();
-                if (!client) return null;
+                if (!client) return { failed: 'not connected to a gateway' };
                 try {
-                    const { data, error: fetchError } = await getEntityDataItem(client, entityType, entityId, topic);
-                    if (fetchError || !data) return null;
-                    return (data as { data?: unknown }).data ?? null;
-                } catch {
-                    return null;
+                    const { data, error: fetchError } = await getEntityDataItem(
+                        client,
+                        entityType,
+                        entityId,
+                        topic,
+                        signal
+                    );
+                    if (fetchError) {
+                        return {
+                            failed: (fetchError as { message?: string }).message || 'the gateway refused the read',
+                        };
+                    }
+                    if (!data) return { failed: 'the gateway answered with nothing' };
+                    const answer = data as { data?: unknown; 'x-medkit'?: { status?: string } };
+                    // The gateway answers a topic it could not sample with an empty `data` and this
+                    // status. Taken as a message, it reads as every value gone to nothing.
+                    if (answer['x-medkit']?.status === 'metadata_only') {
+                        return { failed: 'no sample: the topic has no publisher or sent nothing in time' };
+                    }
+                    return { message: answer.data ?? null };
+                } catch (error) {
+                    // An abort arrives as a DOMException, which is not always an Error.
+                    const reason = (error as { message?: unknown } | null)?.message;
+                    return { failed: typeof reason === 'string' && reason ? reason : String(error) };
                 }
             },
 

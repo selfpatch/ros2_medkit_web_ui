@@ -18,6 +18,20 @@ import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { AppsPanel } from './AppsPanel';
 
+vi.mock('@/components/ResourceTabs', async () => {
+    const actual = await vi.importActual<typeof import('./ResourceTabs')>('@/components/ResourceTabs');
+    return {
+        ...actual,
+        // The tabs' own panels read on their own; here only which one opens matters
+        renderResourceTabContent: (tab: string) =>
+            tab === 'scripts' ? (
+                actual.renderResourceTabContent(tab, 'talker', 'apps')
+            ) : (
+                <div data-testid={`tab-${tab}`} />
+            ),
+    };
+});
+
 vi.mock('@/components/ScriptsPanel', () => ({
     ScriptsPanel: ({ entityId, entityType }: { entityId: string; entityType: string }) => (
         <div data-testid="scripts-panel">{`${entityType}:${entityId}`}</div>
@@ -72,5 +86,64 @@ describe('AppsPanel scripts tab', () => {
         renderAppsPanel({ scriptsSupported: true });
         await userEvent.click(screen.getByRole('button', { name: /scripts/i }));
         expect(screen.getByTestId('scripts-panel')).toHaveTextContent('apps:talker');
+    });
+});
+
+describe('AppsPanel resources that cannot be read', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockState.fetchEntityData.mockResolvedValue([]);
+        mockState.fetchEntityOperations.mockResolvedValue([]);
+        mockState.listEntityFaults.mockResolvedValue({ items: [], count: 0 });
+    });
+
+    it('says the topics could not be read, not that there are none, and reads them again on Retry', async () => {
+        mockState.fetchEntityData
+            .mockRejectedValueOnce(new Error('Failed to fetch'))
+            .mockResolvedValueOnce([{ topic: '/chatter', type: 'std_msgs/msg/String', isPublisher: true }]);
+        const user = userEvent.setup();
+        renderAppsPanel();
+
+        await user.click(screen.getByRole('button', { name: /^Data/ }));
+        expect(await screen.findByText('Could not load topics: Failed to fetch')).toBeInTheDocument();
+        expect(screen.queryByText(/No topics available/)).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+        expect(await screen.findByRole('button', { name: /\/chatter/ })).toBeInTheDocument();
+        expect(screen.queryByText(/Could not load topics/)).not.toBeInTheDocument();
+        expect(mockState.fetchEntityData).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps one failed resource apart from the ones that answered', async () => {
+        mockState.fetchEntityData.mockResolvedValue([{ topic: '/chatter', isPublisher: true }]);
+        mockState.fetchEntityOperations.mockRejectedValue(new Error('Gateway timeout'));
+        mockState.listEntityFaults.mockRejectedValue('connection reset');
+        const user = userEvent.setup();
+        renderAppsPanel();
+
+        // The topics still count on their tab; the failed ones show no count at all, not 0
+        expect(await screen.findByRole('button', { name: /^Data\s*1$/ })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^Operations$/ })).toBeInTheDocument();
+
+        // Those tabs hold panels that read and report their own resource: one message, theirs
+        await user.click(screen.getByRole('button', { name: /^Operations/ }));
+        expect(screen.getByTestId('tab-operations')).toBeInTheDocument();
+        expect(screen.queryByText(/Could not load operations/)).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: /^Faults/ }));
+        expect(screen.getByTestId('tab-faults')).toBeInTheDocument();
+        expect(screen.queryByText(/Could not load faults/)).not.toBeInTheDocument();
+    });
+
+    it('does not claim there are no topics while they are still being read', async () => {
+        mockState.fetchEntityData.mockReturnValue(new Promise(() => {}));
+        const user = userEvent.setup();
+        renderAppsPanel();
+
+        await user.click(screen.getByRole('button', { name: /^Data/ }));
+
+        expect(screen.getByText(/Loading app resources/)).toBeInTheDocument();
+        expect(screen.queryByText(/No topics available/)).not.toBeInTheDocument();
     });
 });

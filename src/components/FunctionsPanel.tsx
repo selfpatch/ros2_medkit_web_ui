@@ -2,10 +2,13 @@ import { useState, useEffect } from 'react';
 import { useShallow } from 'zustand/shallow';
 import { AlertTriangle, ChevronRight, Cpu, Database, GitBranch, Info, Loader2, Users, Zap } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { badgeVariants } from '@/components/ui/badge';
 import { DataValuePreview } from '@/components/DataValuePreview';
+import { topicPathOf } from '@/components/DataRow';
+import { ResourceReadError, readFailure } from '@/components/ResourceReadError';
 import { useAppStore } from '@/lib/store';
-import { ResourceTabBar } from '@/components/ResourceTabBar';
+import { cn } from '@/lib/utils';
+import { ResourceTabBar, type ResourceTabBarTab } from '@/components/ResourceTabBar';
 import {
     RESOURCE_TABS,
     renderResourceTabContent,
@@ -23,19 +26,21 @@ interface FunctionHost {
 
 type FunctionTab = 'overview' | 'hosts' | ResourceTabId;
 
-interface TabConfig {
-    id: FunctionTab;
-    label: string;
-    icon: typeof Database;
-}
-
 // Functions are capability aggregations without their own configuration surface,
 // so Config is intentionally omitted to avoid 404s on `/functions/{id}/configurations`.
-const FUNCTION_TABS: TabConfig[] = [
+const FUNCTION_TABS: ResourceTabBarTab<FunctionTab>[] = [
     { id: 'overview', label: 'Overview', icon: Info },
     { id: 'hosts', label: 'Hosts', icon: Cpu },
     ...RESOURCE_TABS.filter((t) => t.id !== 'configurations'),
 ];
+
+/** Why a resource of the function could not be read; a resource that was read has no entry */
+interface ReadErrors {
+    hosts?: string;
+    topics?: string;
+    operations?: string;
+    faults?: string;
+}
 
 interface FunctionsPanelProps {
     functionId: string;
@@ -58,7 +63,11 @@ export function FunctionsPanel({ functionId, description, path, onNavigate }: Fu
     const [topics, setTopics] = useState<ComponentTopic[]>([]);
     const [operations, setOperations] = useState<Operation[]>([]);
     const [faults, setFaults] = useState<Fault[]>([]);
+    const [readErrors, setReadErrors] = useState<ReadErrors>({});
     const [isLoading, setIsLoading] = useState(false);
+    // Bumped by Retry to read everything again
+    const [attempt, setAttempt] = useState(0);
+    const retry = () => setAttempt((n) => n + 1);
 
     const { selectEntity, getFunctionHosts, fetchEntityData, fetchEntityOperations, listEntityFaults } = useAppStore(
         useShallow((state) => ({
@@ -70,43 +79,52 @@ export function FunctionsPanel({ functionId, description, path, onNavigate }: Fu
         }))
     );
 
-    // Load function resources on mount
+    // Load function resources on mount and on Retry. Each read stands on its own: one that fails
+    // (an error answer or no answer at all) is reported as failed, not as an empty list.
     useEffect(() => {
+        let current = true;
         const loadFunctionData = async () => {
             setIsLoading(true);
+            // Functions do not expose a configurations collection; skip that fetch
+            // to avoid 404s on `/functions/{id}/configurations`.
+            const [hostsRead, topicsRead, opsRead, faultsRead] = await Promise.allSettled([
+                getFunctionHosts(functionId),
+                fetchEntityData('functions', functionId),
+                fetchEntityOperations('functions', functionId),
+                listEntityFaults('functions', functionId),
+            ]);
+            if (!current) return;
 
-            try {
-                // Functions do not expose a configurations collection; skip that fetch
-                // to avoid 404s on `/functions/{id}/configurations`.
-                const [hostsData, topicsData, opsData, faultsData] = await Promise.all([
-                    getFunctionHosts(functionId).catch(() => [] as unknown[]),
-                    fetchEntityData('functions', functionId).catch(() => [] as ComponentTopic[]),
-                    fetchEntityOperations('functions', functionId).catch(() => [] as Operation[]),
-                    listEntityFaults('functions', functionId).catch(() => ({ items: [] as Fault[], count: 0 })),
-                ]);
-
+            const failed: ReadErrors = {};
+            if (hostsRead.status === 'fulfilled') {
                 // Normalize hosts - API returns objects with {id, name, href}
-                const normalizedHosts = hostsData.map((h: unknown) => {
-                    if (typeof h === 'string') {
-                        return { id: h, name: h, href: `/api/v1/apps/${h}` };
-                    }
-                    const hostObj = h as FunctionHost;
-                    return { id: hostObj.id, name: hostObj.name || hostObj.id, href: hostObj.href || '' };
-                });
-
-                setHosts(normalizedHosts);
-                setTopics(topicsData);
-                setOperations(opsData);
-                setFaults(faultsData.items || []);
-            } catch (error) {
-                console.error('Failed to load function data:', error);
-            } finally {
-                setIsLoading(false);
+                setHosts(
+                    hostsRead.value.map((h: unknown) => {
+                        if (typeof h === 'string') {
+                            return { id: h, name: h, href: `/api/v1/apps/${h}` };
+                        }
+                        const hostObj = h as FunctionHost;
+                        return { id: hostObj.id, name: hostObj.name || hostObj.id, href: hostObj.href || '' };
+                    })
+                );
+            } else {
+                failed.hosts = readFailure(hostsRead.reason);
             }
+            if (topicsRead.status === 'fulfilled') setTopics(topicsRead.value);
+            else failed.topics = readFailure(topicsRead.reason);
+            if (opsRead.status === 'fulfilled') setOperations(opsRead.value);
+            else failed.operations = readFailure(opsRead.reason);
+            if (faultsRead.status === 'fulfilled') setFaults(faultsRead.value.items || []);
+            else failed.faults = readFailure(faultsRead.reason);
+            setReadErrors(failed);
+            setIsLoading(false);
         };
 
-        loadFunctionData();
-    }, [getFunctionHosts, fetchEntityData, fetchEntityOperations, listEntityFaults, functionId]);
+        void loadFunctionData();
+        return () => {
+            current = false;
+        };
+    }, [getFunctionHosts, fetchEntityData, fetchEntityOperations, listEntityFaults, functionId, attempt]);
 
     const handleResourceClick = (resourcePath: string) => {
         if (onNavigate) {
@@ -116,6 +134,13 @@ export function FunctionsPanel({ functionId, description, path, onNavigate }: Fu
         }
     };
 
+    // What each tab holds; a resource that could not be read has no count rather than 0
+    const counts: Partial<Record<FunctionTab, number>> = {};
+    if (!readErrors.hosts) counts.hosts = hosts.length;
+    if (!readErrors.topics) counts.data = topics.length;
+    if (!readErrors.operations) counts.operations = operations.length;
+    if (!readErrors.faults) counts.faults = faults.length;
+
     return (
         <div className="space-y-6">
             {/* Its name is the view's heading, in the toolbar */}
@@ -123,12 +148,7 @@ export function FunctionsPanel({ functionId, description, path, onNavigate }: Fu
                 tabs={FUNCTION_TABS}
                 activeTab={activeTab}
                 onTabChange={setActiveTab}
-                counts={{
-                    hosts: hosts.length,
-                    data: topics.length,
-                    operations: operations.length,
-                    faults: faults.length,
-                }}
+                counts={counts}
                 alarmTab="faults"
             />
 
@@ -155,43 +175,50 @@ export function FunctionsPanel({ functionId, description, path, onNavigate }: Fu
                                 onClick={() => setActiveTab('hosts')}
                                 className="p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left"
                             >
-                                <Users className="w-4 h-4 text-emerald-500 mb-1" />
-                                <div className="text-2xl font-semibold">{hosts.length}</div>
+                                <Users className="w-4 h-4 text-faint mb-1" />
+                                <div className="text-2xl font-semibold">{readErrors.hosts ? '-' : hosts.length}</div>
                                 <div className="text-xs text-muted-foreground">Host Apps</div>
                             </button>
                             <button
                                 onClick={() => setActiveTab('data')}
                                 className="p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left"
                             >
-                                <Database className="w-4 h-4 text-blue-500 mb-1" />
-                                <div className="text-2xl font-semibold">{topics.length}</div>
+                                <Database className="w-4 h-4 text-faint mb-1" />
+                                <div className="text-2xl font-semibold">{readErrors.topics ? '-' : topics.length}</div>
                                 <div className="text-xs text-muted-foreground">Data Items</div>
                             </button>
                             <button
                                 onClick={() => setActiveTab('operations')}
                                 className="p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left"
                             >
-                                <Zap className="w-4 h-4 text-amber-500 mb-1" />
-                                <div className="text-2xl font-semibold">{operations.length}</div>
+                                <Zap className="w-4 h-4 text-faint mb-1" />
+                                <div className="text-2xl font-semibold">
+                                    {readErrors.operations ? '-' : operations.length}
+                                </div>
                                 <div className="text-xs text-muted-foreground">Operations</div>
                             </button>
                             <button
                                 onClick={() => setActiveTab('faults')}
-                                className={`p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left ${faults.length > 0 ? 'border-red-300 bg-red-50' : ''}`}
+                                className={`p-3 rounded-lg border hover:bg-accent/50 transition-colors text-left ${faults.length > 0 ? 'border-state-fault/40 bg-state-fault-bg' : ''}`}
                             >
                                 <AlertTriangle
-                                    className={`w-4 h-4 mb-1 ${faults.length > 0 ? 'text-red-500' : 'text-muted-foreground'}`}
+                                    className={`w-4 h-4 mb-1 ${faults.length > 0 ? 'text-state-fault' : 'text-muted-foreground'}`}
                                 />
-                                <div className="text-2xl font-semibold">{faults.length}</div>
+                                <div className="text-2xl font-semibold">{readErrors.faults ? '-' : faults.length}</div>
                                 <div className="text-xs text-muted-foreground">Faults</div>
                             </button>
                         </div>
 
-                        {hosts.length === 0 && !isLoading && (
-                            <div className="mt-4 text-center text-muted-foreground text-sm">
-                                <GitBranch className="w-6 h-6 mx-auto mb-2 opacity-30" />
-                                <p>No host apps are implementing this function yet.</p>
-                            </div>
+                        {readErrors.hosts ? (
+                            <ResourceReadError what="hosts" reason={readErrors.hosts} onRetry={retry} />
+                        ) : (
+                            hosts.length === 0 &&
+                            !isLoading && (
+                                <div className="mt-4 text-center text-muted-foreground text-sm">
+                                    <GitBranch className="w-6 h-6 mx-auto mb-2 opacity-30" />
+                                    <p>No host apps are implementing this function yet.</p>
+                                </div>
+                            )
                         )}
                     </CardContent>
                 </Card>
@@ -201,13 +228,15 @@ export function FunctionsPanel({ functionId, description, path, onNavigate }: Fu
                 <Card>
                     <CardHeader className="pb-3">
                         <CardTitle className="text-base flex items-center gap-2">
-                            <Cpu className="w-4 h-4 text-emerald-500" />
+                            <Cpu className="w-4 h-4 text-faint" />
                             Host Apps
                         </CardTitle>
                         <CardDescription>Apps implementing this function</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        {hosts.length === 0 ? (
+                        {readErrors.hosts ? (
+                            <ResourceReadError what="hosts" reason={readErrors.hosts} onRetry={retry} />
+                        ) : hosts.length === 0 ? (
                             <div className="text-center text-muted-foreground py-4">
                                 <Cpu className="w-8 h-8 mx-auto mb-2 opacity-30" />
                                 <p className="text-sm">No host apps found for this function.</p>
@@ -215,21 +244,30 @@ export function FunctionsPanel({ functionId, description, path, onNavigate }: Fu
                         ) : (
                             <div className="space-y-2">
                                 {hosts.map((host) => (
-                                    <div
+                                    <button
+                                        type="button"
                                         key={host.id}
-                                        className="flex items-center gap-3 p-3 rounded-lg border hover:bg-accent/30 cursor-pointer group"
+                                        className="flex w-full items-center gap-3 p-3 rounded-lg border text-left hover:bg-accent/30 cursor-pointer group"
                                         onClick={() => handleResourceClick(`/apps/${host.id}`)}
                                     >
-                                        <div className="p-1.5 rounded bg-emerald-100">
-                                            <Cpu className="w-4 h-4 text-emerald-600" />
-                                        </div>
+                                        <span className="p-1.5 rounded bg-canvas-2">
+                                            <Cpu className="w-4 h-4 text-body" aria-hidden />
+                                        </span>
                                         <span className="font-medium text-sm truncate flex-1">{host.name}</span>
                                         <span className="font-mono text-xs text-muted-foreground">{host.id}</span>
-                                        <Badge variant="outline" className="text-emerald-600 border-emerald-300">
+                                        <span
+                                            className={cn(
+                                                badgeVariants({ variant: 'outline' }),
+                                                'text-muted-foreground'
+                                            )}
+                                        >
                                             app
-                                        </Badge>
-                                        <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100" />
-                                    </div>
+                                        </span>
+                                        <ChevronRight
+                                            className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100"
+                                            aria-hidden
+                                        />
+                                    </button>
                                 ))}
                             </div>
                         )}
@@ -241,43 +279,49 @@ export function FunctionsPanel({ functionId, description, path, onNavigate }: Fu
                 <Card>
                     <CardHeader className="pb-3">
                         <CardTitle className="text-base flex items-center gap-2">
-                            <Database className="w-4 h-4 text-blue-500" />
+                            <Database className="w-4 h-4 text-faint" />
                             Aggregated Data
                         </CardTitle>
                         <CardDescription>Data items from all host apps</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        {topics.length === 0 ? (
+                        {readErrors.topics ? (
+                            <ResourceReadError what="data items" reason={readErrors.topics} onRetry={retry} />
+                        ) : topics.length === 0 ? (
                             <div className="text-center text-muted-foreground py-4">
                                 <Database className="w-8 h-8 mx-auto mb-2 opacity-30" />
                                 <p className="text-sm">No data items available.</p>
                             </div>
                         ) : (
                             <div className="space-y-2">
-                                {topics.map((topic, idx) => {
-                                    const cleanName = topic.topic.startsWith('/') ? topic.topic.slice(1) : topic.topic;
-                                    const encodedName = encodeURIComponent(cleanName);
-                                    const topicPath = `${path}/data/${encodedName}`;
-                                    return (
-                                        <div
-                                            key={topic.uniqueKey || `${topic.topic}-${idx}`}
-                                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 cursor-pointer group"
-                                            onClick={() => handleResourceClick(topicPath)}
-                                        >
-                                            <Badge variant="outline" className="text-blue-600 border-blue-300">
-                                                topic
-                                            </Badge>
-                                            <span className="font-mono text-sm truncate flex-1">{topic.topic}</span>
-                                            <DataValuePreview topic={topic} />
-                                            {topic.type && (
-                                                <span className="text-xs text-muted-foreground truncate max-w-[200px]">
-                                                    {topic.type}
-                                                </span>
+                                {topics.map((topic, idx) => (
+                                    <button
+                                        type="button"
+                                        key={topic.uniqueKey || `${topic.topic}-${idx}`}
+                                        className="flex w-full items-center gap-3 p-2 rounded-lg text-left hover:bg-accent/50 cursor-pointer group"
+                                        onClick={() => handleResourceClick(topicPathOf(path, topic.topic))}
+                                    >
+                                        <span
+                                            className={cn(
+                                                badgeVariants({ variant: 'outline' }),
+                                                'text-muted-foreground'
                                             )}
-                                            <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100" />
-                                        </div>
-                                    );
-                                })}
+                                        >
+                                            topic
+                                        </span>
+                                        <span className="font-mono text-sm truncate flex-1">{topic.topic}</span>
+                                        <DataValuePreview topic={topic} />
+                                        {topic.type && (
+                                            <span className="text-xs text-muted-foreground truncate max-w-[200px]">
+                                                {topic.type}
+                                            </span>
+                                        )}
+                                        <ChevronRight
+                                            className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100"
+                                            aria-hidden
+                                        />
+                                    </button>
+                                ))}
                             </div>
                         )}
                     </CardContent>

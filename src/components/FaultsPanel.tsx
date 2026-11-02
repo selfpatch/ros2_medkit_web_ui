@@ -204,7 +204,7 @@ export function FaultsPanel({ entityId, entityType = 'components' }: FaultsPanel
                 <FaultList>
                     {faults.map((fault) => (
                         <FaultRow
-                            key={fault.code}
+                            key={faultKey(fault)}
                             fault={fault}
                             onClear={() => handleClear(fault.code)}
                             isClearing={clearingKeys.has(clearingKey(entityType, entityId, fault.code))}

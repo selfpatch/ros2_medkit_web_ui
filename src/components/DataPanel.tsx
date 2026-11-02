@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { JsonFormViewer } from '@/components/JsonFormViewer';
 import { TopicPublishForm } from '@/components/TopicPublishForm';
+import { SectionHeading } from '@/components/SectionHeading';
 import type { ComponentTopic, TopicEndpoint, QosProfile, SovdResourceEntityType } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/lib/store';
@@ -247,9 +248,7 @@ export function DataPanel({ topic, entityId, entityType = 'components' }: DataPa
             {/* Last Received Value */}
             <section className="space-y-2" role="region" aria-label="Last received value">
                 <div className="flex items-center justify-between">
-                    <h3 className="font-sans text-[13px] font-semibold tracking-normal text-foreground">
-                        Last Received Value
-                    </h3>
+                    <SectionHeading>Last Received Value</SectionHeading>
                     {hasData && (
                         <Button variant="ghost" size="sm" onClick={handleCopyFromLast} className="h-7 px-2 text-xs">
                             <Copy className="w-3 h-3 mr-1" />
@@ -278,9 +277,7 @@ export function DataPanel({ topic, entityId, entityType = 'components' }: DataPa
             {/* Write/Publish Section */}
             {canWrite && (
                 <section className="space-y-2 border-t border-hairline pt-4">
-                    <h3 className="font-sans text-[13px] font-semibold tracking-normal text-foreground">
-                        {writeSectionLabel}
-                    </h3>
+                    <SectionHeading>{writeSectionLabel}</SectionHeading>
                     <TopicPublishForm
                         topic={topic}
                         entityId={entityId}

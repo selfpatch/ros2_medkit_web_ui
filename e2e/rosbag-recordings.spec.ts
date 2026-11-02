@@ -27,7 +27,7 @@
 
 import { readFileSync } from 'node:fs';
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page, type Request, type Response as PageResponse } from '@playwright/test';
 
 const GATEWAY_PORT = process.env.E2E_ROSBAG_GATEWAY_PORT ?? '8081';
 const GATEWAY_URL = process.env.E2E_ROSBAG_GATEWAY_URL ?? `http://localhost:${GATEWAY_PORT}/api/v1`;
@@ -104,7 +104,7 @@ test.beforeEach(async ({ page }) => {
     );
 });
 
-async function openTheFault(page: import('@playwright/test').Page) {
+async function openTheFault(page: Page) {
     await page.goto('/', { waitUntil: 'load' });
     await page.getByRole('button', { name: /Faults Dashboard/i }).click();
     await expect(page.getByText(FAULT_CODE).first()).toBeVisible();
@@ -112,7 +112,7 @@ async function openTheFault(page: import('@playwright/test').Page) {
 }
 
 /** The fault's rosbag download buttons, in the order the detail lists them. */
-function downloadButtons(page: import('@playwright/test').Page) {
+function downloadButtons(page: Page) {
     return page.locator('button:has(svg.lucide-download)');
 }
 
@@ -174,25 +174,35 @@ test('every recording downloads as its own bag', async ({ page }) => {
     }
 });
 
-test('re-expanding the fault asks the gateway again instead of replaying a cache', async ({ page }) => {
-    // The detail used to be fetched once per fault and cached forever, so a
-    // recording written after the first expand stayed invisible until the
-    // component remounted. This drives the collapse/re-expand path and pins
-    // that the second expand goes back to the gateway with a 2xx; seeding a
-    // THIRD recording mid-test would need a second seeder pass, so the
-    // count-grows half lives in the jsdom tests that stub the store.
+/**
+ * The first 2xx answer to a read of the fault's details sent from now on. Reads already on
+ * the wire (the page opens the first fault on its own on a wide screen, and the press that
+ * opened it reads again) cannot satisfy it.
+ */
+function nextDetailRead(page: Page): Promise<PageResponse> {
+    const sent = new Set<Request>();
+    const track = (request: Request) => {
+        if (request.url().includes(`/faults/${FAULT_CODE}`)) sent.add(request);
+    };
+    page.on('request', track);
+    return page
+        .waitForResponse((response) => sent.has(response.request()) && response.ok())
+        .finally(() => page.off('request', track));
+}
+
+test('pressing the fault again reads it again instead of replaying a cache', async ({ page }) => {
+    // The detail used to be fetched once per fault and cached forever, so a recording
+    // written after the first look stayed invisible until the component remounted. This
+    // pins that a second press on the fault goes back to the gateway with a 2xx; seeding a
+    // THIRD recording mid-test would need a second seeder pass, so the count-grows half
+    // lives in the jsdom tests that stub the store.
     await openTheFault(page);
     await expect(downloadButtons(page)).toHaveCount(expectedRecordings.length);
 
-    // Collapse.
+    // Armed BEFORE the press, and only satisfied by a 2xx to a read sent after it: an
+    // error response, or the answer to an earlier read, must not count as "read again".
+    const reread = nextDetailRead(page);
     await page.getByText(FAULT_CODE).first().click();
-
-    // Re-expand, armed BEFORE the click and only satisfied by a 2xx: an error
-    // response must not count as "refetched".
-    const refetch = page.waitForResponse(
-        (response) => response.url().includes(`/faults/${FAULT_CODE}`) && response.ok()
-    );
-    await page.getByText(FAULT_CODE).first().click();
-    await refetch;
+    await reread;
     await expect(downloadButtons(page)).toHaveCount(expectedRecordings.length);
 });

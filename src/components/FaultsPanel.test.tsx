@@ -247,4 +247,24 @@ describe('FaultsPanel', () => {
         expect(await screen.findByText('No faults detected')).toBeInTheDocument();
         expect(mockClearFault).toHaveBeenCalledWith('apps', 'app-a', 'LANE_BLOCKED');
     });
+
+    it('lists one code reported by two apps of a component as two rows', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+        mockListEntityFaults.mockResolvedValue(listOf(fault('LANE_BLOCKED', 'app-a'), fault('LANE_BLOCKED', 'app-b')));
+        render(<FaultsPanel entityId="amr-07" entityType="components" />);
+
+        await screen.findByText('app: app-b');
+        expect(screen.getByText('app: app-a')).toBeInTheDocument();
+        expect(consoleError.mock.calls.some((call) => String(call[0]).includes('same key'))).toBe(false);
+        consoleError.mockRestore();
+    });
+
+    it('says the faults could not be read, never that the entity is fine, when the read fails', async () => {
+        mockListEntityFaults.mockRejectedValue(new Error('Fault manager unavailable'));
+        render(<FaultsPanel entityId="app-a" entityType="apps" />);
+
+        expect(await screen.findByText('Fault manager unavailable')).toBeInTheDocument();
+        expect(screen.queryByText('No faults detected')).toBeNull();
+        expect(screen.queryByText('Component is operating normally')).toBeNull();
+    });
 });

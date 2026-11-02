@@ -35,16 +35,16 @@ function toneForStatus(status: string): ExecutionTone {
 }
 
 const TONE_BADGE_CLASSES: Record<ExecutionTone, string> = {
-    ok: 'bg-green-100 text-green-800',
-    error: 'bg-red-100 text-red-800',
-    stopped: 'bg-amber-100 text-amber-800',
+    ok: 'bg-state-fixed-bg text-state-fixed-text',
+    error: 'bg-state-fault-bg text-state-fault-text',
+    stopped: 'bg-state-warn-bg text-state-warn-text',
     neutral: 'bg-muted text-muted-foreground',
 };
 
 const TONE_TEXT_CLASSES: Record<ExecutionTone, string> = {
-    ok: 'text-green-700',
-    error: 'text-red-600',
-    stopped: 'text-amber-700',
+    ok: 'text-state-fixed-text',
+    error: 'text-state-fault-text',
+    stopped: 'text-state-warn-text',
     neutral: 'text-muted-foreground',
 };
 
@@ -144,7 +144,7 @@ export function ScriptExecutionCard({ record }: ScriptExecutionCardProps) {
                         aria-valuemax={100}
                         className="w-full h-2 rounded-full bg-muted overflow-hidden"
                     >
-                        <div className="h-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+                        <div className="h-full bg-graphite transition-all" style={{ width: `${progress}%` }} />
                     </div>
                 )}
 

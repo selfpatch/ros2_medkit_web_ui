@@ -2,8 +2,8 @@ import type { Fault } from '@/lib/types';
 
 /**
  * A fault's life in plain words, from what the gateway says of it: when it was first
- * reported, when this time came (medkit's capture of it, else its newest report), when it
- * ended, and what ends it while it is open.
+ * reported, when this time came (medkit's capture of it, else when it was first reported
+ * or last passed), when it ended, and what ends it while it is open.
  */
 
 const SECOND = 1000;
@@ -46,11 +46,11 @@ export function spanWords(ms: number): string {
     return `${Math.floor(span / DAY)} d${hours ? ` ${hours} h` : ''}`;
 }
 
-export function clock(ms: number): string {
+function clock(ms: number): string {
     return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-/** "21:30" today, "Yesterday 21:30", "Mon 21:30" this week, else "Oct 27" */
+/** "21:30" today, "Yesterday 21:30", "Mon 21:30" within the last six days, else "Oct 27" */
 export function whenWords(ms: number, now: number): string {
     const day = new Date(ms);
     const today = new Date(now);
@@ -64,40 +64,51 @@ export function whenWords(ms: number, now: number): string {
     return day.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+/** A fault's newest report, in ms, else when it was first reported; null with neither */
+export function lastReportedAt(fault: Fault): number | null {
+    return toMs(fault.parameters?.last_occurred) ?? toMs(fault.timestamp);
+}
+
 export interface FaultTimes {
-    /** When this time came */
+    /** When this time came: medkit's capture of it, else when it was first reported or last passed */
     came: number | null;
-    /** When it ended: medkit's last pass, for a fault that is not open */
+    /** When it ended: a healed fault's last report; null while open, and for a cleared fault, whose clear is not dated */
     ended: number | null;
-    /** When the gateway first heard of it */
+    /** When the gateway first heard of it; a fault reported again after a clear starts over */
     first: number | null;
-    /** The newest report of it */
+    /** Its newest FAILED report */
     lastReport: number | null;
     /** Whether the newest capture is of an earlier time than the one now open */
     captureIsEarlier: boolean;
 }
 
 /**
- * The moments of a fault. medkit captures its freeze frames when a fault is confirmed, so
- * the newest capture after its last pass is when this time came; a node that keeps
- * reporting moves the newest report along, which only says it is still reported.
+ * The moments of a fault, from medkit's capture (`capture`, ms) and the fault manager's
+ * times. medkit captures its freeze frames each time a fault is confirmed, so an open
+ * fault came at its newest capture; without one (a pending fault is never captured) it
+ * came when it was first reported. A capture from well before that first report is of an
+ * earlier time, kept across a clear; one a little before it is this time's, its messages
+ * dated by when they arrived (medkit's background capture). Neither report time says
+ * when it came: a node that keeps reporting moves the newest report along, and every
+ * PASSED report moves the last pass, also while the fault stays confirmed.
+ *
+ * So a healed fault ended with its last FAILED report. Nothing dates a clear.
  */
 export function faultTimes(fault: Fault, capture: number | null): FaultTimes {
     const lastReport = toMs(fault.parameters?.last_occurred);
-    const lastPassed = toMs(fault.parameters?.last_passed);
     const first = toMs(fault.timestamp);
     if (isOpen(fault)) {
-        const thisTime = capture !== null && (lastPassed === null || capture > lastPassed);
+        const earlier = capture !== null && first !== null && capture < first - MINUTE;
         return {
-            came: thisTime ? capture : lastReport,
+            came: capture !== null && !earlier ? capture : first,
             ended: null,
             first,
             lastReport,
-            captureIsEarlier: capture !== null && !thisTime,
+            captureIsEarlier: earlier,
         };
     }
-    const ended = lastPassed;
-    const came = capture !== null && (ended === null || capture <= ended) ? capture : lastReport;
+    const ended = fault.status === 'healed' ? lastReport : null;
+    const came = capture !== null && (ended === null || capture <= ended) ? capture : first;
     return { came, ended, first, lastReport, captureIsEarlier: false };
 }
 
@@ -129,21 +140,35 @@ export interface StoryRow {
 }
 
 /**
- * The fault's life, newest on top: what ends it, whether it is still reported, when this
- * time came, and when it was first reported.
+ * The fault's life, newest on top: what ends it, whether it is still reported (said from
+ * its newest report, else from when its topics last answered, `readAt`, or that they do
+ * not answer, `failing`), when this time came, and when it was first reported.
  */
-export function storyRows(fault: Fault, times: FaultTimes, now: number, readAt: number | null): StoryRow[] {
+export function storyRows(
+    fault: Fault,
+    times: FaultTimes,
+    now: number,
+    readAt: number | null,
+    failing: boolean
+): StoryRow[] {
     const name = fault.entity_id;
     const open = isOpen(fault);
     const rows: StoryRow[] = [];
+    // The count goes up each time a cleared fault is reported again, and its first report
+    // starts over then: the first row is its latest return.
     const count = fault.parameters?.occurrence_count;
-    if (times.first !== null && (times.came === null || times.came - times.first > MINUTE)) {
+    const comebacks = typeof count === 'number' && count > 1 ? count - 1 : 0;
+    const cameBack = comebacks
+        ? `Came back ${comebacks} time${comebacks === 1 ? '' : 's'} after being cleared.`
+        : undefined;
+    const showsFirst = times.first !== null && (times.came === null || times.came - times.first > MINUTE);
+    if (showsFirst) {
         rows.push({
             key: 'first',
-            when: whenWords(times.first, now),
+            when: whenWords(times.first!, now),
             dot: 'first',
-            title: 'First reported.',
-            note: typeof count === 'number' && count > 1 ? `Reported ${count} times since.` : undefined,
+            title: comebacks ? 'Reported again after a clear.' : 'First reported.',
+            note: cameBack,
             rail: 'quiet',
         });
     }
@@ -153,6 +178,8 @@ export function storyRows(fault: Fault, times: FaultTimes, now: number, readAt: 
             when: whenWords(times.came, now),
             dot: 'came',
             title: `${name} started reporting it.`,
+            // Without a first row of its own, its return is told here.
+            note: showsFirst ? undefined : cameBack,
             rail: open ? 'open' : 'quiet',
         });
     }
@@ -171,11 +198,18 @@ export function storyRows(fault: Fault, times: FaultTimes, now: number, readAt: 
         ? `${name} last reported it ${spanWords(now - times.lastReport!)} ago.`
         : readAt !== null
           ? `${name} was read ${spanWords(now - readAt)} ago.`
-          : undefined;
+          : failing
+            ? `${name}'s topics do not answer.`
+            : undefined;
     rows.push(
-        fault.status === 'pending'
-            ? { key: 'now', when: 'now', dot: 'now', title: 'Reported, not confirmed yet.', note, rail: 'next' }
-            : { key: 'now', when: 'now', dot: 'now', title: 'Still reported.', note, rail: 'next' },
+        {
+            key: 'now',
+            when: 'now',
+            dot: 'now',
+            title: fault.status === 'pending' ? 'Reported, not confirmed yet.' : 'Still reported.',
+            note,
+            rail: 'next',
+        },
         {
             key: 'next',
             when: 'next',

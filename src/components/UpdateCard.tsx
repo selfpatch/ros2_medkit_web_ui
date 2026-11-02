@@ -48,13 +48,13 @@ function statusBadgeVariant(status: UpdateStatusValue): BadgeVariant {
 function progressBarColor(status: UpdateStatusValue): string {
     switch (status) {
         case 'inProgress':
-            return 'bg-blue-500';
+            return 'bg-graphite';
         case 'completed':
-            return 'bg-green-500';
+            return 'bg-state-ok';
         case 'failed':
-            return 'bg-red-500';
+            return 'bg-state-fault';
         default:
-            return 'bg-gray-400';
+            return 'bg-state-off';
     }
 }
 
@@ -152,7 +152,7 @@ export function UpdateCard({ entry, baseUrl, busy, onAction }: UpdateCardProps) 
     const isFailed = status?.status === 'failed';
 
     return (
-        <Card className={isFailed ? 'border-red-300' : undefined}>
+        <Card className={isFailed ? 'border-state-fault/40' : undefined}>
             <CardHeader className="py-3 px-4">
                 <div className="flex items-center justify-between gap-2">
                     <CardTitle className="text-sm font-medium flex items-center gap-2 min-w-0">
@@ -216,7 +216,7 @@ export function UpdateCard({ entry, baseUrl, busy, onAction }: UpdateCardProps) 
                         )}
 
                         {status.error && (
-                            <div className="flex items-start gap-2 text-sm text-red-600">
+                            <div className="flex items-start gap-2 text-sm text-state-fault-text">
                                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                                 <span>{status.error}</span>
                             </div>

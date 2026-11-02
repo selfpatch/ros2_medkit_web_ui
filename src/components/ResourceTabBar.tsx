@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import { SEGMENT_GROUP, segmentClass } from '@/components/SegmentedSwitch';
 import { cn } from '@/lib/utils';
 
 export interface ResourceTabBarTab<T extends string> {
@@ -8,7 +9,8 @@ export interface ResourceTabBarTab<T extends string> {
 }
 
 interface ResourceTabBarProps<T extends string> {
-    tabs: ResourceTabBarTab<T>[];
+    tabs: readonly ResourceTabBarTab<T>[];
+    /** The open tab; one that is not among `tabs` (a tab that just went away) shows the first as open */
     activeTab: T;
     onTabChange: (id: T) => void;
     /** How many items each tab holds; a tab without a count, or at 0, shows none */
@@ -29,11 +31,13 @@ export function ResourceTabBar<T extends string>({
     counts,
     alarmTab,
 }: ResourceTabBarProps<T>) {
+    // The parent drops a vanished tab in an effect, after this render: never show none open meanwhile
+    const shownTab = tabs.some((tab) => tab.id === activeTab) ? activeTab : tabs[0]?.id;
     return (
         <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-            <div className="inline-flex gap-px rounded-[9px] bg-canvas-2 p-0.5">
+            <div className={SEGMENT_GROUP}>
                 {tabs.map(({ id, label, icon: Icon }) => {
-                    const isActive = id === activeTab;
+                    const isActive = id === shownTab;
                     const count = counts?.[id] ?? 0;
                     return (
                         <button
@@ -41,10 +45,7 @@ export function ResourceTabBar<T extends string>({
                             type="button"
                             aria-pressed={isActive}
                             onClick={() => onTabChange(id)}
-                            className={cn(
-                                'flex h-8 items-center gap-1.5 whitespace-nowrap rounded-[7px] px-3 text-[13px] font-medium outline-none transition-colors focus-visible:outline-2 focus-visible:outline-ring',
-                                isActive ? 'raised text-foreground' : 'text-muted-foreground hover:text-foreground'
-                            )}
+                            className={segmentClass(isActive, 'lg')}
                         >
                             <Icon className="size-4" aria-hidden />
                             {label}

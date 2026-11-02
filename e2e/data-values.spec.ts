@@ -73,8 +73,8 @@ function componentRow(page: Page) {
     return page.getByRole('treeitem').filter({ hasText: 'component' }).first();
 }
 
-/** The Refresh buttons of the selected entity; the tree has its own "Refresh entities". */
-function refreshButtons(page: Page) {
+/** The selected entity's Refresh, on the view's top line; the tree has its own "Refresh entities". */
+function refreshButton(page: Page) {
     return page.getByRole('button', { name: 'Refresh', exact: true });
 }
 
@@ -90,7 +90,7 @@ async function openApp(page: Page): Promise<void> {
 async function openComponent(page: Page): Promise<void> {
     await page.goto('/', { waitUntil: 'load' });
     await componentRow(page).click();
-    await expect(refreshButtons(page)).toHaveCount(1);
+    await expect(refreshButton(page)).toHaveCount(1);
 }
 
 /** Opens a data item of the data source app the way a user does: tree, app, Data tab, row. */
@@ -154,8 +154,8 @@ test('Refresh reads the item again and shows the new value', async ({ page }) =>
     page.on('request', (request) => {
         if (request.method() === 'GET' && COUNTER_READ.test(request.url())) reads.push(request.url());
     });
-    // The data panel's own Refresh comes after the one in the page header.
-    await refreshButtons(page).last().click();
+    // A data item's view has one Refresh, on its top line; a second one would fail this click.
+    await refreshButton(page).click();
 
     await expect.poll(() => reads.length).toBeGreaterThan(0);
     await expect
@@ -173,7 +173,7 @@ test('Refresh of a data item says when the gateway answers with an error', async
         })
     );
 
-    await refreshButtons(page).last().click();
+    await refreshButton(page).click();
 
     await expect(page.getByText('Failed to refresh data: Sampling failed')).toBeVisible();
 });
@@ -187,7 +187,7 @@ test('Refresh of a data item that answers after the user moved on keeps the new 
     });
     const answered = page.waitForResponse(COUNTER_READ);
 
-    await refreshButtons(page).last().click();
+    await refreshButton(page).click();
     await page.getByRole('treeitem', { name: new RegExp(APP_ID) }).click();
     await expect(page.getByText('Node Information')).toBeVisible();
     await answered;
@@ -207,7 +207,7 @@ test('Refresh of a component says when the gateway answers with an error', async
         })
     );
 
-    await refreshButtons(page).click();
+    await refreshButton(page).click();
 
     await expect(page.getByText('Failed to refresh data: Discovery is busy')).toBeVisible();
 });
@@ -220,7 +220,7 @@ test('Refresh of a component that answers after the user moved on keeps the new 
     });
     const answered = page.waitForResponse(COMPONENT_READ);
 
-    await refreshButtons(page).click();
+    await refreshButton(page).click();
     // Selecting the component expanded it, so its apps are listed.
     await page.getByRole('treeitem', { name: new RegExp(APP_ID) }).click();
     await expect(page.getByText('Node Information')).toBeVisible();
